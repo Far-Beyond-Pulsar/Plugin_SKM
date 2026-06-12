@@ -24,7 +24,12 @@ impl SkeletalAnimEditorPanel {
         let editor_weak = cx.entity().downgrade();
 
         let workspace = cx.new(|cx| {
-            Workspace::new_with_channel("skeletal-anim-workspace", ui::dock::DockChannel(1), window, cx)
+            Workspace::new_with_channel(
+                "skeletal-anim-workspace",
+                ui::dock::DockChannel(1),
+                window,
+                cx,
+            )
         });
 
         let viewport_panel = cx.new(|cx| ViewportPanel::new(editor_weak.clone(), cx));
@@ -72,6 +77,8 @@ impl SkeletalAnimEditorPanel {
             // `Workspace::initialize` doesn't expose a custom size for the
             // bottom dock; set it directly so the timeline has more room
             // than the default height.
+            //
+            // TODO: Modify `Workspace::initialize` to expose a custom size for the bottom dock.
             workspace.dock_area().update(cx, |dock_area, cx| {
                 dock_area.set_bottom_dock(bottom, Some(px(260.0)), true, window, cx);
             });
@@ -107,15 +114,12 @@ impl Render for SkeletalAnimEditorPanel {
             self.initialize_workspace(window, cx);
         }
 
-        div()
-            .size_full()
-            .bg(cx.theme().background)
-            .map(|el| {
-                if let Some(workspace) = &self.workspace {
-                    el.child(workspace.clone())
-                } else {
-                    el.child("Initializing...")
-                }
-            })
+        div().size_full().bg(cx.theme().background).map(|el| {
+            if let Some(workspace) = &self.workspace {
+                el.child(workspace.clone())
+            } else {
+                el.child("Initializing...")
+            }
+        })
     }
 }
