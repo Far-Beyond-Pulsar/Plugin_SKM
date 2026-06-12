@@ -307,9 +307,8 @@ impl ViewportPanel {
             // FPS look: keep the camera eye fixed and swing the target.
             DragMode::Look => {
                 let eye = self.camera.eye();
-                self.camera.yaw_deg -= delta.x * 0.3;
-                // Inverted pitch so dragging mouse down (positive delta.y) looks down (negative pitch)
-                self.camera.pitch_deg = (self.camera.pitch_deg + delta.y * 0.3).clamp(-89.0, 89.0);
+                self.camera.yaw_deg += delta.x * 0.3;
+                self.camera.pitch_deg = (self.camera.pitch_deg - delta.y * 0.3).clamp(-89.0, 89.0);
 
                 let yaw = self.camera.yaw_deg.to_radians();
                 let pitch = self.camera.pitch_deg.to_radians();
