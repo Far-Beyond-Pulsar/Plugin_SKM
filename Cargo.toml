@@ -1,0 +1,40 @@
+[package]
+name = "skeletal_animation_plugin"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "skeletal_animation_plugin"
+
+[[example]]
+name = "standalone"
+path = "examples/standalone.rs"
+
+[dependencies]
+# UI dependencies (local paths so traits resolve to the same crate instance)
+gpui-ce = { git = "https://github.com/Far-Beyond-Pulsar/WGPUI", rev = "3458d987317e30f6cda800e03822292e27ef4a33" }
+ui      = { git = "https://github.com/Far-Beyond-Pulsar/WGPUI-Component", rev = "3e386a01cf3e0e3c0f86eed7f3e3b9835ce54f70" }
+
+plugin_editor_api = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f413a294c1360d0e14c9c28e9d86b2f83596bc40" }
+ui_common          = { git = "https://github.com/Far-Beyond-Pulsar/Pulsar-Native", rev = "f413a294c1360d0e14c9c28e9d86b2f83596bc40" }
+
+# Utilities
+uuid = { version = "1.0", features = ["v4"] }
+smol = "2.0"
+log = "0.4"
+tracing = "0.1.41"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.149"
+
+# GPU
+wgpu = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", rev = "fce5b80e8017304449124b12637ec324417e40c8", default-features = false, features = ["dx12", "vulkan", "wgsl", "metal"] }
+bytemuck = { version = "1", features = ["derive"] }
+
+anyhow = "1.0"
+
+# Force windows 0.62 to match wgpu-hal and avoid gpu-allocator version conflict
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common"] }
