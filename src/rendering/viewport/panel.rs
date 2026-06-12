@@ -44,6 +44,8 @@ enum DragMode {
     Pan,
     /// Alt + LMB drag — orbit: eye orbits around fixed target.
     Orbit,
+    /// Alt + RMB drag — zoom/dolly: adjust distance to target.
+    Zoom,
 }
 
 /// Orbit camera: yaw/pitch around a target point at a fixed distance.
@@ -86,6 +88,16 @@ impl Default for OrbitCamera {
     }
 }
 
+#[derive(Default)]
+struct InputState {
+    forward: bool,
+    backward: bool,
+    left: bool,
+    right: bool,
+    up: bool,
+    down: bool,
+}
+
 pub struct ViewportPanel {
     editor: WeakEntity<SkeletalAnimEditorPanel>,
     focus_handle: FocusHandle,
@@ -94,6 +106,7 @@ pub struct ViewportPanel {
     camera: OrbitCamera,
     drag_last: Option<Point<f32>>,
     drag_mode: DragMode,
+    input_state: InputState,
     /// True until the first render where we can read the skeleton and compute
     /// a camera distance/target that frames it exactly.
     needs_fit: bool,
@@ -106,7 +119,7 @@ pub struct ViewportPanel {
 
 impl ViewportPanel {
     pub fn new(editor: WeakEntity<SkeletalAnimEditorPanel>, cx: &mut Context<Self>) -> Self {
-        Self {
+        let panel = Self {
             editor,
             focus_handle: cx.focus_handle(),
             renderer: ViewportRenderer::new(),
@@ -114,11 +127,31 @@ impl ViewportPanel {
             camera: OrbitCamera::default(),
             drag_last: None,
             drag_mode: DragMode::None,
+            input_state: InputState::default(),
             needs_fit: true,
             last_view_proj: Mat4::IDENTITY,
             last_origin: Point::new(0.0, 0.0),
             last_size: Size::new(1.0, 1.0),
-        }
+        };
+
+        let weak = cx.weak_entity();
+        cx.spawn(async move |_, cx| {
+            const FRAME: std::time::Duration = std::time::Duration::from_millis(16);
+            loop {
+                smol::Timer::after(FRAME).await;
+                let still_alive = weak.update(cx, |panel, cx| {
+                    panel.tick_camera_movement(cx);
+                    true
+                });
+                match still_alive {
+                    Ok(true) => {}
+                    _ => break,
+                }
+            }
+        })
+        .detach();
+
+        panel
     }
 
     fn handle_mouse_down(
@@ -127,10 +160,16 @@ impl ViewportPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.focus_handle.focus(window, cx);
+
         match event.button {
             // RMB → FPS-style look (Unreal perspective drag)
             MouseButton::Right => {
-                self.drag_mode = DragMode::Look;
+                if event.modifiers.alt {
+                    self.drag_mode = DragMode::Zoom;
+                } else {
+                    self.drag_mode = DragMode::Look;
+                }
                 self.drag_last = Some(Point::new(
                     event.position.x.as_f32(),
                     event.position.y.as_f32(),
@@ -162,7 +201,96 @@ impl ViewportPanel {
 
     fn handle_mouse_up(&mut self) {
         self.drag_last = None;
+        if self.drag_mode == DragMode::Look {
+            // Reset input state when stopping fly mode.
+            self.input_state = InputState::default();
+        }
         self.drag_mode = DragMode::None;
+    }
+
+    fn handle_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        if self.drag_mode != DragMode::Look {
+            return;
+        }
+        let key = event.keystroke.key.as_str();
+        let mut changed = true;
+        match key {
+            "w" | "W" => self.input_state.forward = true,
+            "s" | "S" => self.input_state.backward = true,
+            "a" | "A" => self.input_state.left = true,
+            "d" | "D" => self.input_state.right = true,
+            "space" | " " => self.input_state.up = true,
+            "shift" | "shift_l" | "shift_r" => self.input_state.down = true,
+            _ => changed = false,
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    fn handle_key_up(&mut self, event: &KeyUpEvent, cx: &mut Context<Self>) {
+        let key = event.keystroke.key.as_str();
+        let mut changed = true;
+        match key {
+            "w" | "W" => self.input_state.forward = false,
+            "s" | "S" => self.input_state.backward = false,
+            "a" | "A" => self.input_state.left = false,
+            "d" | "D" => self.input_state.right = false,
+            "space" | " " => self.input_state.up = false,
+            "shift" | "shift_l" | "shift_r" => self.input_state.down = false,
+            _ => changed = false,
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    fn tick_camera_movement(&mut self, cx: &mut Context<Self>) {
+        if self.drag_mode != DragMode::Look {
+            return;
+        }
+
+        let mut movement = Vec3::ZERO;
+
+        let yaw = self.camera.yaw_deg.to_radians();
+        let pitch = self.camera.pitch_deg.to_radians();
+
+        // The direction the camera is facing
+        let forward = Vec3::new(
+            yaw.sin() * pitch.cos(),
+            pitch.sin(),
+            yaw.cos() * pitch.cos(),
+        );
+        let world_up = Vec3::new(0.0, 1.0, 0.0);
+        // "right" is the cross product of world up and forward
+        let right = world_up.cross(forward).normalize();
+
+        if self.input_state.forward {
+            movement = movement.add(forward);
+        }
+        if self.input_state.backward {
+            movement = movement.sub(forward);
+        }
+        if self.input_state.right {
+            movement = movement.add(right);
+        }
+        if self.input_state.left {
+            movement = movement.sub(right);
+        }
+        if self.input_state.up {
+            movement = movement.add(world_up);
+        }
+        if self.input_state.down {
+            movement = movement.sub(world_up);
+        }
+
+        if movement.length() > 0.001 {
+            // Move speed proportional to distance makes it feel better at scale
+            let speed = (self.camera.distance * 0.02).clamp(0.05, 1.0);
+            movement = movement.normalize().scale(speed);
+            self.camera.target = self.camera.target.add(movement);
+            cx.notify();
+        }
     }
 
     fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -180,28 +308,40 @@ impl ViewportPanel {
             DragMode::Look => {
                 let eye = self.camera.eye();
                 self.camera.yaw_deg -= delta.x * 0.3;
-                self.camera.pitch_deg = (self.camera.pitch_deg - delta.y * 0.3).clamp(-89.0, 89.0);
+                // Inverted pitch so dragging mouse down (positive delta.y) looks down (negative pitch)
+                self.camera.pitch_deg = (self.camera.pitch_deg + delta.y * 0.3).clamp(-89.0, 89.0);
+
                 let yaw = self.camera.yaw_deg.to_radians();
                 let pitch = self.camera.pitch_deg.to_radians();
-                let forward = Vec3::new(
+                let dir = Vec3::new(
                     yaw.sin() * pitch.cos(),
                     pitch.sin(),
                     yaw.cos() * pitch.cos(),
                 );
-                self.camera.target = eye.add(forward.scale(self.camera.distance));
+
+                // eye = target + dir * distance  =>  target = eye - dir * distance
+                self.camera.target = eye.sub(dir.scale(self.camera.distance));
             }
             // Pan: translate both eye and target in screen space.
             DragMode::Pan => {
                 let yaw = self.camera.yaw_deg.to_radians();
                 let pitch = self.camera.pitch_deg.to_radians();
-                // Screen-space right and true up based on current orientation.
-                let right = Vec3::new(yaw.cos(), 0.0, -yaw.sin());
-                let forward = Vec3::new(
+
+                // direction from target to eye
+                let dir = Vec3::new(
                     yaw.sin() * pitch.cos(),
                     pitch.sin(),
                     yaw.cos() * pitch.cos(),
                 );
-                let up = right.cross(forward).normalize();
+                // direction from eye to target (forward)
+                let look = dir.scale(-1.0);
+                let world_up = Vec3::new(0.0, 1.0, 0.0);
+
+                // screen right
+                let right = look.cross(world_up).normalize();
+                // screen up
+                let up = right.cross(look).normalize();
+
                 let scale = self.camera.distance * 0.0015;
                 self.camera.target = self
                     .camera
@@ -212,7 +352,13 @@ impl ViewportPanel {
             // Orbit: classic eye-around-target rotation.
             DragMode::Orbit => {
                 self.camera.yaw_deg -= delta.x * 0.4;
-                self.camera.pitch_deg = (self.camera.pitch_deg + delta.y * 0.4).clamp(-89.0, 89.0);
+                // Inverted pitch
+                self.camera.pitch_deg = (self.camera.pitch_deg - delta.y * 0.4).clamp(-89.0, 89.0);
+            }
+            // Zoom: change distance to target
+            DragMode::Zoom => {
+                let scale = self.camera.distance * 0.005;
+                self.camera.distance = (self.camera.distance + delta.y * scale).clamp(0.1, 100.0);
             }
             DragMode::None => {}
         }
@@ -224,7 +370,7 @@ impl ViewportPanel {
             ScrollDelta::Lines(p) => p.y,
             ScrollDelta::Pixels(p) => p.y.as_f32() / 40.0,
         };
-        self.camera.distance = (self.camera.distance * (1.0 - delta * 0.1)).clamp(0.5, 30.0);
+        self.camera.distance = (self.camera.distance * (1.0 - delta * 0.1)).clamp(0.1, 100.0);
         cx.notify();
     }
 
@@ -321,10 +467,10 @@ impl ViewportPanel {
             .max(0.1); // guard against a degenerate single-joint rig at the origin
 
         // view_proj uses a 45° vertical FOV.  distance = r / tan(fov/2) puts the
-        // sphere edge exactly at the frame edge; ×1.05 adds a sliver of padding.
+        // sphere edge exactly at the frame edge; ×1.2 adds a comfortable padding.
         let half_fov = 22.5_f32.to_radians();
         self.camera.target = center;
-        self.camera.distance = (radius / half_fov.tan() * 1.05).max(0.5);
+        self.camera.distance = (radius / half_fov.tan() * 1.2).max(0.5);
     }
 
     /// Build the line and joint instance buffers for the current pose.
@@ -532,6 +678,8 @@ impl Render for ViewportPanel {
         let entity_move = entity.clone();
         let entity_scroll = entity.clone();
         let entity_reset = entity.clone();
+        let entity_key_down = entity.clone();
+        let entity_key_up = entity.clone();
 
         let controls = div().absolute().top_2().right_2().child(
             Button::new("viewport-reset-camera")
@@ -600,6 +748,12 @@ impl Render for ViewportPanel {
             })
             .on_scroll_wheel(move |event: &ScrollWheelEvent, _window, cx| {
                 entity_scroll.update(cx, |panel, cx| panel.handle_scroll(event, cx));
+            })
+            .on_key_down(move |event: &KeyDownEvent, _window, cx| {
+                entity_key_down.update(cx, |panel, cx| panel.handle_key_down(event, cx));
+            })
+            .on_key_up(move |event: &KeyUpEvent, _window, cx| {
+                entity_key_up.update(cx, |panel, cx| panel.handle_key_up(event, cx));
             })
             .child(gpu_display)
             .child(driver)
