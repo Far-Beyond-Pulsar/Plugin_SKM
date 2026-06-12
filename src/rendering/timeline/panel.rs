@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use crate::editor::panel::SkeletalAnimEditorPanel;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use ui::input::{InputEvent, InputState, NumberInput};
+use ui::input::{InputEvent, InputState, NumberInput, NumberInputEvent, StepAction};
 use ui::PixelsExt;
 use ui::{dock::PanelEvent, h_flex, ActiveTheme};
 
@@ -127,7 +127,7 @@ fn number_width(number: i64) -> f32 {
 struct RangeInputs {
     start: Entity<InputState>,
     end: Entity<InputState>,
-    _subscriptions: [Subscription; 2],
+    _subscriptions: [Subscription; 4],
 }
 
 pub struct TimelinePanel {
@@ -200,21 +200,61 @@ impl TimelinePanel {
                 }
             }
         });
-        let sub_end = cx.subscribe_in(&end_input, window, move |_this, input, event: &InputEvent, window, cx| {
-            if matches!(event, InputEvent::Change) {
-                if let Ok(value) = input.read(cx).value().parse::<i32>() {
-                    if let Some(editor) = editor_weak.upgrade() {
-                        editor.update(cx, |editor, cx| editor.set_play_range_end(value, cx));
+        let sub_end = cx.subscribe_in(&end_input, window, {
+            let editor_weak = editor_weak.clone();
+            move |_this, input, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    if let Ok(value) = input.read(cx).value().parse::<i32>() {
+                        if let Some(editor) = editor_weak.upgrade() {
+                            editor.update(cx, |editor, cx| editor.set_play_range_end(value, cx));
+                        }
+                        window.refresh();
                     }
-                    window.refresh();
                 }
+            }
+        });
+
+        let sub_start_step = cx.subscribe_in(&start_input, window, {
+            let editor_weak = editor_weak.clone();
+            move |_this, input, event: &NumberInputEvent, window, cx| {
+                let NumberInputEvent::Step { action, .. } = event;
+                let current = input.read(cx).value().parse::<i32>().unwrap_or(0);
+                let new_value = match action {
+                    StepAction::Increment => current + 1,
+                    StepAction::Decrement => current - 1,
+                };
+                input.update(cx, |input, cx| {
+                    input.set_value(new_value.to_string(), window, cx);
+                });
+                if let Some(editor) = editor_weak.upgrade() {
+                    editor.update(cx, |editor, cx| editor.set_play_range_start(new_value, cx));
+                }
+                window.refresh();
+            }
+        });
+        let sub_end_step = cx.subscribe_in(&end_input, window, {
+            let editor_weak = editor_weak.clone();
+            move |_this, input, event: &NumberInputEvent, window, cx| {
+                let NumberInputEvent::Step { action, .. } = event;
+                let current = input.read(cx).value().parse::<i32>().unwrap_or(0);
+                let new_value = match action {
+                    StepAction::Increment => current + 1,
+                    StepAction::Decrement => current - 1,
+                };
+                input.update(cx, |input, cx| {
+                    input.set_value(new_value.to_string(), window, cx);
+                });
+                if let Some(editor) = editor_weak.upgrade() {
+                    editor.update(cx, |editor, cx| editor.set_play_range_end(new_value, cx));
+                }
+                window.refresh();
             }
         });
 
         self.range_inputs = Some(RangeInputs {
             start: start_input,
             end: end_input,
-            _subscriptions: [sub_start, sub_end],
+            _subscriptions: [sub_start, sub_end, sub_start_step, sub_end_step],
         });
     }
 

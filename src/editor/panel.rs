@@ -213,9 +213,20 @@ impl SkeletalAnimEditorPanel {
         cx.notify();
     }
 
-    /// Move the playhead to `time`, clamped to the clip's duration.
+    /// The `(start, end)` playhead bounds in seconds, derived from
+    /// `play_range` (inclusive frame range) and the clip's `fps`.
+    fn play_range_seconds(&self) -> (f32, f32) {
+        let fps = self.animation.fps.max(1.0);
+        let (start_frame, end_frame) = self.play_range;
+        let start = start_frame as f32 / fps;
+        let end = ((end_frame + 1) as f32 / fps).max(start);
+        (start, end)
+    }
+
+    /// Move the playhead to `time`, clamped to the playback range.
     pub fn seek(&mut self, time: f32, cx: &mut Context<Self>) {
-        self.playback.time = time.clamp(0.0, self.animation.duration.max(0.0));
+        let (start, end) = self.play_range_seconds();
+        self.playback.time = time.clamp(start, end);
         cx.notify();
     }
 
@@ -245,10 +256,11 @@ impl SkeletalAnimEditorPanel {
                         if !this.playback.playing {
                             return false;
                         }
-                        let duration = this.animation.duration.max(0.001);
+                        let (start, end) = this.play_range_seconds();
+                        let span = (end - start).max(0.001);
                         this.playback.time += FRAME.as_secs_f32();
-                        if this.playback.time >= duration {
-                            this.playback.time %= duration;
+                        if this.playback.time >= end {
+                            this.playback.time = start + (this.playback.time - start) % span;
                         }
                         cx.notify();
                         true
