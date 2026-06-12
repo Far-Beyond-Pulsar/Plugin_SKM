@@ -4,14 +4,9 @@
 
 use crate::core::Mat4;
 
-use super::types::{JointInstance, LineVertex, MeshVertex, ViewportUniforms};
+use super::types::{GizmoBubbleInstance, JointInstance, LineVertex, MeshVertex, ViewportUniforms};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-
-/// Size in pixels of the square orientation-gizmo viewport, and its margin
-/// from the top-right corner of the main viewport.
-const GIZMO_SIZE: f32 = 96.0;
-const GIZMO_MARGIN: f32 = 14.0;
 
 struct LineState {
     pipeline: wgpu::RenderPipeline,
@@ -48,6 +43,8 @@ struct GizmoState {
     axis_vert_cap: u64,
     bubble_inst_buf: wgpu::Buffer,
     bubble_inst_cap: u64,
+    bg_inst_buf: wgpu::Buffer,
+    bg_inst_cap: u64,
 }
 
 struct DepthState {
@@ -77,8 +74,8 @@ impl ViewportRenderer {
 
     /// Called every frame. `lines` covers both the ground grid and bone
     /// segments; `joints` is one billboard per bone; `mesh` is the shaded
-    /// octahedral bone geometry. `gizmo_view_proj`, `gizmo_axes` and
-    /// `gizmo_bubbles` describe the orientation gizmo drawn in the corner.
+    /// octahedral bone geometry. `gizmo_axes` and `gizmo_bubbles` are
+    /// pre-projected NDC geometry for the orientation gizmo in the corner.
     pub fn render_frame(
         &mut self,
         device: &wgpu::Device,
@@ -91,9 +88,9 @@ impl ViewportRenderer {
         lines: &[LineVertex],
         joints: &[JointInstance],
         mesh: &[MeshVertex],
-        gizmo_view_proj: Mat4,
         gizmo_axes: &[LineVertex],
-        gizmo_bubbles: &[JointInstance],
+        gizmo_bubbles: &[GizmoBubbleInstance],
+        gizmo_background: &[GizmoBubbleInstance],
     ) {
         if self.lines.is_none() {
             self.lines = Some(Self::create_lines(device, fmt));
@@ -197,20 +194,33 @@ impl ViewportRenderer {
                 }
             }
 
-            // Orientation gizmo: drawn last, into a small square viewport in
-            // the top-right corner, using its own rotation-only projection.
+            // Orientation gizmo: drawn last, on top of the scene. Its vertex
+            // positions are pre-baked into NDC space (identity projection),
+            // so it covers the whole render target like the rest of the pass.
             if let Some(gz) = &mut self.gizmo {
                 let gizmo_uniforms = ViewportUniforms {
-                    view_proj: gizmo_view_proj.0,
-                    viewport: [GIZMO_SIZE, GIZMO_SIZE],
+                    view_proj: Mat4::IDENTITY.0,
+                    viewport: [w as f32, h as f32],
                     time: uniforms.time,
                     _pad: 0.0,
                 };
                 queue.write_buffer(&gz.uni_buf, 0, bytemuck::bytes_of(&gizmo_uniforms));
 
-                let gx = (w as f32 - GIZMO_SIZE - GIZMO_MARGIN).max(0.0);
-                let gy = GIZMO_MARGIN.min(h as f32);
-                pass.set_viewport(gx, gy, GIZMO_SIZE, GIZMO_SIZE, 0.0, 1.0);
+                if !gizmo_background.is_empty() {
+                    let bytes = bytemuck::cast_slice(gizmo_background);
+                    Self::ensure_buf(
+                        device,
+                        &mut gz.bg_inst_buf,
+                        &mut gz.bg_inst_cap,
+                        bytes,
+                        wgpu::BufferUsages::VERTEX,
+                    );
+                    queue.write_buffer(&gz.bg_inst_buf, 0, bytes);
+                    pass.set_pipeline(&gz.bubble_pipeline);
+                    pass.set_bind_group(0, &gz.uni_bg, &[]);
+                    pass.set_vertex_buffer(0, gz.bg_inst_buf.slice(..));
+                    pass.draw(0..6, 0..gizmo_background.len() as u32);
+                }
 
                 if !gizmo_axes.is_empty() {
                     let bytes = bytemuck::cast_slice(gizmo_axes);
@@ -621,9 +631,10 @@ impl ViewportRenderer {
             0 => Float32x3, // center
             1 => Float32,   // size
             2 => Float32x4, // color
+            3 => Float32,   // letter
         ];
         let bubble_vbl = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<JointInstance>() as wgpu::BufferAddress,
+            array_stride: std::mem::size_of::<GizmoBubbleInstance>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &bubble_attrs,
         };
@@ -662,10 +673,18 @@ impl ViewportRenderer {
             mapped_at_creation: false,
         });
 
-        let bubble_init_cap = 8 * std::mem::size_of::<JointInstance>() as u64;
+        let bubble_init_cap = 8 * std::mem::size_of::<GizmoBubbleInstance>() as u64;
         let bubble_inst_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport_gizmo_bubble_inst"),
             size: bubble_init_cap,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bg_init_cap = std::mem::size_of::<GizmoBubbleInstance>() as u64;
+        let bg_inst_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport_gizmo_bg_inst"),
+            size: bg_init_cap,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -679,6 +698,8 @@ impl ViewportRenderer {
             axis_vert_cap: axis_init_cap,
             bubble_inst_buf,
             bubble_inst_cap: bubble_init_cap,
+            bg_inst_buf,
+            bg_inst_cap: bg_init_cap,
         }
     }
 }

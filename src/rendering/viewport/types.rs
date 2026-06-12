@@ -38,3 +38,17 @@ pub struct MeshVertex {
     pub normal: [f32; 3],
     pub color: [f32; 4],
 }
+
+/// One instanced billboard circle for the orientation gizmo: an axis-end
+/// bubble, or (with `letter < -1.5`) the flat backdrop disc behind the whole
+/// widget.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GizmoBubbleInstance {
+    pub center: [f32; 3],
+    /// Diameter in pixels.
+    pub size: f32,
+    pub color: [f32; 4],
+    /// Axis label glyph: 0 = X, 1 = Y, 2 = Z, -1 = no label, -2 = backdrop disc.
+    pub letter: f32,
+}

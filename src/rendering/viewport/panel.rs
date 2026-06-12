@@ -21,7 +21,7 @@ use ui::PixelsExt;
 use ui::{dock::PanelEvent, ActiveTheme, IconName};
 
 use super::renderer::ViewportRenderer;
-use super::types::{JointInstance, LineVertex, MeshVertex, ViewportUniforms};
+use super::types::{GizmoBubbleInstance, JointInstance, LineVertex, MeshVertex, ViewportUniforms};
 
 const GRID_EXTENT: i32 = 8;
 const GRID_COLOR: [f32; 4] = [0.30, 0.31, 0.34, 0.6];
@@ -29,8 +29,7 @@ const AXIS_X_COLOR: [f32; 4] = [0.75, 0.25, 0.25, 1.0];
 const AXIS_Z_COLOR: [f32; 4] = [0.25, 0.35, 0.80, 1.0];
 const BONE_COLOR: [f32; 4] = [0.85, 0.85, 0.88, 1.0];
 const BONE_SELECTED_COLOR: [f32; 4] = [1.0, 0.65, 0.15, 1.0];
-const JOINT_COLOR: [f32; 4] = [0.55, 0.75, 1.0, 1.0];
-const JOINT_SELECTED_COLOR: [f32; 4] = [1.0, 0.65, 0.15, 1.0];
+/// Hit-test radius (in pixels) used to pick the nearest joint on click.
 const JOINT_SIZE_PX: f32 = 10.0;
 
 /// Fraction of a bone's length used as the octahedron's "neck" ring distance
@@ -39,21 +38,33 @@ const JOINT_SIZE_PX: f32 = 10.0;
 const BONE_RING_DIST_FRAC: f32 = 0.1;
 const BONE_RING_RADIUS_FRAC: f32 = 0.08;
 
-/// Orientation gizmo: fixed eye distance / FOV (decoupled from the main
-/// camera's zoom), axis spoke length, and bubble size in pixels.
-const GIZMO_EYE_DIST: f32 = 3.0;
-const GIZMO_FOV_DEG: f32 = 32.0;
+/// Radius (as a fraction of bone length) of the sphere capping the thin
+/// (tail) end of each bone.
+const BONE_TIP_SPHERE_RADIUS_FRAC: f32 = 0.07;
+const SPHERE_RINGS: usize = 6;
+const SPHERE_SEGMENTS: usize = 10;
+
+/// Orientation gizmo: on-screen size/position (in pixels, top-right corner)
+/// and the world-space length of each axis spoke before projection.
+const GIZMO_SIZE_PX: f32 = 96.0;
+const GIZMO_MARGIN_PX: f32 = 14.0;
 const GIZMO_AXIS_LEN: f32 = 0.8;
-const GIZMO_BUBBLE_PX: f32 = 16.0;
+const GIZMO_BUBBLE_PX: f32 = 11.0;
+/// Diameter of the backdrop disc behind the gizmo. Sized to hug the axis
+/// spokes and end bubbles with a small amount of breathing room.
+const GIZMO_BG_PX: f32 = GIZMO_SIZE_PX + GIZMO_BUBBLE_PX + 4.0;
+/// Slightly lighter than the viewport's clear color (see `renderer.rs`),
+/// so the disc reads as a subtle panel rather than a solid shape.
+const GIZMO_BG_COLOR: [f32; 4] = [0.16, 0.17, 0.19, 0.55];
 
 /// Colors for the six gizmo axis directions, ordered +X, -X, +Y, -Y, +Z, -Z.
 const GIZMO_AXIS_COLORS: [[f32; 4]; 6] = [
-    [0.85, 0.27, 0.27, 1.0],
-    [0.45, 0.18, 0.18, 1.0],
-    [0.35, 0.80, 0.35, 1.0],
-    [0.20, 0.40, 0.20, 1.0],
-    [0.30, 0.50, 0.90, 1.0],
-    [0.18, 0.26, 0.45, 1.0],
+    [0.85, 0.27, 0.27, 0.9],
+    [0.45, 0.18, 0.18, 0.9],
+    [0.35, 0.80, 0.35, 0.9],
+    [0.20, 0.40, 0.20, 0.9],
+    [0.30, 0.50, 0.90, 0.9],
+    [0.18, 0.26, 0.45, 0.9],
 ];
 
 /// Which drag gesture is currently active.
@@ -264,6 +275,19 @@ impl ViewportPanel {
             _ => changed = false,
         }
         if changed {
+            cx.notify();
+        }
+    }
+
+    /// Shift is reported as a modifier rather than a regular key event, so
+    /// track it separately to drive "fly down" while in Look mode.
+    fn handle_modifiers_changed(&mut self, event: &ModifiersChangedEvent, cx: &mut Context<Self>) {
+        if self.drag_mode != DragMode::Look {
+            return;
+        }
+        let down = event.modifiers.shift;
+        if down != self.input_state.down {
+            self.input_state.down = down;
             cx.notify();
         }
     }
@@ -501,7 +525,7 @@ impl ViewportPanel {
         editor: &SkeletalAnimEditorPanel,
     ) -> (Vec<LineVertex>, Vec<JointInstance>, Vec<MeshVertex>) {
         let mut lines = Vec::new();
-        let mut joints = Vec::new();
+        let joints: Vec<JointInstance> = Vec::new();
         let mut mesh = Vec::new();
 
         // Ground grid on the XZ plane.
@@ -550,16 +574,6 @@ impl ViewportPanel {
                     Self::push_bone_octahedron(&mut mesh, ppos, pos, color);
                 }
             }
-
-            joints.push(JointInstance {
-                center: pos.to_array(),
-                size: JOINT_SIZE_PX,
-                color: if is_selected {
-                    JOINT_SELECTED_COLOR
-                } else {
-                    JOINT_COLOR
-                },
-            });
         }
 
         (lines, joints, mesh)
@@ -615,24 +629,76 @@ impl ViewportPanel {
                 });
             }
         }
+
+        // Cap the thin (tail) end with a small sphere.
+        Self::push_sphere(verts, tail, length * BONE_TIP_SPHERE_RADIUS_FRAC, color);
     }
 
-    /// Build the rotation-only view-projection matrix and geometry for the
-    /// orientation gizmo: 6 axis spokes radiating from the origin, each
-    /// capped with a colored bubble, matching the main camera's orientation.
-    fn build_gizmo(&self) -> (Mat4, Vec<LineVertex>, Vec<JointInstance>) {
+    /// Append the triangles of a UV sphere of `radius` centered at `center`.
+    fn push_sphere(verts: &mut Vec<MeshVertex>, center: Vec3, radius: f32, color: [f32; 4]) {
+        use std::f32::consts::PI;
+
+        let sphere_point = |lat: f32, lon: f32| -> Vec3 {
+            Vec3::new(lat.cos() * lon.cos(), lat.sin(), lat.cos() * lon.sin())
+        };
+
+        let mut push_tri = |a: Vec3, b: Vec3, c: Vec3| {
+            let normal_for = |p: Vec3| p; // unit sphere point doubles as its outward normal
+            for p in [a, b, c] {
+                verts.push(MeshVertex {
+                    pos: center.add(p.scale(radius)).to_array(),
+                    normal: normal_for(p).to_array(),
+                    color,
+                });
+            }
+        };
+
+        for i in 0..SPHERE_RINGS {
+            let lat0 = PI * (i as f32 / SPHERE_RINGS as f32 - 0.5);
+            let lat1 = PI * ((i + 1) as f32 / SPHERE_RINGS as f32 - 0.5);
+            for j in 0..SPHERE_SEGMENTS {
+                let lon0 = 2.0 * PI * (j as f32 / SPHERE_SEGMENTS as f32);
+                let lon1 = 2.0 * PI * ((j + 1) as f32 / SPHERE_SEGMENTS as f32);
+
+                let p00 = sphere_point(lat0, lon0);
+                let p01 = sphere_point(lat0, lon1);
+                let p10 = sphere_point(lat1, lon0);
+                let p11 = sphere_point(lat1, lon1);
+
+                push_tri(p00, p10, p11);
+                push_tri(p00, p11, p01);
+            }
+        }
+    }
+
+    /// Build geometry for the orientation gizmo: 6 axis spokes radiating
+    /// from a center point, each capped with a colored bubble, rotated to
+    /// match the main camera's orientation.
+    ///
+    /// Rather than rendering into a separate sub-viewport, the spoke and
+    /// bubble positions are projected straight to clip-space coordinates
+    /// (`z = 0.5`, `w = 1`) that land in the top-right corner of the frame,
+    /// sized in pixels relative to the `(w, h)` render-target size. The
+    /// renderer draws this geometry with an identity view-projection.
+    fn build_gizmo(
+        &self,
+        w: f32,
+        h: f32,
+    ) -> (Vec<LineVertex>, Vec<GizmoBubbleInstance>, Vec<GizmoBubbleInstance>) {
         let yaw = self.camera.yaw_deg.to_radians();
         let pitch = self.camera.pitch_deg.to_radians();
+        // Direction from the orbit target toward the eye.
         let view_dir = Vec3::new(
             yaw.sin() * pitch.cos(),
             pitch.sin(),
             yaw.cos() * pitch.cos(),
         );
 
-        let eye = view_dir.scale(GIZMO_EYE_DIST);
-        let view = Mat4::look_at(eye, Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0));
-        let proj = Mat4::perspective(GIZMO_FOV_DEG, 1.0, 0.1, 10.0);
-        let view_proj = proj.mul(&view);
+        // Camera-space basis: `right`/`up` span the screen plane.
+        let world_up = Vec3::new(0.0, 1.0, 0.0);
+        let forward = view_dir.scale(-1.0); // eye -> target
+        let right = forward.cross(world_up).normalize();
+        let up = right.cross(forward).normalize();
 
         let axes: [Vec3; 6] = [
             Vec3::new(1.0, 0.0, 0.0),
@@ -643,6 +709,28 @@ impl ViewportPanel {
             Vec3::new(0.0, 0.0, -1.0),
         ];
 
+        // Center and half-size of the gizmo, in NDC. The center is offset
+        // from the corner by the backdrop disc's radius (the largest
+        // element) so nothing — disc, spokes, or bubbles — clips off-screen.
+        let half_px = GIZMO_SIZE_PX * 0.5;
+        let bg_radius_px = GIZMO_BG_PX * 0.5;
+        let center_x_px = w - GIZMO_MARGIN_PX - bg_radius_px;
+        let center_y_px = GIZMO_MARGIN_PX + bg_radius_px;
+        let ndc_cx = (center_x_px / w) * 2.0 - 1.0;
+        let ndc_cy = 1.0 - (center_y_px / h) * 2.0;
+        let scale_x = (half_px / GIZMO_AXIS_LEN) * (2.0 / w);
+        let scale_y = (half_px / GIZMO_AXIS_LEN) * (2.0 / h);
+
+        let project = |v: Vec3| -> [f32; 3] {
+            let tip = v.scale(GIZMO_AXIS_LEN);
+            [
+                ndc_cx + tip.dot(right) * scale_x,
+                ndc_cy + tip.dot(up) * scale_y,
+                0.5,
+            ]
+        };
+        let center_pos = [ndc_cx, ndc_cy, 0.5];
+
         // Draw farthest-from-camera axes first so closer bubbles end up on
         // top (the gizmo pipelines don't depth-test against each other).
         let mut order: [usize; 6] = [0, 1, 2, 3, 4, 5];
@@ -652,27 +740,32 @@ impl ViewportPanel {
             da.partial_cmp(&db).unwrap()
         });
 
+        let background = vec![GizmoBubbleInstance {
+            center: center_pos,
+            size: GIZMO_BG_PX,
+            color: GIZMO_BG_COLOR,
+            letter: -2.0,
+        }];
+
         let mut lines = Vec::with_capacity(12);
         let mut bubbles = Vec::with_capacity(6);
         for i in order {
             let color = GIZMO_AXIS_COLORS[i];
-            let tip = axes[i].scale(GIZMO_AXIS_LEN);
+            let tip = project(axes[i]);
             lines.push(LineVertex {
-                pos: [0.0, 0.0, 0.0],
+                pos: center_pos,
                 color,
             });
-            lines.push(LineVertex {
-                pos: tip.to_array(),
-                color,
-            });
-            bubbles.push(JointInstance {
-                center: tip.to_array(),
+            lines.push(LineVertex { pos: tip, color });
+            bubbles.push(GizmoBubbleInstance {
+                center: tip,
                 size: GIZMO_BUBBLE_PX,
                 color,
+                letter: (i / 2) as f32,
             });
         }
 
-        (view_proj, lines, bubbles)
+        (lines, bubbles, background)
     }
 }
 
@@ -773,7 +866,8 @@ impl Render for ViewportPanel {
                             _pad: 0.0,
                         };
 
-                        let (gizmo_view_proj, gizmo_lines, gizmo_bubbles) = panel.build_gizmo();
+                        let (gizmo_lines, gizmo_bubbles, gizmo_background) =
+                            panel.build_gizmo(w as f32, h as f32);
 
                         panel.renderer.render_frame(
                             surface.device(),
@@ -786,9 +880,9 @@ impl Render for ViewportPanel {
                             &lines,
                             &joints,
                             &mesh,
-                            gizmo_view_proj,
                             &gizmo_lines,
                             &gizmo_bubbles,
+                            &gizmo_background,
                         );
                         drop(view);
                         surface.swap_buffers();
@@ -812,6 +906,7 @@ impl Render for ViewportPanel {
         let entity_reset = entity.clone();
         let entity_key_down = entity.clone();
         let entity_key_up = entity.clone();
+        let entity_modifiers = entity.clone();
 
         let controls = div().absolute().top_2().right_2().child(
             Button::new("viewport-reset-camera")
@@ -886,6 +981,9 @@ impl Render for ViewportPanel {
             })
             .on_key_up(move |event: &KeyUpEvent, _window, cx| {
                 entity_key_up.update(cx, |panel, cx| panel.handle_key_up(event, cx));
+            })
+            .on_modifiers_changed(move |event: &ModifiersChangedEvent, _window, cx| {
+                entity_modifiers.update(cx, |panel, cx| panel.handle_modifiers_changed(event, cx));
             })
             .child(gpu_display)
             .child(driver)
