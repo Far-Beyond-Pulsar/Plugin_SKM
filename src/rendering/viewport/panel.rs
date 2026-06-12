@@ -21,7 +21,7 @@ use ui::PixelsExt;
 use ui::{dock::PanelEvent, ActiveTheme, IconName};
 
 use super::renderer::ViewportRenderer;
-use super::types::{JointInstance, LineVertex, ViewportUniforms};
+use super::types::{JointInstance, LineVertex, MeshVertex, ViewportUniforms};
 
 const GRID_EXTENT: i32 = 8;
 const GRID_COLOR: [f32; 4] = [0.30, 0.31, 0.34, 0.6];
@@ -32,6 +32,29 @@ const BONE_SELECTED_COLOR: [f32; 4] = [1.0, 0.65, 0.15, 1.0];
 const JOINT_COLOR: [f32; 4] = [0.55, 0.75, 1.0, 1.0];
 const JOINT_SELECTED_COLOR: [f32; 4] = [1.0, 0.65, 0.15, 1.0];
 const JOINT_SIZE_PX: f32 = 10.0;
+
+/// Fraction of a bone's length used as the octahedron's "neck" ring distance
+/// from the head joint, and as its radius. Matches the classic bone shape
+/// used by Blender and most other 3D animation tools.
+const BONE_RING_DIST_FRAC: f32 = 0.1;
+const BONE_RING_RADIUS_FRAC: f32 = 0.08;
+
+/// Orientation gizmo: fixed eye distance / FOV (decoupled from the main
+/// camera's zoom), axis spoke length, and bubble size in pixels.
+const GIZMO_EYE_DIST: f32 = 3.0;
+const GIZMO_FOV_DEG: f32 = 32.0;
+const GIZMO_AXIS_LEN: f32 = 0.8;
+const GIZMO_BUBBLE_PX: f32 = 16.0;
+
+/// Colors for the six gizmo axis directions, ordered +X, -X, +Y, -Y, +Z, -Z.
+const GIZMO_AXIS_COLORS: [[f32; 4]; 6] = [
+    [0.85, 0.27, 0.27, 1.0],
+    [0.45, 0.18, 0.18, 1.0],
+    [0.35, 0.80, 0.35, 1.0],
+    [0.20, 0.40, 0.20, 1.0],
+    [0.30, 0.50, 0.90, 1.0],
+    [0.18, 0.26, 0.45, 1.0],
+];
 
 /// Which drag gesture is currently active.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -472,13 +495,14 @@ impl ViewportPanel {
         self.camera.distance = (radius / half_fov.tan() * 1.2).max(0.5);
     }
 
-    /// Build the line and joint instance buffers for the current pose.
+    /// Build the line, joint, and bone-mesh instance buffers for the current pose.
     fn build_scene(
         &self,
         editor: &SkeletalAnimEditorPanel,
-    ) -> (Vec<LineVertex>, Vec<JointInstance>) {
+    ) -> (Vec<LineVertex>, Vec<JointInstance>, Vec<MeshVertex>) {
         let mut lines = Vec::new();
         let mut joints = Vec::new();
+        let mut mesh = Vec::new();
 
         // Ground grid on the XZ plane.
         for i in -GRID_EXTENT..=GRID_EXTENT {
@@ -523,14 +547,7 @@ impl ViewportPanel {
                     } else {
                         BONE_COLOR
                     };
-                    lines.push(LineVertex {
-                        pos: ppos.to_array(),
-                        color,
-                    });
-                    lines.push(LineVertex {
-                        pos: pos.to_array(),
-                        color,
-                    });
+                    Self::push_bone_octahedron(&mut mesh, ppos, pos, color);
                 }
             }
 
@@ -545,7 +562,117 @@ impl ViewportPanel {
             });
         }
 
-        (lines, joints)
+        (lines, joints, mesh)
+    }
+
+    /// Append the triangles of a classic octahedral bone shape spanning
+    /// `head` (the parent joint) to `tail` (this joint): a 4-sided pyramid
+    /// from the head to a "neck" ring near the head, mirrored from the ring
+    /// to the tail.
+    fn push_bone_octahedron(verts: &mut Vec<MeshVertex>, head: Vec3, tail: Vec3, color: [f32; 4]) {
+        let diff = tail.sub(head);
+        let length = diff.length();
+        if length < 1e-5 {
+            return;
+        }
+        let axis = diff.scale(1.0 / length);
+
+        let world_up = Vec3::new(0.0, 1.0, 0.0);
+        let reference = if axis.dot(world_up).abs() > 0.99 {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else {
+            world_up
+        };
+        let right = axis.cross(reference).normalize();
+        let up = right.cross(axis).normalize();
+
+        let ring_center = head.add(axis.scale(length * BONE_RING_DIST_FRAC));
+        let radius = length * BONE_RING_RADIUS_FRAC;
+
+        let b1 = ring_center.add(right.scale(radius));
+        let b2 = ring_center.add(up.scale(radius));
+        let b3 = ring_center.sub(right.scale(radius));
+        let b4 = ring_center.sub(up.scale(radius));
+
+        let faces = [
+            (head, b1, b2),
+            (head, b2, b3),
+            (head, b3, b4),
+            (head, b4, b1),
+            (tail, b2, b1),
+            (tail, b3, b2),
+            (tail, b4, b3),
+            (tail, b1, b4),
+        ];
+
+        for (a, b, c) in faces {
+            let normal = b.sub(a).cross(c.sub(a)).normalize().to_array();
+            for p in [a, b, c] {
+                verts.push(MeshVertex {
+                    pos: p.to_array(),
+                    normal,
+                    color,
+                });
+            }
+        }
+    }
+
+    /// Build the rotation-only view-projection matrix and geometry for the
+    /// orientation gizmo: 6 axis spokes radiating from the origin, each
+    /// capped with a colored bubble, matching the main camera's orientation.
+    fn build_gizmo(&self) -> (Mat4, Vec<LineVertex>, Vec<JointInstance>) {
+        let yaw = self.camera.yaw_deg.to_radians();
+        let pitch = self.camera.pitch_deg.to_radians();
+        let view_dir = Vec3::new(
+            yaw.sin() * pitch.cos(),
+            pitch.sin(),
+            yaw.cos() * pitch.cos(),
+        );
+
+        let eye = view_dir.scale(GIZMO_EYE_DIST);
+        let view = Mat4::look_at(eye, Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0));
+        let proj = Mat4::perspective(GIZMO_FOV_DEG, 1.0, 0.1, 10.0);
+        let view_proj = proj.mul(&view);
+
+        let axes: [Vec3; 6] = [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(-1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, -1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, -1.0),
+        ];
+
+        // Draw farthest-from-camera axes first so closer bubbles end up on
+        // top (the gizmo pipelines don't depth-test against each other).
+        let mut order: [usize; 6] = [0, 1, 2, 3, 4, 5];
+        order.sort_by(|&a, &b| {
+            let da = axes[a].dot(view_dir);
+            let db = axes[b].dot(view_dir);
+            da.partial_cmp(&db).unwrap()
+        });
+
+        let mut lines = Vec::with_capacity(12);
+        let mut bubbles = Vec::with_capacity(6);
+        for i in order {
+            let color = GIZMO_AXIS_COLORS[i];
+            let tip = axes[i].scale(GIZMO_AXIS_LEN);
+            lines.push(LineVertex {
+                pos: [0.0, 0.0, 0.0],
+                color,
+            });
+            lines.push(LineVertex {
+                pos: tip.to_array(),
+                color,
+            });
+            bubbles.push(JointInstance {
+                center: tip.to_array(),
+                size: GIZMO_BUBBLE_PX,
+                color,
+            });
+        }
+
+        (view_proj, lines, bubbles)
     }
 }
 
@@ -580,7 +707,7 @@ impl Render for ViewportPanel {
             self.needs_fit = false;
         }
 
-        let (lines, joints) = {
+        let (lines, joints, mesh) = {
             let editor_ref = editor.read(cx);
             self.build_scene(editor_ref)
         };
@@ -646,6 +773,8 @@ impl Render for ViewportPanel {
                             _pad: 0.0,
                         };
 
+                        let (gizmo_view_proj, gizmo_lines, gizmo_bubbles) = panel.build_gizmo();
+
                         panel.renderer.render_frame(
                             surface.device(),
                             surface.queue(),
@@ -656,6 +785,10 @@ impl Render for ViewportPanel {
                             &uniforms,
                             &lines,
                             &joints,
+                            &mesh,
+                            gizmo_view_proj,
+                            &gizmo_lines,
+                            &gizmo_bubbles,
                         );
                         drop(view);
                         surface.swap_buffers();

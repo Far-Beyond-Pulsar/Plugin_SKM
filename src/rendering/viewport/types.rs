@@ -29,3 +29,12 @@ pub struct JointInstance {
     pub size: f32,
     pub color: [f32; 4],
 }
+
+/// One vertex of a shaded `TriangleList` mesh (used for the octahedral bone shapes).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MeshVertex {
+    pub pos: [f32; 3],
+    pub normal: [f32; 3],
+    pub color: [f32; 4],
+}
