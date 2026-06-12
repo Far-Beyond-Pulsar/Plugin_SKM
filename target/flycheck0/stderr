@@ -1,4 +1,0 @@
-error: failed to parse manifest at `/Users/tristanpoland/Documents/GitHub/Pulgin_SKM/Cargo.toml`
-
-Caused by:
-  can't find library `skeletal_animation_plugin`, rename file to `src/lib.rs` or specify lib.path
