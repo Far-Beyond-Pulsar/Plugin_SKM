@@ -40,7 +40,7 @@ fn vs_main(
     let uv = corners[vertex_index];
 
     var px = input.pos + uv * input.size;
-    if input.kind != 2u {
+    if input.kind != 2u && input.kind != 3u {
         px.x -= u.scroll_x;
     }
 

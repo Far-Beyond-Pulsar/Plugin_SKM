@@ -40,9 +40,6 @@ const BOX_SELECT_BORDER: [f32; 4] = [0.55, 0.75, 1.0, 0.9];
 const BOX_SELECT_BORDER_PX: f32 = 1.0;
 /// Fill color for the diagonally-hatched, out-of-play-range track area.
 const HATCH_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.35];
-/// How far the hatch overlay extends past the play range, in screen px, to
-/// cover any amount of scroll/zoom.
-const HATCH_EXTENT: f32 = 50_000.0;
 
 /// Width/height of a single "pixel" in the bitmap digit font, in screen px.
 const DIGIT_CELL: f32 = 2.0;
@@ -888,7 +885,7 @@ impl Render for TimelinePanel {
                 .items_center()
                 .gap_2()
                 .px_2()
-                .h(px(RULER_HEIGHT))
+                .h(px(32.0))
                 .bg(theme.secondary)
                 .border_b_1()
                 .border_color(theme.border)
@@ -900,7 +897,7 @@ impl Render for TimelinePanel {
                 )
                 .child(
                     div()
-                        .w(px(64.0))
+                        .w(px(110.0))
                         .child(NumberInput::new(&range_inputs.start).w_full()),
                 )
                 .child(
@@ -911,12 +908,12 @@ impl Render for TimelinePanel {
                 )
                 .child(
                     div()
-                        .w(px(64.0))
+                        .w(px(110.0))
                         .child(NumberInput::new(&range_inputs.end).w_full()),
                 )
                 .into_any_element()
         } else {
-            div().w_full().flex_shrink_0().h(px(RULER_HEIGHT)).into_any_element()
+            div().w_full().flex_shrink_0().h(px(32.0)).into_any_element()
         };
 
         div()
