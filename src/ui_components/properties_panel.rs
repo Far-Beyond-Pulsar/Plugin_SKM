@@ -1,5 +1,6 @@
 //! Right dock panel: transform properties for the selected bone or keyframe.
 
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use ui::dock::PanelEvent;
 use ui::input::NumberInput;
