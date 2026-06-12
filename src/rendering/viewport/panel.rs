@@ -8,7 +8,7 @@ use crate::core::{evaluate_world_transforms, Mat4, Vec3};
 use crate::editor::panel::SkeletalAnimEditorPanel;
 use gpui::*;
 use ui::PixelsExt;
-use ui::{dock::PanelEvent, wgpu_surface, ActiveTheme};
+use ui::{dock::PanelEvent, ActiveTheme};
 
 use super::renderer::ViewportRenderer;
 use super::types::{JointInstance, LineVertex, ViewportUniforms};
@@ -405,8 +405,11 @@ impl Render for ViewportPanel {
             )
             .on_mouse_up(
                 MouseButton::Left,
-                move |_event: &MouseUpEvent, _window, cx| {
-                    entity_up.update(cx, |panel, _cx| panel.handle_mouse_up());
+                {
+                    let entity_up = entity_up.clone();
+                    move |_event: &MouseUpEvent, _window, cx| {
+                        entity_up.update(cx, |panel, _cx| panel.handle_mouse_up());
+                    }
                 },
             )
             .on_mouse_up(

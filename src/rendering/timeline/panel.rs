@@ -9,7 +9,7 @@ use crate::editor::panel::SkeletalAnimEditorPanel;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use ui::PixelsExt;
-use ui::{dock::PanelEvent, wgpu_surface, ActiveTheme};
+use ui::{dock::PanelEvent, ActiveTheme};
 
 use super::renderer::TimelineRenderer;
 use super::types::{RectInstance, TimelineUniforms};

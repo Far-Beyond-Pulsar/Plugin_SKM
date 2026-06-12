@@ -7,7 +7,8 @@
 use gpui::*;
 use ui::dock::PanelEvent;
 use ui::hierarchical_tree::{render_tree_folder, render_tree_item, tree_colors};
-use ui::{v_flex, ActiveTheme, IconName};
+use ui::scroll::ScrollbarAxis;
+use ui::{v_flex, ActiveTheme, IconName, StyledExt};
 
 use crate::editor::SkeletalAnimEditorPanel;
 
@@ -28,30 +29,40 @@ impl BoneHierarchyPanel {
         let Some(editor) = self.editor.upgrade() else {
             return Vec::new();
         };
-        let editor = editor.read(cx);
+        let entries: Vec<(String, String, usize, bool, bool, bool)> = {
+            let editor = editor.read(cx);
 
-        let mut rows = Vec::new();
-        let mut skip_below_depth: Option<usize> = None;
+            let mut entries = Vec::new();
+            let mut skip_below_depth: Option<usize> = None;
 
-        for (bone, depth) in editor.skeleton.depth_first() {
-            if let Some(skip_depth) = skip_below_depth {
-                if depth > skip_depth {
-                    continue;
+            for (bone, depth) in editor.skeleton.depth_first() {
+                if let Some(skip_depth) = skip_below_depth {
+                    if depth > skip_depth {
+                        continue;
+                    }
+                    skip_below_depth = None;
                 }
-                skip_below_depth = None;
-            }
 
-            let bone_id = bone.id.clone();
-            let name = bone.name.clone();
-            let has_children = !editor.skeleton.children_of(&bone.id).is_empty();
-            let is_selected = editor.selected_bone.as_deref() == Some(bone.id.as_str());
+                let bone_id = bone.id.clone();
+                let name = bone.name.clone();
+                let has_children = !editor.skeleton.children_of(&bone.id).is_empty();
+                let is_selected = editor.selected_bone.as_deref() == Some(bone.id.as_str());
+                let is_expanded = has_children && editor.is_bone_expanded(&bone.id);
 
-            if has_children {
-                let is_expanded = editor.is_bone_expanded(&bone.id);
-                if !is_expanded {
+                if has_children && !is_expanded {
                     skip_below_depth = Some(depth);
                 }
 
+                entries.push((bone_id, name, depth, has_children, is_expanded, is_selected));
+            }
+
+            entries
+        };
+
+        let mut rows = Vec::new();
+
+        for (bone_id, name, depth, has_children, is_expanded, is_selected) in entries {
+            if has_children {
                 let editor_weak = self.editor.clone();
                 let click_id = bone_id.clone();
                 rows.push(render_tree_folder(
@@ -118,7 +129,7 @@ impl Render for BoneHierarchyPanel {
             .size_full()
             .bg(cx.theme().sidebar)
             .py_1()
-            .overflow_y_scroll()
+            .scrollable(ScrollbarAxis::Vertical)
             .children(rows)
     }
 }
