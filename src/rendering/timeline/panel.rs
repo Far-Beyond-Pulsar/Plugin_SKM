@@ -5,10 +5,11 @@
 //! diamonds, and the playhead. Click-drag in the canvas scrubs the
 //! playhead; clicking a diamond selects that keyframe.
 
-use gpui::*;
-use ui::{dock::PanelEvent, wgpu_surface, ActiveTheme};
-
 use crate::editor::panel::SkeletalAnimEditorPanel;
+use gpui::prelude::FluentBuilder;
+use gpui::*;
+use ui::PixelsExt;
+use ui::{dock::PanelEvent, wgpu_surface, ActiveTheme};
 
 use super::renderer::TimelineRenderer;
 use super::types::{RectInstance, TimelineUniforms};
@@ -58,11 +59,18 @@ impl TimelinePanel {
         ((x + self.scroll_x) / PX_PER_SEC).max(0.0)
     }
 
-    fn handle_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if event.button != MouseButton::Left {
             return;
         }
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
 
         let x = event.position.x.as_f32() - self.last_origin.x - GUTTER_WIDTH;
         let y = event.position.y.as_f32() - self.last_origin.y;
@@ -119,7 +127,9 @@ impl TimelinePanel {
         if !self.dragging_playhead {
             return;
         }
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let x = event.position.x.as_f32() - self.last_origin.x - GUTTER_WIDTH;
         let time = self.x_to_time(x);
         editor.update(cx, |editor, cx| editor.seek(time, cx));
@@ -149,7 +159,11 @@ impl TimelinePanel {
 
     /// Build the instanced rectangles for ruler, row backgrounds, keyframe
     /// diamonds, and the playhead.
-    fn build_rects(&self, editor: &SkeletalAnimEditorPanel, canvas_width: f32) -> Vec<RectInstance> {
+    fn build_rects(
+        &self,
+        editor: &SkeletalAnimEditorPanel,
+        canvas_width: f32,
+    ) -> Vec<RectInstance> {
         let mut rects = Vec::new();
 
         rects.push(RectInstance {
@@ -273,21 +287,28 @@ impl Render for TimelinePanel {
             let editor_weak = self.editor.clone();
             gutter = gutter.child(
                 div()
-                    .id(SharedString::from(format!("timeline-track-{}", track.bone_id)))
+                    .id(SharedString::from(format!(
+                        "timeline-track-{}",
+                        track.bone_id
+                    )))
                     .h(px(ROW_HEIGHT))
                     .w_full()
                     .flex()
                     .items_center()
                     .px_2()
                     .text_sm()
-                    .when(is_selected, |d| d.bg(theme.accent).text_color(theme.accent_foreground))
+                    .when(is_selected, |d| {
+                        d.bg(theme.accent).text_color(theme.accent_foreground)
+                    })
                     .when(!is_selected, |d| d.text_color(theme.foreground))
                     .border_b_1()
                     .border_color(theme.border)
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
                         let bone_id = bone_id.clone();
-                        let _ = editor_weak.update(cx, |editor, cx| editor.select_bone(Some(bone_id), window, cx));
+                        let _ = editor_weak.update(cx, |editor, cx| {
+                            editor.select_bone(Some(bone_id), window, cx)
+                        });
                     })
                     .child(name),
             );
@@ -318,10 +339,14 @@ impl Render for TimelinePanel {
                     let sw = bounds.size.width.as_f32().max(1.0) as u32;
                     let sh = bounds.size.height.as_f32().max(1.0) as u32;
                     pre.update(cx, |panel, cx| {
-                        panel.last_origin =
-                            Point::new(bounds.origin.x.as_f32() - GUTTER_WIDTH, bounds.origin.y.as_f32());
-                        panel.last_size =
-                            Size::new(bounds.size.width.as_f32() + GUTTER_WIDTH, bounds.size.height.as_f32());
+                        panel.last_origin = Point::new(
+                            bounds.origin.x.as_f32() - GUTTER_WIDTH,
+                            bounds.origin.y.as_f32(),
+                        );
+                        panel.last_size = Size::new(
+                            bounds.size.width.as_f32() + GUTTER_WIDTH,
+                            bounds.size.height.as_f32(),
+                        );
                         if panel.surface.is_none() {
                             if let Some(s) = window.create_wgpu_surface(
                                 sw.max(64),
@@ -336,11 +361,15 @@ impl Render for TimelinePanel {
                 },
                 move |_bounds, _pre, _window, cx| {
                     paint.update(cx, |panel, cx| {
-                        let Some(ref surface) = panel.surface else { return };
+                        let Some(ref surface) = panel.surface else {
+                            return;
+                        };
                         if surface.is_resize_pending() {
                             return;
                         }
-                        let Some((view, (w, h))) = surface.back_view_with_size() else { return };
+                        let Some((view, (w, h))) = surface.back_view_with_size() else {
+                            return;
+                        };
 
                         let uniforms = TimelineUniforms {
                             viewport: [w as f32, h as f32],
@@ -381,12 +410,18 @@ impl Render for TimelinePanel {
             .relative()
             .overflow_hidden()
             .track_focus(&self.focus_handle)
-            .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, window, cx| {
-                entity_down.update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
-            })
-            .on_mouse_up(MouseButton::Left, move |_event: &MouseUpEvent, _window, cx| {
-                entity_up.update(cx, |panel, _cx| panel.handle_mouse_up());
-            })
+            .on_mouse_down(
+                MouseButton::Left,
+                move |event: &MouseDownEvent, window, cx| {
+                    entity_down.update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
+                },
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                move |_event: &MouseUpEvent, _window, cx| {
+                    entity_up.update(cx, |panel, _cx| panel.handle_mouse_up());
+                },
+            )
             .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
                 entity_move.update(cx, |panel, cx| panel.handle_mouse_move(event, cx));
             })

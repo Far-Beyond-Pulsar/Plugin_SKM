@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use ui::dock::{DockItem, PanelEvent};
 use ui::workspace::Workspace;
