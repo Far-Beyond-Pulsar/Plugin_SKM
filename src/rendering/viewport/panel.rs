@@ -4,11 +4,11 @@
 //! markers) and supports an orbit camera (drag to rotate, scroll to zoom,
 //! shift-drag to pan) plus click-to-select on a joint.
 
-use gpui::*;
-use ui::{dock::PanelEvent, wgpu_surface, ActiveTheme};
-
 use crate::core::{evaluate_world_transforms, Mat4, Vec3};
 use crate::editor::panel::SkeletalAnimEditorPanel;
+use gpui::*;
+use ui::PixelsExt;
+use ui::{dock::PanelEvent, wgpu_surface, ActiveTheme};
 
 use super::renderer::ViewportRenderer;
 use super::types::{JointInstance, LineVertex, ViewportUniforms};
@@ -92,8 +92,16 @@ impl ViewportPanel {
         }
     }
 
-    fn handle_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.drag_last = Some(Point::new(event.position.x.as_f32(), event.position.y.as_f32()));
+    fn handle_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.drag_last = Some(Point::new(
+            event.position.x.as_f32(),
+            event.position.y.as_f32(),
+        ));
         self.panning = event.modifiers.shift || event.button == MouseButton::Right;
         if event.button == MouseButton::Left && !event.modifiers.shift {
             self.select_bone_at(event.position, window, cx);
@@ -139,7 +147,9 @@ impl ViewportPanel {
 
     /// Find the joint nearest to `pos` in screen space and select its bone.
     fn select_bone_at(&mut self, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let w = self.last_size.width.max(1.0);
         let h = self.last_size.height.max(1.0);
         let click = Point::new(
@@ -149,12 +159,17 @@ impl ViewportPanel {
         let view_proj = self.last_view_proj;
 
         editor.update(cx, |editor, cx| {
-            let world =
-                evaluate_world_transforms(&editor.skeleton, &editor.animation, editor.playback.time);
+            let world = evaluate_world_transforms(
+                &editor.skeleton,
+                &editor.animation,
+                editor.playback.time,
+            );
 
             let mut best: Option<(String, f32)> = None;
             for bone in &editor.skeleton.bones {
-                let Some(m) = world.get(&bone.id) else { continue };
+                let Some(m) = world.get(&bone.id) else {
+                    continue;
+                };
                 let p = m.transform_point(Vec3::ZERO);
                 let (cx_, cy, _, cw) = view_proj.transform_clip(p);
                 if cw <= 0.0 {
@@ -177,7 +192,10 @@ impl ViewportPanel {
     }
 
     /// Build the line and joint instance buffers for the current pose.
-    fn build_scene(&self, editor: &SkeletalAnimEditorPanel) -> (Vec<LineVertex>, Vec<JointInstance>) {
+    fn build_scene(
+        &self,
+        editor: &SkeletalAnimEditorPanel,
+    ) -> (Vec<LineVertex>, Vec<JointInstance>) {
         let mut lines = Vec::new();
         let mut joints = Vec::new();
 
@@ -185,35 +203,64 @@ impl ViewportPanel {
         for i in -GRID_EXTENT..=GRID_EXTENT {
             let f = i as f32;
             let color = if i == 0 { AXIS_Z_COLOR } else { GRID_COLOR };
-            lines.push(LineVertex { pos: [f, 0.0, -GRID_EXTENT as f32], color });
-            lines.push(LineVertex { pos: [f, 0.0, GRID_EXTENT as f32], color });
+            lines.push(LineVertex {
+                pos: [f, 0.0, -GRID_EXTENT as f32],
+                color,
+            });
+            lines.push(LineVertex {
+                pos: [f, 0.0, GRID_EXTENT as f32],
+                color,
+            });
 
             let color = if i == 0 { AXIS_X_COLOR } else { GRID_COLOR };
-            lines.push(LineVertex { pos: [-GRID_EXTENT as f32, 0.0, f], color });
-            lines.push(LineVertex { pos: [GRID_EXTENT as f32, 0.0, f], color });
+            lines.push(LineVertex {
+                pos: [-GRID_EXTENT as f32, 0.0, f],
+                color,
+            });
+            lines.push(LineVertex {
+                pos: [GRID_EXTENT as f32, 0.0, f],
+                color,
+            });
         }
 
-        let world = evaluate_world_transforms(&editor.skeleton, &editor.animation, editor.playback.time);
+        let world =
+            evaluate_world_transforms(&editor.skeleton, &editor.animation, editor.playback.time);
         let selected = editor.selected_bone.as_deref();
 
         for bone in &editor.skeleton.bones {
-            let Some(m) = world.get(&bone.id) else { continue };
+            let Some(m) = world.get(&bone.id) else {
+                continue;
+            };
             let pos = m.transform_point(Vec3::ZERO);
             let is_selected = selected == Some(bone.id.as_str());
 
             if let Some(parent_id) = &bone.parent {
                 if let Some(pm) = world.get(parent_id) {
                     let ppos = pm.transform_point(Vec3::ZERO);
-                    let color = if is_selected { BONE_SELECTED_COLOR } else { BONE_COLOR };
-                    lines.push(LineVertex { pos: ppos.to_array(), color });
-                    lines.push(LineVertex { pos: pos.to_array(), color });
+                    let color = if is_selected {
+                        BONE_SELECTED_COLOR
+                    } else {
+                        BONE_COLOR
+                    };
+                    lines.push(LineVertex {
+                        pos: ppos.to_array(),
+                        color,
+                    });
+                    lines.push(LineVertex {
+                        pos: pos.to_array(),
+                        color,
+                    });
                 }
             }
 
             joints.push(JointInstance {
                 center: pos.to_array(),
                 size: JOINT_SIZE_PX,
-                color: if is_selected { JOINT_SELECTED_COLOR } else { JOINT_COLOR },
+                color: if is_selected {
+                    JOINT_SELECTED_COLOR
+                } else {
+                    JOINT_COLOR
+                },
             });
         }
 
@@ -273,8 +320,10 @@ impl Render for ViewportPanel {
                     let sw = bounds.size.width.as_f32().max(1.0) as u32;
                     let sh = bounds.size.height.as_f32().max(1.0) as u32;
                     pre.update(cx, |panel, cx| {
-                        panel.last_origin = Point::new(bounds.origin.x.as_f32(), bounds.origin.y.as_f32());
-                        panel.last_size = Size::new(bounds.size.width.as_f32(), bounds.size.height.as_f32());
+                        panel.last_origin =
+                            Point::new(bounds.origin.x.as_f32(), bounds.origin.y.as_f32());
+                        panel.last_size =
+                            Size::new(bounds.size.width.as_f32(), bounds.size.height.as_f32());
                         if panel.surface.is_none() {
                             if let Some(s) = window.create_wgpu_surface(
                                 sw.max(64),
@@ -289,11 +338,15 @@ impl Render for ViewportPanel {
                 },
                 move |_bounds, _pre, _window, cx| {
                     paint.update(cx, |panel, cx| {
-                        let Some(ref surface) = panel.surface else { return };
+                        let Some(ref surface) = panel.surface else {
+                            return;
+                        };
                         if surface.is_resize_pending() {
                             return;
                         }
-                        let Some((view, (w, h))) = surface.back_view_with_size() else { return };
+                        let Some((view, (w, h))) = surface.back_view_with_size() else {
+                            return;
+                        };
 
                         let aspect = w as f32 / h.max(1) as f32;
                         let view_proj = panel.camera.view_proj(aspect);
@@ -338,18 +391,30 @@ impl Render for ViewportPanel {
             .relative()
             .overflow_hidden()
             .track_focus(&self.focus_handle)
-            .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, window, cx| {
-                entity_down.update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
-            })
-            .on_mouse_down(MouseButton::Right, move |event: &MouseDownEvent, window, cx| {
-                entity.update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
-            })
-            .on_mouse_up(MouseButton::Left, move |_event: &MouseUpEvent, _window, cx| {
-                entity_up.update(cx, |panel, _cx| panel.handle_mouse_up());
-            })
-            .on_mouse_up(MouseButton::Right, move |_event: &MouseUpEvent, _window, cx| {
-                entity_up.update(cx, |panel, _cx| panel.handle_mouse_up());
-            })
+            .on_mouse_down(
+                MouseButton::Left,
+                move |event: &MouseDownEvent, window, cx| {
+                    entity_down.update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
+                },
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                move |event: &MouseDownEvent, window, cx| {
+                    entity.update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
+                },
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                move |_event: &MouseUpEvent, _window, cx| {
+                    entity_up.update(cx, |panel, _cx| panel.handle_mouse_up());
+                },
+            )
+            .on_mouse_up(
+                MouseButton::Right,
+                move |_event: &MouseUpEvent, _window, cx| {
+                    entity_up.update(cx, |panel, _cx| panel.handle_mouse_up());
+                },
+            )
             .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
                 entity_move.update(cx, |panel, cx| panel.handle_mouse_move(event, cx));
             })
