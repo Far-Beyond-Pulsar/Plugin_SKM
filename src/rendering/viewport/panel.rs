@@ -1,10 +1,19 @@
 //! `ViewportPanel` — dock panel hosting the 3D bone viewport.
 //!
 //! Renders a ground grid, the animated skeleton (bone segments + joint
-//! markers) and supports an orbit camera (drag to rotate, scroll to zoom,
-//! shift-drag to pan) plus click-to-select on a joint.
+//! markers) and supports Unreal Engine-style viewport controls:
+//!
+//! | Input                | Action                              |
+//! |----------------------|-------------------------------------|
+//! | RMB + drag           | Look (FPS-style, eye stays fixed)   |
+//! | MMB + drag           | Pan (translate camera laterally)    |
+//! | Alt + LMB + drag     | Orbit around target                 |
+//! | Scroll wheel         | Zoom / dolly                        |
+//! | LMB click            | Select bone                         |
 
-use crate::core::{evaluate_world_transforms, Mat4, Vec3};
+use std::collections::HashMap;
+
+use crate::core::{evaluate_world_transforms, Mat4, Skeleton, Vec3};
 use crate::editor::panel::SkeletalAnimEditorPanel;
 use gpui::*;
 use ui::button::Button;
@@ -23,6 +32,19 @@ const BONE_SELECTED_COLOR: [f32; 4] = [1.0, 0.65, 0.15, 1.0];
 const JOINT_COLOR: [f32; 4] = [0.55, 0.75, 1.0, 1.0];
 const JOINT_SELECTED_COLOR: [f32; 4] = [1.0, 0.65, 0.15, 1.0];
 const JOINT_SIZE_PX: f32 = 10.0;
+
+/// Which drag gesture is currently active.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum DragMode {
+    #[default]
+    None,
+    /// RMB drag — FPS-style look: eye stays fixed, target follows the view direction.
+    Look,
+    /// MMB drag — pan: translate both eye and target in screen space.
+    Pan,
+    /// Alt + LMB drag — orbit: eye orbits around fixed target.
+    Orbit,
+}
 
 /// Orbit camera: yaw/pitch around a target point at a fixed distance.
 pub struct OrbitCamera {
@@ -54,10 +76,12 @@ impl OrbitCamera {
 impl Default for OrbitCamera {
     fn default() -> Self {
         Self {
-            target: Vec3::new(0.0, 1.0, 0.0),
-            yaw_deg: 35.0,
+            // These are overwritten by `fit_camera_to_skeleton` on the first render;
+            // they only apply if the skeleton is empty.
+            target: Vec3::ZERO,
+            yaw_deg: 45.0,
             pitch_deg: 20.0,
-            distance: 4.0,
+            distance: 3.0,
         }
     }
 }
@@ -69,7 +93,10 @@ pub struct ViewportPanel {
     surface: Option<WgpuSurfaceHandle>,
     camera: OrbitCamera,
     drag_last: Option<Point<f32>>,
-    panning: bool,
+    drag_mode: DragMode,
+    /// True until the first render where we can read the skeleton and compute
+    /// a camera distance/target that frames it exactly.
+    needs_fit: bool,
     /// View-projection and screen bounds from the most recent paint, used to
     /// project joint positions for click-to-select.
     last_view_proj: Mat4,
@@ -86,7 +113,8 @@ impl ViewportPanel {
             surface: None,
             camera: OrbitCamera::default(),
             drag_last: None,
-            panning: false,
+            drag_mode: DragMode::None,
+            needs_fit: true,
             last_view_proj: Mat4::IDENTITY,
             last_origin: Point::new(0.0, 0.0),
             last_size: Size::new(1.0, 1.0),
@@ -99,40 +127,94 @@ impl ViewportPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.drag_last = Some(Point::new(
-            event.position.x.as_f32(),
-            event.position.y.as_f32(),
-        ));
-        self.panning = event.modifiers.shift || event.button == MouseButton::Right;
-        if event.button == MouseButton::Left && !event.modifiers.shift {
-            self.select_bone_at(event.position, window, cx);
+        match event.button {
+            // RMB → FPS-style look (Unreal perspective drag)
+            MouseButton::Right => {
+                self.drag_mode = DragMode::Look;
+                self.drag_last = Some(Point::new(
+                    event.position.x.as_f32(),
+                    event.position.y.as_f32(),
+                ));
+            }
+            // MMB → pan
+            MouseButton::Middle => {
+                self.drag_mode = DragMode::Pan;
+                self.drag_last = Some(Point::new(
+                    event.position.x.as_f32(),
+                    event.position.y.as_f32(),
+                ));
+            }
+            // LMB + Alt → orbit; plain LMB → select
+            MouseButton::Left => {
+                if event.modifiers.alt {
+                    self.drag_mode = DragMode::Orbit;
+                    self.drag_last = Some(Point::new(
+                        event.position.x.as_f32(),
+                        event.position.y.as_f32(),
+                    ));
+                } else {
+                    self.select_bone_at(event.position, window, cx);
+                }
+            }
+            _ => {}
         }
     }
 
     fn handle_mouse_up(&mut self) {
         self.drag_last = None;
-        self.panning = false;
+        self.drag_mode = DragMode::None;
     }
 
     fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         let Some(last) = self.drag_last else { return };
+        if self.drag_mode == DragMode::None {
+            return;
+        }
+
         let pos = Point::new(event.position.x.as_f32(), event.position.y.as_f32());
         let delta = Point::new(pos.x - last.x, pos.y - last.y);
         self.drag_last = Some(pos);
 
-        if self.panning {
-            let yaw = self.camera.yaw_deg.to_radians();
-            let right = Vec3::new(yaw.cos(), 0.0, -yaw.sin());
-            let up = Vec3::new(0.0, 1.0, 0.0);
-            let scale = self.camera.distance * 0.0015;
-            self.camera.target = self
-                .camera
-                .target
-                .add(right.scale(-delta.x * scale))
-                .add(up.scale(delta.y * scale));
-        } else {
-            self.camera.yaw_deg -= delta.x * 0.4;
-            self.camera.pitch_deg = (self.camera.pitch_deg + delta.y * 0.4).clamp(-89.0, 89.0);
+        match self.drag_mode {
+            // FPS look: keep the camera eye fixed and swing the target.
+            DragMode::Look => {
+                let eye = self.camera.eye();
+                self.camera.yaw_deg -= delta.x * 0.3;
+                self.camera.pitch_deg = (self.camera.pitch_deg - delta.y * 0.3).clamp(-89.0, 89.0);
+                let yaw = self.camera.yaw_deg.to_radians();
+                let pitch = self.camera.pitch_deg.to_radians();
+                let forward = Vec3::new(
+                    yaw.sin() * pitch.cos(),
+                    pitch.sin(),
+                    yaw.cos() * pitch.cos(),
+                );
+                self.camera.target = eye.add(forward.scale(self.camera.distance));
+            }
+            // Pan: translate both eye and target in screen space.
+            DragMode::Pan => {
+                let yaw = self.camera.yaw_deg.to_radians();
+                let pitch = self.camera.pitch_deg.to_radians();
+                // Screen-space right and true up based on current orientation.
+                let right = Vec3::new(yaw.cos(), 0.0, -yaw.sin());
+                let forward = Vec3::new(
+                    yaw.sin() * pitch.cos(),
+                    pitch.sin(),
+                    yaw.cos() * pitch.cos(),
+                );
+                let up = right.cross(forward).normalize();
+                let scale = self.camera.distance * 0.0015;
+                self.camera.target = self
+                    .camera
+                    .target
+                    .add(right.scale(-delta.x * scale))
+                    .add(up.scale(delta.y * scale));
+            }
+            // Orbit: classic eye-around-target rotation.
+            DragMode::Orbit => {
+                self.camera.yaw_deg -= delta.x * 0.4;
+                self.camera.pitch_deg = (self.camera.pitch_deg + delta.y * 0.4).clamp(-89.0, 89.0);
+            }
+            DragMode::None => {}
         }
         cx.notify();
     }
@@ -190,6 +272,59 @@ impl ViewportPanel {
                 editor.select_bone(Some(bone_id), window, cx);
             }
         });
+    }
+
+    /// Compute the bind-pose bounding sphere of `skeleton` and position the
+    /// camera so the sphere just fills the vertical FOV.
+    fn fit_camera_to_skeleton(&mut self, skeleton: &Skeleton) {
+        if skeleton.bones.is_empty() {
+            return;
+        }
+
+        // Walk bones in depth-first order, accumulating world matrices from
+        // the bind pose only (no animation clip needed).
+        let mut world: HashMap<String, Mat4> = HashMap::with_capacity(skeleton.bones.len());
+        let mut positions: Vec<Vec3> = Vec::with_capacity(skeleton.bones.len());
+
+        for (bone, _) in skeleton.depth_first() {
+            let local = bone.bind_transform.to_matrix();
+            let parent_world = bone
+                .parent
+                .as_deref()
+                .and_then(|p| world.get(p))
+                .copied()
+                .unwrap_or(Mat4::IDENTITY);
+            let mat = parent_world.mul(&local);
+            positions.push(mat.transform_point(Vec3::ZERO));
+            world.insert(bone.id.clone(), mat);
+        }
+
+        // AABB of all joint origins.
+        let mut min = positions[0];
+        let mut max = positions[0];
+        for p in &positions[1..] {
+            min = Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z));
+            max = Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z));
+        }
+
+        let center = Vec3::new(
+            (min.x + max.x) * 0.5,
+            (min.y + max.y) * 0.5,
+            (min.z + max.z) * 0.5,
+        );
+
+        // Bounding-sphere radius: furthest joint from center.
+        let radius = positions
+            .iter()
+            .map(|p| p.sub(center).length())
+            .fold(0.0f32, f32::max)
+            .max(0.1); // guard against a degenerate single-joint rig at the origin
+
+        // view_proj uses a 45° vertical FOV.  distance = r / tan(fov/2) puts the
+        // sphere edge exactly at the frame edge; ×1.05 adds a sliver of padding.
+        let half_fov = 22.5_f32.to_radians();
+        self.camera.target = center;
+        self.camera.distance = (radius / half_fov.tan() * 1.05).max(0.5);
     }
 
     /// Build the line and joint instance buffers for the current pose.
@@ -293,6 +428,13 @@ impl Render for ViewportPanel {
             return div().size_full().child("No editor").into_any_element();
         };
 
+        // On the first render (or after a reset), fit the camera to the skeleton.
+        if self.needs_fit {
+            let skeleton = editor.read(cx).skeleton.clone();
+            self.fit_camera_to_skeleton(&skeleton);
+            self.needs_fit = false;
+        }
+
         let (lines, joints) = {
             let editor_ref = editor.read(cx);
             self.build_scene(editor_ref)
@@ -381,27 +523,32 @@ impl Render for ViewportPanel {
             .size_full()
         };
 
-        let entity_down = entity.clone();
-        let entity_up = entity.clone();
+        let entity_lmb_down = entity.clone();
+        let entity_rmb_down = entity.clone();
+        let entity_mmb_down = entity.clone();
+        let entity_lmb_up = entity.clone();
+        let entity_rmb_up = entity.clone();
+        let entity_mmb_up = entity.clone();
         let entity_move = entity.clone();
         let entity_scroll = entity.clone();
         let entity_reset = entity.clone();
 
-        let controls = div()
-            .absolute()
-            .top_2()
-            .right_2()
-            .child(
-                Button::new("viewport-reset-camera")
-                    .icon(IconName::Maximize)
-                    .tooltip("Reset Camera")
-                    .on_click(move |_, _window, cx| {
-                        entity_reset.update(cx, |panel, cx| {
-                            panel.camera = OrbitCamera::default();
-                            cx.notify();
-                        });
-                    }),
-            );
+        let controls = div().absolute().top_2().right_2().child(
+            Button::new("viewport-reset-camera")
+                .icon(IconName::Maximize)
+                .tooltip(
+                    "Reset Camera (RMB: Look  |  MMB: Pan  |  Alt+LMB: Orbit  |  Scroll: Zoom)",
+                )
+                .on_click(move |_, _window, cx| {
+                    entity_reset.update(cx, |panel, cx| {
+                        // Re-fit to the current skeleton on the next render.
+                        panel.camera.yaw_deg = 45.0;
+                        panel.camera.pitch_deg = 20.0;
+                        panel.needs_fit = true;
+                        cx.notify();
+                    });
+                }),
+        );
 
         div()
             .id("skeletal-viewport")
@@ -412,28 +559,40 @@ impl Render for ViewportPanel {
             .on_mouse_down(
                 MouseButton::Left,
                 move |event: &MouseDownEvent, window, cx| {
-                    entity_down.update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
+                    entity_lmb_down
+                        .update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
                 },
             )
             .on_mouse_down(
                 MouseButton::Right,
                 move |event: &MouseDownEvent, window, cx| {
-                    entity.update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
+                    entity_rmb_down
+                        .update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
+                },
+            )
+            .on_mouse_down(
+                MouseButton::Middle,
+                move |event: &MouseDownEvent, window, cx| {
+                    entity_mmb_down
+                        .update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
                 },
             )
             .on_mouse_up(
                 MouseButton::Left,
-                {
-                    let entity_up = entity_up.clone();
-                    move |_event: &MouseUpEvent, _window, cx| {
-                        entity_up.update(cx, |panel, _cx| panel.handle_mouse_up());
-                    }
+                move |_event: &MouseUpEvent, _window, cx| {
+                    entity_lmb_up.update(cx, |panel, _cx| panel.handle_mouse_up());
                 },
             )
             .on_mouse_up(
                 MouseButton::Right,
                 move |_event: &MouseUpEvent, _window, cx| {
-                    entity_up.update(cx, |panel, _cx| panel.handle_mouse_up());
+                    entity_rmb_up.update(cx, |panel, _cx| panel.handle_mouse_up());
+                },
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                move |_event: &MouseUpEvent, _window, cx| {
+                    entity_mmb_up.update(cx, |panel, _cx| panel.handle_mouse_up());
                 },
             )
             .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
