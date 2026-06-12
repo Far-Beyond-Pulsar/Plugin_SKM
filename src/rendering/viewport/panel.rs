@@ -7,8 +7,9 @@
 use crate::core::{evaluate_world_transforms, Mat4, Vec3};
 use crate::editor::panel::SkeletalAnimEditorPanel;
 use gpui::*;
+use ui::button::Button;
 use ui::PixelsExt;
-use ui::{dock::PanelEvent, ActiveTheme};
+use ui::{dock::PanelEvent, ActiveTheme, IconName};
 
 use super::renderer::ViewportRenderer;
 use super::types::{JointInstance, LineVertex, ViewportUniforms};
@@ -384,6 +385,23 @@ impl Render for ViewportPanel {
         let entity_up = entity.clone();
         let entity_move = entity.clone();
         let entity_scroll = entity.clone();
+        let entity_reset = entity.clone();
+
+        let controls = div()
+            .absolute()
+            .top_2()
+            .right_2()
+            .child(
+                Button::new("viewport-reset-camera")
+                    .icon(IconName::Maximize)
+                    .tooltip("Reset Camera")
+                    .on_click(move |_, _window, cx| {
+                        entity_reset.update(cx, |panel, cx| {
+                            panel.camera = OrbitCamera::default();
+                            cx.notify();
+                        });
+                    }),
+            );
 
         div()
             .id("skeletal-viewport")
@@ -426,6 +444,7 @@ impl Render for ViewportPanel {
             })
             .child(gpu_display)
             .child(driver)
+            .child(controls)
             .into_any_element()
     }
 }

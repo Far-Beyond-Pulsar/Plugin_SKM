@@ -7,9 +7,10 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use ui::button::Button;
 use ui::dock::{DockItem, PanelEvent};
 use ui::workspace::Workspace;
-use ui::ActiveTheme;
+use ui::{h_flex, ActiveTheme, Disableable, IconName};
 
 use crate::rendering::{TimelinePanel, ViewportPanel};
 use crate::ui_components::{BoneHierarchyPanel, BonePropertiesPanel};
@@ -115,12 +116,96 @@ impl Render for SkeletalAnimEditorPanel {
             self.initialize_workspace(window, cx);
         }
 
-        div().size_full().bg(cx.theme().background).map(|el| {
-            if let Some(workspace) = &self.workspace {
-                el.child(workspace.clone())
-            } else {
-                el.child("Initializing...")
-            }
-        })
+        let entity = cx.entity().clone();
+        let is_playing = self.playback.playing;
+        let time = self.playback.time;
+        let duration = self.animation.duration;
+        let is_dirty = self.is_dirty;
+        let has_path = self.current_asset_path.is_some();
+
+        let toolbar = h_flex()
+            .w_full()
+            .flex_shrink_0()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .bg(cx.theme().secondary)
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("skeletal-save")
+                    .icon(IconName::FloppyDisk)
+                    .tooltip("Save")
+                    .disabled(!has_path)
+                    .on_click({
+                        let entity = entity.clone();
+                        move |_, _window, cx| {
+                            entity.update(cx, |editor, cx| {
+                                if let Err(err) = editor.save() {
+                                    log::error!("Failed to save skeletal animation asset: {err}");
+                                }
+                                cx.notify();
+                            });
+                        }
+                    }),
+            )
+            .child(
+                Button::new("skeletal-toggle-play")
+                    .icon(if is_playing {
+                        IconName::Pause
+                    } else {
+                        IconName::Play
+                    })
+                    .tooltip(if is_playing { "Pause" } else { "Play" })
+                    .on_click({
+                        let entity = entity.clone();
+                        move |_, _window, cx| {
+                            entity.update(cx, |editor, cx| editor.toggle_play(cx));
+                        }
+                    }),
+            )
+            .child(
+                Button::new("skeletal-stop")
+                    .icon(IconName::SkipPrev)
+                    .tooltip("Return to start")
+                    .on_click({
+                        let entity = entity.clone();
+                        move |_, _window, cx| {
+                            entity.update(cx, |editor, cx| {
+                                editor.playback.playing = false;
+                                editor.seek(0.0, cx);
+                            });
+                        }
+                    }),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("{:.2}s / {:.2}s", time, duration)),
+            )
+            .when(is_dirty, |el| {
+                el.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().warning)
+                        .child("\u{25cf} Unsaved changes"),
+                )
+            });
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(cx.theme().background)
+            .child(toolbar)
+            .child(div().flex_1().min_h_0().map(|el| {
+                if let Some(workspace) = &self.workspace {
+                    el.child(workspace.clone())
+                } else {
+                    el.child("Initializing...")
+                }
+            }))
     }
 }

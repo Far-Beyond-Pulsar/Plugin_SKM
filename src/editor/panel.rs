@@ -36,8 +36,18 @@ pub struct SkeletalAnimEditorPanel {
 
     pub selected_bone: Option<String>,
     pub expanded_bones: HashSet<String>,
+    /// "Primary" selected keyframe, used by the properties panel.
     pub selected_keyframe: Option<(String, usize)>,
+    /// Full multi-selection of keyframes (box/marquee select), as
+    /// `(bone_id, keyframe_index)` pairs. Always a superset containing
+    /// `selected_keyframe` when non-empty.
+    pub selected_keyframes: HashSet<(String, usize)>,
     pub playback: Playback,
+
+    /// Inclusive frame range to play/loop, e.g. `(-1, 10)` for an 11-frame
+    /// clip with one frame of pre-roll. Editable in the timeline's top bar.
+    /// The area outside this range is hatched out in the timeline.
+    pub play_range: (i32, i32),
 
     pub(crate) viewport_panel: Option<Entity<ViewportPanel>>,
     pub(crate) timeline_panel: Option<Entity<TimelinePanel>>,
@@ -99,6 +109,7 @@ impl SkeletalAnimEditorPanel {
         }
 
         let root_id = skeleton.root_bones().first().map(|b| b.id.clone());
+        let default_play_range = (0, (animation.duration * animation.fps).round().max(0.0) as i32);
 
         let mut panel = Self {
             focus_handle: cx.focus_handle(),
@@ -110,7 +121,9 @@ impl SkeletalAnimEditorPanel {
             selected_bone: None,
             expanded_bones: HashSet::new(),
             selected_keyframe: None,
+            selected_keyframes: HashSet::new(),
             playback: Playback { time: 0.0, playing: false },
+            play_range: default_play_range,
             viewport_panel: None,
             timeline_panel: None,
             transform_inputs,
@@ -127,6 +140,7 @@ impl SkeletalAnimEditorPanel {
     /// Select a bone (or clear selection), refreshing the properties panel.
     pub fn select_bone(&mut self, bone_id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_keyframe = None;
+        self.selected_keyframes.clear();
         if let Some(id) = &bone_id {
             self.expand_ancestors(id);
         }
@@ -135,15 +149,67 @@ impl SkeletalAnimEditorPanel {
         cx.notify();
     }
 
-    /// Select a keyframe on a bone's track, refreshing the properties panel.
+    /// Select a single keyframe on a bone's track, replacing any existing
+    /// multi-selection, and refresh the properties panel.
     pub fn select_keyframe(
         &mut self,
         keyframe: Option<(String, usize)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.selected_keyframes.clear();
+        if let Some(key) = &keyframe {
+            self.selected_keyframes.insert(key.clone());
+        }
         self.selected_keyframe = keyframe;
         self.sync_transform_inputs(window, cx);
+        cx.notify();
+    }
+
+    /// Toggle whether `key` is part of the multi-selection (shift-click).
+    pub fn toggle_keyframe_selection(
+        &mut self,
+        key: (String, usize),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.selected_keyframes.remove(&key) {
+            self.selected_keyframes.insert(key.clone());
+        }
+        self.selected_keyframe = self.selected_keyframes.iter().next().cloned();
+        self.sync_transform_inputs(window, cx);
+        cx.notify();
+    }
+
+    /// Replace the keyframe multi-selection wholesale (used by box-select).
+    /// If `additive` is true, `keys` are merged into the existing selection
+    /// instead of replacing it.
+    pub fn set_selected_keyframes(
+        &mut self,
+        keys: HashSet<(String, usize)>,
+        additive: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if additive {
+            self.selected_keyframes.extend(keys);
+        } else {
+            self.selected_keyframes = keys;
+        }
+        self.selected_keyframe = self.selected_keyframes.iter().next().cloned();
+        self.sync_transform_inputs(window, cx);
+        cx.notify();
+    }
+
+    /// Set the start of the playback range (inclusive frame number).
+    pub fn set_play_range_start(&mut self, start: i32, cx: &mut Context<Self>) {
+        self.play_range.0 = start;
+        cx.notify();
+    }
+
+    /// Set the end of the playback range (inclusive frame number).
+    pub fn set_play_range_end(&mut self, end: i32, cx: &mut Context<Self>) {
+        self.play_range.1 = end;
         cx.notify();
     }
 

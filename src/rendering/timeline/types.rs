@@ -21,7 +21,8 @@ pub struct RectInstance {
     pub pos: [f32; 2],
     pub size: [f32; 2],
     pub color: [f32; 4],
-    /// 0 = plain rect, 1 = diamond (keyframe marker), 2 = fixed (ignores scroll, e.g. row backgrounds/playhead)
+    /// 0 = plain rect, 1 = diamond (keyframe marker), 2 = fixed (ignores scroll, e.g. row backgrounds/playhead),
+    /// 3 = greyed-out diagonal hatch (out-of-range track area)
     pub kind: u32,
     pub _pad: [u32; 3],
 }

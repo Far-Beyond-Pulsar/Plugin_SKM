@@ -19,6 +19,7 @@ struct VertexOut {
     @location(0) color: vec4<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) kind: u32,
+    @location(3) world_pos: vec2<f32>,
 };
 
 @vertex
@@ -50,6 +51,7 @@ fn vs_main(
     out.color = input.color;
     out.uv = uv;
     out.kind = input.kind;
+    out.world_pos = px;
     return out;
 }
 
@@ -59,6 +61,17 @@ fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
         let d = abs(input.uv.x - 0.5) + abs(input.uv.y - 0.5);
         if d > 0.5 {
             discard;
+        }
+    }
+    if input.kind == 3u {
+        // Diagonal hatching for out-of-range track area: 45-degree stripes
+        // over a greyed-out fill.
+        let period = 16.0;
+        let line_width = 2.0;
+        let coord = input.world_pos.x + input.world_pos.y;
+        let m = coord - floor(coord / period) * period;
+        if m < line_width {
+            return vec4<f32>(1.0, 1.0, 1.0, 0.12);
         }
     }
     return input.color;
