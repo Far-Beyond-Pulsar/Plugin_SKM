@@ -24,11 +24,12 @@ struct LineVertexOut {
 
 @vertex
 fn vs_line(input: LineVertexIn) -> LineVertexOut {
+    // Hairline geometry is never jittered: at 1px width its rasterized
+    // coverage is binary, so sub-pixel jitter just flips which pixel it
+    // lands on frame-to-frame, producing flicker that history clamping
+    // can't fix (both samples are "correct", just different pixels).
     var out: LineVertexOut;
-    var clip_pos = u.view_proj * vec4<f32>(input.pos, 1.0);
-    clip_pos.x += u.jitter.x * clip_pos.w;
-    clip_pos.y += u.jitter.y * clip_pos.w;
-    out.clip_pos = clip_pos;
+    out.clip_pos = u.view_proj * vec4<f32>(input.pos, 1.0);
     out.color = input.color;
     return out;
 }
