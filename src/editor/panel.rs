@@ -64,10 +64,10 @@ pub struct SkeletalAnimEditorPanel {
 
 impl SkeletalAnimEditorPanel {
     /// Create a new editor populated with the built-in sample skeleton and
-    /// idle animation.
+    /// running animation.
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let skeleton = core::sample::humanoid_skeleton();
-        let animation = core::sample::idle_animation(&skeleton);
+        let animation = core::sample::run_animation(&skeleton);
         Self::new_internal(skeleton, animation, None, window, cx)
     }
 
