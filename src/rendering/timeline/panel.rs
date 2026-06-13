@@ -137,6 +137,9 @@ pub struct TimelinePanel {
     renderer: TimelineRenderer,
     surface: Option<WgpuSurfaceHandle>,
     scroll_x: f32,
+    /// Vertical scroll offset (px) over the track rows, when they overflow
+    /// the visible area. Only adjustable via shift+scroll.
+    scroll_y: f32,
     zoom: f32,
     dragging_playhead: bool,
     panning: bool,
@@ -160,6 +163,7 @@ impl TimelinePanel {
             renderer: TimelineRenderer::new(),
             surface: None,
             scroll_x: 0.0,
+            scroll_y: 0.0,
             zoom: 1.0,
             dragging_playhead: false,
             panning: false,
@@ -264,6 +268,14 @@ impl TimelinePanel {
         PX_PER_SEC * self.zoom
     }
 
+    /// The largest valid `scroll_y`, given `track_count` rows of track area
+    /// and the panel's last-measured size. Zero if all rows already fit.
+    fn max_scroll_y(&self, track_count: usize) -> f32 {
+        let track_area_height = track_count as f32 * ROW_HEIGHT;
+        let visible_height = (self.last_size.height - RULER_HEIGHT).max(0.0);
+        (track_area_height - visible_height).max(0.0)
+    }
+
     /// Convert a canvas-relative x coordinate (pixels) to a clip time. May
     /// be negative if the view has been panned to show time before 0;
     /// `Editor::seek` clamps this back into the clip's valid range.
@@ -344,10 +356,11 @@ impl TimelinePanel {
         // Hit-test keyframe diamonds.
         let scroll_x = self.scroll_x;
         let px_per_sec = self.px_per_sec();
+        let scroll_y = self.scroll_y;
         let hit = editor.update(cx, |editor, _cx| {
             let mut found = None;
             for (i, track) in editor.animation.tracks.iter().enumerate() {
-                let row_y = RULER_HEIGHT + i as f32 * ROW_HEIGHT;
+                let row_y = RULER_HEIGHT + i as f32 * ROW_HEIGHT - scroll_y;
                 if y < row_y || y > row_y + ROW_HEIGHT {
                     continue;
                 }
@@ -421,6 +434,7 @@ impl TimelinePanel {
         let min_y = start.1.min(current.1);
         let max_y = start.1.max(current.1);
         let scroll_x = self.scroll_x;
+        let scroll_y = self.scroll_y;
         let px_per_sec = self.px_per_sec();
 
         let hits: HashSet<(String, usize)> = editor
@@ -430,7 +444,7 @@ impl TimelinePanel {
             .iter()
             .enumerate()
             .flat_map(|(i, track)| {
-                let row_y = RULER_HEIGHT + i as f32 * ROW_HEIGHT;
+                let row_y = RULER_HEIGHT + i as f32 * ROW_HEIGHT - scroll_y;
                 let kf_y = row_y + ROW_HEIGHT * 0.5;
                 let bone_id = track.bone_id.clone();
                 track
@@ -513,6 +527,22 @@ impl TimelinePanel {
             }
         };
 
+        if event.modifiers.shift {
+            // Scroll the track rows vertically, if they overflow the visible
+            // area; otherwise leave zoom/pan untouched entirely.
+            let Some(editor) = self.editor.upgrade() else {
+                return;
+            };
+            let track_count = editor.read(cx).animation.tracks.len();
+            let max_scroll_y = self.max_scroll_y(track_count);
+            if max_scroll_y <= 0.0 {
+                return;
+            }
+            self.scroll_y = (self.scroll_y - delta * 16.0).clamp(0.0, max_scroll_y);
+            cx.notify();
+            return;
+        }
+
         if event.modifiers.control || event.modifiers.platform {
             // Ctrl/cmd+scroll pans horizontally.
             self.scroll_x -= delta * 16.0;
@@ -539,19 +569,14 @@ impl TimelinePanel {
         let fps = editor.animation.fps.max(1.0);
         let mut rects = Vec::new();
 
-        rects.push(RectInstance {
-            pos: [0.0, 0.0],
-            size: [canvas_width, RULER_HEIGHT],
-            color: RULER_BG,
-            kind: 2,
-            _pad: [0; 3],
-        });
-
+        // Track rows + keyframes are pushed first, scrolled vertically by
+        // `scroll_y`; the ruler (pushed below) is drawn on top of them so it
+        // stays opaque even when rows scroll up underneath it.
         let selected_bone = editor.selected_bone.as_deref();
         let selected_keyframes = &editor.selected_keyframes;
 
         for (i, track) in editor.animation.tracks.iter().enumerate() {
-            let row_y = RULER_HEIGHT + i as f32 * ROW_HEIGHT;
+            let row_y = RULER_HEIGHT + i as f32 * ROW_HEIGHT - self.scroll_y;
             let is_selected_row = selected_bone == Some(track.bone_id.as_str());
             let bg = if is_selected_row {
                 ROW_BG_SELECTED
@@ -601,7 +626,7 @@ impl TimelinePanel {
             let left_w = screen_range_start.clamp(0.0, canvas_width);
             if left_w > 0.0 {
                 rects.push(RectInstance {
-                    pos: [0.0, RULER_HEIGHT],
+                    pos: [0.0, RULER_HEIGHT - self.scroll_y],
                     size: [left_w, track_area_height],
                     color: HATCH_COLOR,
                     kind: 3,
@@ -613,7 +638,7 @@ impl TimelinePanel {
             let right_w = canvas_width - right_start;
             if right_w > 0.0 {
                 rects.push(RectInstance {
-                    pos: [right_start, RULER_HEIGHT],
+                    pos: [right_start, RULER_HEIGHT - self.scroll_y],
                     size: [right_w, track_area_height],
                     color: HATCH_COLOR,
                     kind: 3,
@@ -621,6 +646,17 @@ impl TimelinePanel {
                 });
             }
         }
+
+        // Ruler background, drawn after the (possibly scrolled) track rows
+        // so it stays opaque; tick marks/labels and the current-frame
+        // highlight are drawn on top of it further below.
+        rects.push(RectInstance {
+            pos: [0.0, 0.0],
+            size: [canvas_width, RULER_HEIGHT],
+            color: RULER_BG,
+            kind: 2,
+            _pad: [0; 3],
+        });
 
         let total_height = RULER_HEIGHT + editor.animation.tracks.len() as f32 * ROW_HEIGHT;
         let playhead_x = editor.playback.time * px_per_sec;
@@ -760,9 +796,15 @@ impl Render for TimelinePanel {
             div()
                 .h(px(RULER_HEIGHT))
                 .w_full()
+                .flex_shrink_0()
                 .border_b_1()
                 .border_color(theme.border),
         );
+
+        // Track-name rows live in their own scroll-clipped region below the
+        // ruler spacer, offset by `scroll_y` to track the canvas rows drawn
+        // by `build_rects`.
+        let mut track_rows = div().absolute().left_0().right_0().top(px(-self.scroll_y)).flex().flex_col();
         for track in &editor_ref.animation.tracks {
             let name = editor_ref
                 .skeleton
@@ -772,7 +814,7 @@ impl Render for TimelinePanel {
             let is_selected = editor_ref.selected_bone.as_deref() == Some(track.bone_id.as_str());
             let bone_id = track.bone_id.clone();
             let editor_weak = self.editor.clone();
-            gutter = gutter.child(
+            track_rows = track_rows.child(
                 div()
                     .id(SharedString::from(format!(
                         "timeline-track-{}",
@@ -800,6 +842,14 @@ impl Render for TimelinePanel {
                     .child(name),
             );
         }
+        gutter = gutter.child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .relative()
+                .overflow_hidden()
+                .child(track_rows),
+        );
         let _ = editor_ref;
 
         let gpu_display: AnyElement = if let Some(ref s) = self.surface {
