@@ -864,6 +864,8 @@ impl Render for ViewportPanel {
                             viewport: [w as f32, h as f32],
                             time: 0.0,
                             _pad: 0.0,
+                            jitter: [0.0, 0.0],
+                            _pad2: [0.0, 0.0],
                         };
 
                         let (gizmo_lines, gizmo_bubbles, gizmo_background) =

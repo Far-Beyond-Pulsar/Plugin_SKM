@@ -164,6 +164,56 @@ impl Mat4 {
         ])
     }
 
+    /// Inverse of this matrix, via Gauss-Jordan elimination with partial
+    /// pivoting. Used to reconstruct world-space positions from depth for
+    /// TAA history reprojection.
+    pub fn inverse(&self) -> Mat4 {
+        let src = &self.0;
+        // `a[row]` holds the augmented `[A | I]` row: columns 0..4 are `A`,
+        // columns 4..8 are the identity, which becomes `A^-1` once `A`'s
+        // side has been reduced to the identity.
+        let mut a = [[0f32; 8]; 4];
+        for row in 0..4 {
+            for col in 0..4 {
+                a[row][col] = src[col * 4 + row];
+            }
+            a[row][4 + row] = 1.0;
+        }
+
+        for col in 0..4 {
+            let mut pivot = col;
+            for row in (col + 1)..4 {
+                if a[row][col].abs() > a[pivot][col].abs() {
+                    pivot = row;
+                }
+            }
+            a.swap(col, pivot);
+
+            let div = a[col][col];
+            if div.abs() > 1e-12 {
+                for c in 0..8 {
+                    a[col][c] /= div;
+                }
+            }
+            for row in 0..4 {
+                if row != col {
+                    let factor = a[row][col];
+                    for c in 0..8 {
+                        a[row][c] -= factor * a[col][c];
+                    }
+                }
+            }
+        }
+
+        let mut out = [0f32; 16];
+        for row in 0..4 {
+            for col in 0..4 {
+                out[col * 4 + row] = a[row][4 + col];
+            }
+        }
+        Mat4(out)
+    }
+
     /// Right-handed look-at view matrix.
     pub fn look_at(eye: Vec3, target: Vec3, up: Vec3) -> Mat4 {
         let f = target.sub(eye).normalize(); // forward

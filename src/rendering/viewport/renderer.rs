@@ -4,9 +4,37 @@
 
 use crate::core::Mat4;
 
-use super::types::{GizmoBubbleInstance, JointInstance, LineVertex, MeshVertex, ViewportUniforms};
+use super::types::{
+    GizmoBubbleInstance, JointInstance, LineVertex, MeshVertex, ResolveUniforms, ViewportUniforms,
+};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Format of the offscreen scene color and TAA history textures. Float so
+/// the resolve pass can blend/clamp without banding.
+const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
+/// Internal scene render resolution as a fraction of the output size.
+/// `1.0` runs TAA at native resolution; values below `1.0` additionally
+/// upscale (the resolve pass's bilinear `scene_color` sample does the
+/// upscaling).
+const RENDER_SCALE: f32 = 1.0;
+
+/// Fraction of the previous frame's resolved color kept when blending with
+/// the current frame.
+const HISTORY_BLEND: f32 = 0.9;
+
+/// Halton(2,3) sequence, mapped to `[-0.5, 0.5)` sub-pixel offsets, used to
+/// jitter the camera projection for TAA sampling.
+const JITTER_SAMPLES: [[f32; 2]; 8] = [
+    [0.5 - 0.5, 0.333333 - 0.5],
+    [0.25 - 0.5, 0.666667 - 0.5],
+    [0.75 - 0.5, 0.111111 - 0.5],
+    [0.125 - 0.5, 0.444444 - 0.5],
+    [0.625 - 0.5, 0.777778 - 0.5],
+    [0.375 - 0.5, 0.222222 - 0.5],
+    [0.875 - 0.5, 0.555556 - 0.5],
+    [0.0625 - 0.5, 0.888889 - 0.5],
+];
 
 struct LineState {
     pipeline: wgpu::RenderPipeline,
@@ -53,12 +81,43 @@ struct DepthState {
     height: u32,
 }
 
+/// Offscreen targets for the TAA/upscale pipeline: the jittered scene is
+/// rendered into `scene_color`/`scene_depth` at render resolution, then
+/// resolved against a ping-ponged `history` pair at output resolution.
+struct OffscreenState {
+    scene_color: wgpu::TextureView,
+    scene_depth: wgpu::TextureView,
+    history: [wgpu::TextureView; 2],
+    render_w: u32,
+    render_h: u32,
+    output_w: u32,
+    output_h: u32,
+}
+
+struct ResolveState {
+    pipeline: wgpu::RenderPipeline,
+    bgl: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    uni_buf: wgpu::Buffer,
+}
+
 pub struct ViewportRenderer {
     lines: Option<LineState>,
     joints: Option<JointState>,
     mesh: Option<MeshState>,
     gizmo: Option<GizmoState>,
     depth: Option<DepthState>,
+    offscreen: Option<OffscreenState>,
+    resolve: Option<ResolveState>,
+    /// Index into `OffscreenState::history` that was written *last* frame,
+    /// i.e. the one to read from this frame.
+    history_idx: usize,
+    /// True once the history buffer holds a previously-resolved frame.
+    history_valid: bool,
+    /// Previous frame's unjittered camera view-projection, for reprojection.
+    prev_view_proj: Mat4,
+    /// TAA jitter sequence position.
+    frame_index: u64,
 }
 
 impl ViewportRenderer {
@@ -69,6 +128,12 @@ impl ViewportRenderer {
             mesh: None,
             gizmo: None,
             depth: None,
+            offscreen: None,
+            resolve: None,
+            history_idx: 0,
+            history_valid: false,
+            prev_view_proj: Mat4::IDENTITY,
+            frame_index: 0,
         }
     }
 
@@ -93,25 +158,46 @@ impl ViewportRenderer {
         gizmo_background: &[GizmoBubbleInstance],
     ) {
         if self.lines.is_none() {
-            self.lines = Some(Self::create_lines(device, fmt));
-            self.joints = Some(Self::create_joints(device, fmt));
-            self.mesh = Some(Self::create_mesh(device, fmt));
+            // Lines/mesh/joints render into the offscreen scene target (see
+            // Pass 1 below), not the swapchain, so their pipelines must match
+            // `OFFSCREEN_FORMAT` rather than the swapchain's `fmt`.
+            self.lines = Some(Self::create_lines(device, OFFSCREEN_FORMAT));
+            self.joints = Some(Self::create_joints(device, OFFSCREEN_FORMAT));
+            self.mesh = Some(Self::create_mesh(device, OFFSCREEN_FORMAT));
             self.gizmo = Some(Self::create_gizmo(device, fmt));
+            self.resolve = Some(Self::create_resolve(device, fmt));
         }
         self.ensure_depth(device, w, h);
+        self.ensure_offscreen(device, w, h);
 
-        let uni_bytes = bytemuck::bytes_of(uniforms);
-        let depth_view = &self.depth.as_ref().unwrap().view;
+        let off = self.offscreen.as_ref().unwrap();
+        let render_w = off.render_w;
+        let render_h = off.render_h;
+
+        // Sub-pixel jitter for this frame, in NDC units (so it can be added
+        // directly to clip-space x/y after multiplying by clip.w).
+        let sample = JITTER_SAMPLES[(self.frame_index as usize) % JITTER_SAMPLES.len()];
+        let jitter = [
+            sample[0] * 2.0 / render_w as f32,
+            sample[1] * 2.0 / render_h as f32,
+        ];
+
+        let mut scene_uniforms = *uniforms;
+        scene_uniforms.jitter = jitter;
+        scene_uniforms.viewport = [render_w as f32, render_h as f32];
+        let uni_bytes = bytemuck::bytes_of(&scene_uniforms);
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("viewport_encoder"),
         });
 
+        // ── Pass 1: jittered scene -> offscreen color + depth ──────────────
         {
+            let off = self.offscreen.as_ref().unwrap();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("viewport_pass"),
+                label: Some("viewport_scene_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    view: &off.scene_color,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
@@ -125,10 +211,10 @@ impl ViewportRenderer {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: depth_view,
+                    view: &off.scene_depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
+                        store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
                 }),
@@ -193,16 +279,100 @@ impl ViewportRenderer {
                     pass.draw(0..6, 0..joints.len() as u32);
                 }
             }
+        }
 
-            // Orientation gizmo: drawn last, on top of the scene. Its vertex
-            // positions are pre-baked into NDC space (identity projection),
-            // so it covers the whole render target like the rest of the pass.
+        // ── Pass 2: TAA/upscale resolve -> swapchain + history ──────────────
+        {
+            let off = self.offscreen.as_ref().unwrap();
+            let resolve = self.resolve.as_ref().unwrap();
+            let read_idx = 1 - self.history_idx;
+            let write_idx = self.history_idx;
+
+            let inv_view_proj = Mat4(uniforms.view_proj).inverse();
+            let resolve_uniforms = ResolveUniforms {
+                inv_view_proj: inv_view_proj.0,
+                prev_view_proj: self.prev_view_proj.0,
+                render_size: [off.render_w as f32, off.render_h as f32],
+                output_size: [off.output_w as f32, off.output_h as f32],
+                blend: HISTORY_BLEND,
+                history_valid: if self.history_valid { 1.0 } else { 0.0 },
+                _pad: [0.0, 0.0],
+            };
+            queue.write_buffer(&resolve.uni_buf, 0, bytemuck::bytes_of(&resolve_uniforms));
+
+            let bind_group = Self::resolve_bind_group(device, resolve, off, read_idx);
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("viewport_resolve_pass"),
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &off.history[write_idx],
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                ],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            pass.set_pipeline(&resolve.pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        // ── Pass 3: orientation gizmo -> swapchain (unjittered, on top) ─────
+        {
+            let depth_view = &self.depth.as_ref().unwrap().view;
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("viewport_gizmo_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            // Orientation gizmo. Its vertex positions are pre-baked into NDC
+            // space (identity projection) and never jittered, so it stays
+            // crisp and stable on top of the resolved scene.
             if let Some(gz) = &mut self.gizmo {
                 let gizmo_uniforms = ViewportUniforms {
                     view_proj: Mat4::IDENTITY.0,
                     viewport: [w as f32, h as f32],
                     time: uniforms.time,
                     _pad: 0.0,
+                    jitter: [0.0, 0.0],
+                    _pad2: [0.0, 0.0],
                 };
                 queue.write_buffer(&gz.uni_buf, 0, bytemuck::bytes_of(&gizmo_uniforms));
 
@@ -257,6 +427,11 @@ impl ViewportRenderer {
         }
 
         queue.submit(std::iter::once(encoder.finish()));
+
+        self.prev_view_proj = Mat4(uniforms.view_proj);
+        self.history_valid = true;
+        self.history_idx = 1 - self.history_idx;
+        self.frame_index += 1;
     }
 
     // ── helpers ────────────────────────────────────────────────────────────
@@ -306,6 +481,251 @@ impl ViewportRenderer {
             width: w,
             height: h,
         });
+    }
+
+    /// Creates a single-mip, single-layer 2D render target view.
+    fn create_target(
+        device: &wgpu::Device,
+        label: &str,
+        w: u32,
+        h: u32,
+        format: wgpu::TextureFormat,
+        usage: wgpu::TextureUsages,
+    ) -> wgpu::TextureView {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage,
+            view_formats: &[],
+        });
+        texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+    /// (Re)creates the offscreen render-resolution scene targets and the
+    /// output-resolution TAA history pair, if the output size (or the
+    /// derived render resolution) has changed since the last frame.
+    fn ensure_offscreen(&mut self, device: &wgpu::Device, w: u32, h: u32) {
+        let render_w = ((w as f32 * RENDER_SCALE).round() as u32).max(1);
+        let render_h = ((h as f32 * RENDER_SCALE).round() as u32).max(1);
+        let output_w = w.max(1);
+        let output_h = h.max(1);
+
+        if let Some(off) = &self.offscreen {
+            if off.render_w == render_w
+                && off.render_h == render_h
+                && off.output_w == output_w
+                && off.output_h == output_h
+            {
+                return;
+            }
+        }
+
+        let target_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+        let scene_color = Self::create_target(
+            device,
+            "viewport_scene_color",
+            render_w,
+            render_h,
+            OFFSCREEN_FORMAT,
+            target_usage,
+        );
+        let scene_depth = Self::create_target(
+            device,
+            "viewport_scene_depth",
+            render_w,
+            render_h,
+            DEPTH_FORMAT,
+            target_usage,
+        );
+        let history = [
+            Self::create_target(device, "viewport_history_0", output_w, output_h, OFFSCREEN_FORMAT, target_usage),
+            Self::create_target(device, "viewport_history_1", output_w, output_h, OFFSCREEN_FORMAT, target_usage),
+        ];
+
+        self.offscreen = Some(OffscreenState {
+            scene_color,
+            scene_depth,
+            history,
+            render_w,
+            render_h,
+            output_w,
+            output_h,
+        });
+        // New textures hold garbage; don't reproject from them this frame.
+        self.history_idx = 0;
+        self.history_valid = false;
+    }
+
+    /// Builds the per-frame bind group for the resolve pass: the
+    /// just-rendered scene color/depth, plus last frame's history texture
+    /// (`history[read_idx]`) to reproject from.
+    fn resolve_bind_group(
+        device: &wgpu::Device,
+        resolve: &ResolveState,
+        off: &OffscreenState,
+        read_idx: usize,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("viewport_resolve_bg"),
+            layout: &resolve.bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: resolve.uni_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&off.scene_color),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&off.scene_depth),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&off.history[read_idx]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&resolve.sampler),
+                },
+            ],
+        })
+    }
+
+    /// Builds the fullscreen-triangle TAA/upscale resolve pipeline: it reads
+    /// the render-resolution scene color/depth and the previous frame's
+    /// history, and writes both the final (output-resolution) swapchain
+    /// image and the new history texture in one pass (MRT).
+    fn create_resolve(device: &wgpu::Device, fmt: wgpu::TextureFormat) -> ResolveState {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("viewport_resolve"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/resolve.wgsl").into()),
+        });
+
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewport_resolve_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewport_resolve_layout"),
+            bind_group_layouts: &[Some(&bgl)],
+            immediate_size: 0,
+        });
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("viewport_resolve"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_fullscreen"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_resolve"),
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: fmt,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: OFFSCREEN_FORMAT,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("viewport_resolve_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let uni_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("viewport_resolve_uni"),
+            size: std::mem::size_of::<ResolveUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        ResolveState {
+            pipeline,
+            bgl,
+            sampler,
+            uni_buf,
+        }
     }
 
     fn uni_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {

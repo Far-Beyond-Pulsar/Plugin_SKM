@@ -8,6 +8,11 @@ struct Uniforms {
     viewport: vec2<f32>,
     time: f32,
     _pad: f32,
+    // Unused by the gizmo (always zero): kept for layout parity with
+    // `scene.wgsl`'s `Uniforms`, since both are filled from the same
+    // `ViewportUniforms` Rust struct.
+    jitter: vec2<f32>,
+    _pad2: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;

@@ -10,6 +10,32 @@ pub struct ViewportUniforms {
     pub viewport: [f32; 2],
     pub time: f32,
     pub _pad: f32,
+    /// Sub-pixel clip-space offset applied this frame for TAA sample
+    /// jittering. Zero for passes that should not be jittered (e.g. gizmo).
+    pub jitter: [f32; 2],
+    pub _pad2: [f32; 2],
+}
+
+/// Uniforms for the TAA/upscale resolve pass.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ResolveUniforms {
+    /// Inverse of this frame's *unjittered* camera view-projection matrix,
+    /// used to reconstruct world-space positions from depth.
+    pub inv_view_proj: [f32; 16],
+    /// Previous frame's *unjittered* camera view-projection matrix, used to
+    /// reproject world-space positions into last frame's history buffer.
+    pub prev_view_proj: [f32; 16],
+    /// Size of the offscreen scene render target (post render-scale).
+    pub render_size: [f32; 2],
+    /// Size of the final output (swapchain) target.
+    pub output_size: [f32; 2],
+    /// History blend weight (0 = ignore history, 1 = ignore current frame).
+    pub blend: f32,
+    /// 0.0 on the first frame or after a resize, when the history buffer
+    /// holds no useful data yet.
+    pub history_valid: f32,
+    pub _pad: [f32; 2],
 }
 
 /// One vertex of a `LineList` segment (grid lines and bone segments).

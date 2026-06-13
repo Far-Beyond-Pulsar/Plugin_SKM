@@ -3,6 +3,9 @@ struct Uniforms {
     viewport: vec2<f32>,
     time: f32,
     _pad: f32,
+    // Sub-pixel clip-space offset for TAA sample jittering (zero when unused).
+    jitter: vec2<f32>,
+    _pad2: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -22,7 +25,10 @@ struct LineVertexOut {
 @vertex
 fn vs_line(input: LineVertexIn) -> LineVertexOut {
     var out: LineVertexOut;
-    out.clip_pos = u.view_proj * vec4<f32>(input.pos, 1.0);
+    var clip_pos = u.view_proj * vec4<f32>(input.pos, 1.0);
+    clip_pos.x += u.jitter.x * clip_pos.w;
+    clip_pos.y += u.jitter.y * clip_pos.w;
+    out.clip_pos = clip_pos;
     out.color = input.color;
     return out;
 }
@@ -67,6 +73,8 @@ fn vs_joint(
     let ndc_size = (input.size / u.viewport) * 2.0 * clip.w;
     clip.x += offset.x * ndc_size.x;
     clip.y += offset.y * ndc_size.y;
+    clip.x += u.jitter.x * clip.w;
+    clip.y += u.jitter.y * clip.w;
 
     out.clip_pos = clip;
     out.color = input.color;
@@ -95,7 +103,10 @@ struct MeshVertexOut {
 @vertex
 fn vs_mesh(input: MeshVertexIn) -> MeshVertexOut {
     var out: MeshVertexOut;
-    out.clip_pos = u.view_proj * vec4<f32>(input.pos, 1.0);
+    var clip_pos = u.view_proj * vec4<f32>(input.pos, 1.0);
+    clip_pos.x += u.jitter.x * clip_pos.w;
+    clip_pos.y += u.jitter.y * clip_pos.w;
+    out.clip_pos = clip_pos;
     out.normal = input.normal;
     out.color = input.color;
     return out;
