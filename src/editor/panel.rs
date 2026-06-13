@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use gpui::*;
 use ui::input::{InputEvent, NumberInputEvent, StepAction};
 
-use crate::core::{self, AnimationClip, BoneTrack, Keyframe, Skeleton, Transform};
+use crate::core::{self, evaluate_world_transforms, AnimationClip, BoneTrack, Keyframe, Skeleton, Transform, Vec3};
 use crate::rendering::{TimelinePanel, ViewportPanel};
 
 use super::transform_inputs::TransformInputs;
@@ -26,6 +26,47 @@ pub struct Playback {
     /// Current playhead position, in seconds.
     pub time: f32,
     pub playing: bool,
+}
+
+#[derive(Default)]
+pub struct DebugOverlay {
+    pub show_tracers: bool,
+}
+
+/// Per-bone tracer trail state: positions recorded each frame during playback.
+pub struct TracerState {
+    pub trails: HashMap<String, Vec<Vec3>>,
+    pub colors: HashMap<String, [f32; 4]>,
+}
+
+impl TracerState {
+    pub fn new(skeleton: &Skeleton) -> Self {
+        let colors = skeleton
+            .bones
+            .iter()
+            .map(|b| (b.id.clone(), Self::bone_color(&b.id)))
+            .collect();
+        Self { trails: HashMap::new(), colors }
+    }
+
+    fn bone_color(id: &str) -> [f32; 4] {
+        let h = id.bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
+        let hue = ((h % 997) as f32 * 0.6180339887).fract() * 360.0;
+        let s = 0.65 + ((h >> 8) & 7) as f32 * 0.05;
+        let l = 0.50 + ((h >> 11) & 7) as f32 * 0.05;
+        let c = (1.0_f32 - (2.0 * l - 1.0_f32).abs()) * s;
+        let x = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
+        let m = l - c / 2.0;
+        let (r, g, b) = match (hue as u32) / 60 {
+            0 => (c, x, 0.0),
+            1 => (x, c, 0.0),
+            2 => (0.0, c, x),
+            3 => (0.0, x, c),
+            4 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+        [r + m, g + m, b + m, 0.85]
+    }
 }
 
 pub struct SkeletalAnimEditorPanel {
@@ -58,6 +99,8 @@ pub struct SkeletalAnimEditorPanel {
     pub(crate) timeline_panel: Option<Entity<TimelinePanel>>,
 
     pub transform_inputs: TransformInputs,
+    pub debug: DebugOverlay,
+    pub tracer_state: TracerState,
 
     subscriptions: Vec<Subscription>,
 }
@@ -115,6 +158,7 @@ impl SkeletalAnimEditorPanel {
 
         let root_id = skeleton.root_bones().first().map(|b| b.id.clone());
         let default_play_range = (0, (animation.duration * animation.fps).round().max(0.0) as i32);
+        let tracer_state = TracerState::new(&skeleton);
 
         let mut panel = Self {
             focus_handle: cx.focus_handle(),
@@ -132,6 +176,8 @@ impl SkeletalAnimEditorPanel {
             viewport_panel: None,
             timeline_panel: None,
             transform_inputs,
+            debug: DebugOverlay::default(),
+            tracer_state,
             subscriptions,
         };
 
@@ -388,6 +434,9 @@ impl SkeletalAnimEditorPanel {
     pub fn toggle_play(&mut self, cx: &mut Context<Self>) {
         self.playback.playing = !self.playback.playing;
         if self.playback.playing {
+            if self.debug.show_tracers {
+                self.tracer_state.trails.clear();
+            }
             let weak = cx.weak_entity();
             cx.spawn(async move |_, cx| {
                 const FRAME: std::time::Duration = std::time::Duration::from_millis(16);
@@ -400,8 +449,35 @@ impl SkeletalAnimEditorPanel {
                         let (start, end) = this.play_range_seconds();
                         let span = (end - start).max(0.001);
                         this.playback.time += FRAME.as_secs_f32();
-                        if this.playback.time >= end {
+                        let wrapped = this.playback.time >= end;
+                        if wrapped {
                             this.playback.time = start + (this.playback.time - start) % span;
+                        }
+                        if this.debug.show_tracers {
+                            let world = evaluate_world_transforms(
+                                &this.skeleton,
+                                &this.animation,
+                                this.playback.time,
+                            );
+                            for bone in &this.skeleton.bones {
+                                if let Some(m) = world.get(&bone.id) {
+                                    let pos = m.transform_point(Vec3::ZERO);
+                                    this.tracer_state
+                                        .trails
+                                        .entry(bone.id.clone())
+                                        .or_default()
+                                        .push(pos);
+                                }
+                            }
+                            // Sliding window: keep at most one animation loop worth of frames
+                            let max_len = (span / FRAME.as_secs_f32()).ceil() as usize;
+                            if max_len > 0 {
+                                for trail in this.tracer_state.trails.values_mut() {
+                                    while trail.len() > max_len {
+                                        trail.remove(0);
+                                    }
+                                }
+                            }
                         }
                         cx.notify();
                         true

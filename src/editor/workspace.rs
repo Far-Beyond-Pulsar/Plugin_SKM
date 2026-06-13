@@ -10,12 +10,13 @@ use gpui::*;
 use ui::button::Button;
 use ui::dock::{DockItem, PanelEvent};
 use ui::workspace::Workspace;
-use ui::{h_flex, ActiveTheme, Disableable, IconName};
+use ui::button::ButtonVariants;
+use ui::{h_flex, ActiveTheme, Disableable, IconName, Selectable};
 
 use crate::rendering::{TimelinePanel, ViewportPanel};
 use crate::ui_components::{BoneHierarchyPanel, BonePropertiesPanel};
 
-use super::panel::SkeletalAnimEditorPanel;
+use super::panel::{SkeletalAnimEditorPanel, TracerState};
 
 impl SkeletalAnimEditorPanel {
     pub fn initialize_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -184,6 +185,25 @@ impl Render for SkeletalAnimEditorPanel {
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
                     .child(format!("{:.2}s / {:.2}s", time, duration)),
+            )
+            .child(
+                Button::new("debug-tracers")
+                    .label("Tracers")
+                    .selected(self.debug.show_tracers)
+                    .ghost()
+                    .tooltip("Toggle tracer debug visualization")
+                    .on_click({
+                        let entity = entity.clone();
+                        move |_, _window, cx| {
+                            entity.update(cx, |editor, cx| {
+                                editor.debug.show_tracers = !editor.debug.show_tracers;
+                                if editor.debug.show_tracers {
+                                    editor.tracer_state = TracerState::new(&editor.skeleton);
+                                }
+                                cx.notify();
+                            });
+                        }
+                    }),
             )
             .when(is_dirty, |el| {
                 el.child(

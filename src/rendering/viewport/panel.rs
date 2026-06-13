@@ -528,6 +528,28 @@ impl ViewportPanel {
         let joints: Vec<JointInstance> = Vec::new();
         let mut mesh = Vec::new();
 
+        // Tracer trails: persistent colored lines tracing each joint's path
+        if editor.debug.show_tracers {
+            for (bone_id, trail) in &editor.tracer_state.trails {
+                let color = editor
+                    .tracer_state
+                    .colors
+                    .get(bone_id)
+                    .copied()
+                    .unwrap_or([0.0, 1.0, 0.0, 0.8]);
+                for chunk in trail.windows(2) {
+                    lines.push(LineVertex {
+                        pos: chunk[0].to_array(),
+                        color,
+                    });
+                    lines.push(LineVertex {
+                        pos: chunk[1].to_array(),
+                        color,
+                    });
+                }
+            }
+        }
+
         // Ground grid on the XZ plane.
         for i in -GRID_EXTENT..=GRID_EXTENT {
             let f = i as f32;
@@ -563,14 +585,22 @@ impl ViewportPanel {
             let pos = m.transform_point(Vec3::ZERO);
             let is_selected = selected == Some(bone.id.as_str());
 
+            let color = if editor.debug.show_tracers {
+                editor
+                    .tracer_state
+                    .colors
+                    .get(&bone.id)
+                    .copied()
+                    .unwrap_or(BONE_COLOR)
+            } else if is_selected {
+                BONE_SELECTED_COLOR
+            } else {
+                BONE_COLOR
+            };
+
             if let Some(parent_id) = &bone.parent {
                 if let Some(pm) = world.get(parent_id) {
                     let ppos = pm.transform_point(Vec3::ZERO);
-                    let color = if is_selected {
-                        BONE_SELECTED_COLOR
-                    } else {
-                        BONE_COLOR
-                    };
                     Self::push_bone_octahedron(&mut mesh, ppos, pos, color);
                 }
             }
