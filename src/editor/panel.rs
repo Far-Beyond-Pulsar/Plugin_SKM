@@ -5,16 +5,21 @@
 //! dock workspace (center viewport, bone hierarchy, properties, timeline) is
 //! built lazily on first render in [`super::workspace`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use gpui::*;
 use ui::input::{InputEvent, NumberInputEvent, StepAction};
 
-use crate::core::{self, AnimationClip, Skeleton, Transform};
+use crate::core::{self, AnimationClip, BoneTrack, Keyframe, Skeleton, Transform};
 use crate::rendering::{TimelinePanel, ViewportPanel};
 
 use super::transform_inputs::TransformInputs;
+
+/// Maximum time difference, in seconds, for a keyframe to be considered "at"
+/// the playhead (and thus the properties panel's "Key" indicators to show as
+/// keyed / editable).
+const KEYFRAME_EPS: f32 = 1e-4;
 
 /// Playback transport state for the timeline.
 pub struct Playback {
@@ -138,13 +143,14 @@ impl SkeletalAnimEditorPanel {
     }
 
     /// Select a bone (or clear selection), refreshing the properties panel.
+    /// The keyframe selection is resynced to whatever (if anything) the new
+    /// bone has keyed at the current playhead time.
     pub fn select_bone(&mut self, bone_id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
-        self.selected_keyframe = None;
-        self.selected_keyframes.clear();
         if let Some(id) = &bone_id {
             self.expand_ancestors(id);
         }
         self.selected_bone = bone_id;
+        self.resync_selected_keyframe();
         self.sync_transform_inputs(window, cx);
         cx.notify();
     }
@@ -201,6 +207,138 @@ impl SkeletalAnimEditorPanel {
         cx.notify();
     }
 
+    /// The index of `bone_id`'s keyframe at the current playhead time (within
+    /// `KEYFRAME_EPS`), if any. Used to drive the properties panel's "Key"
+    /// indicators and to gate transform editing.
+    pub fn keyframe_at_playhead(&self, bone_id: &str) -> Option<usize> {
+        self.animation
+            .track(bone_id)
+            .and_then(|t| t.keyframes.iter().position(|k| (k.time - self.playback.time).abs() < KEYFRAME_EPS))
+    }
+
+    /// Recompute `selected_keyframe`/`selected_keyframes` from the selected
+    /// bone and current playhead time: if the bone has a keyframe at the
+    /// playhead, it becomes the (sole) selection; otherwise the keyframe
+    /// selection is cleared. Does not touch `selected_bone` or notify.
+    fn resync_selected_keyframe(&mut self) {
+        let key = self
+            .selected_bone
+            .as_ref()
+            .and_then(|bone_id| self.keyframe_at_playhead(bone_id).map(|idx| (bone_id.clone(), idx)));
+        self.selected_keyframes.clear();
+        if let Some(key) = &key {
+            self.selected_keyframes.insert(key.clone());
+        }
+        self.selected_keyframe = key;
+    }
+
+    /// Insert (or update) a keyframe on the selected bone's track at the
+    /// current playhead time, capturing the bone's current pose so the
+    /// insertion doesn't visibly change anything. Creates the track if the
+    /// bone doesn't have one yet. No-op if no bone is selected.
+    pub fn insert_keyframe(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(bone_id) = self.selected_bone.clone() else {
+            return;
+        };
+        let time = self.playback.time;
+
+        // Capture the pose to insert *before* taking a mutable borrow of the
+        // track: the existing animated pose (if any), else the bind pose.
+        let transform = self
+            .animation
+            .track(&bone_id)
+            .and_then(|t| t.sample(time))
+            .unwrap_or_else(|| {
+                self.skeleton
+                    .bone(&bone_id)
+                    .map(|b| b.bind_transform.clone())
+                    .unwrap_or_default()
+            });
+
+        if self.animation.track(&bone_id).is_none() {
+            self.animation.tracks.push(BoneTrack {
+                bone_id: bone_id.clone(),
+                keyframes: Vec::new(),
+            });
+        }
+        let track = self.animation.track_mut(&bone_id).unwrap();
+
+        // Keyframes at (nearly) the same time are replaced in place rather
+        // than duplicated.
+        let index = match track.keyframes.iter().position(|k| (k.time - time).abs() < KEYFRAME_EPS) {
+            Some(i) => {
+                track.keyframes[i].transform = transform;
+                i
+            }
+            None => {
+                let pos = track
+                    .keyframes
+                    .iter()
+                    .position(|k| k.time > time)
+                    .unwrap_or(track.keyframes.len());
+                track.keyframes.insert(pos, Keyframe { time, transform });
+                pos
+            }
+        };
+
+        self.is_dirty = true;
+        self.select_keyframe(Some((bone_id, index)), window, cx);
+    }
+
+    /// Remove every keyframe in the current multi-selection from its track.
+    /// No-op if nothing is selected.
+    pub fn delete_selected_keyframes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.selected_keyframes.is_empty() {
+            return;
+        }
+
+        let mut by_track: HashMap<String, Vec<usize>> = HashMap::new();
+        for (bone_id, index) in &self.selected_keyframes {
+            by_track.entry(bone_id.clone()).or_default().push(*index);
+        }
+
+        for (bone_id, mut indices) in by_track {
+            if let Some(track) = self.animation.track_mut(&bone_id) {
+                // Remove highest indices first so earlier removals don't
+                // shift the positions of indices still pending removal.
+                indices.sort_unstable_by(|a, b| b.cmp(a));
+                indices.dedup();
+                for index in indices {
+                    if index < track.keyframes.len() {
+                        track.keyframes.remove(index);
+                    }
+                }
+            }
+        }
+
+        // Drop tracks left with no keyframes, so the timeline doesn't show
+        // an empty row for a bone that's no longer animated.
+        self.animation.tracks.retain(|t| !t.keyframes.is_empty());
+
+        self.is_dirty = true;
+        self.select_keyframe(None, window, cx);
+    }
+
+    /// Remove the selected bone's keyframe at the current playhead time, if
+    /// any. No-op if no bone is selected or it has no keyframe there.
+    pub fn delete_keyframe_at_playhead(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(bone_id) = self.selected_bone.clone() else {
+            return;
+        };
+        let Some(index) = self.keyframe_at_playhead(&bone_id) else {
+            return;
+        };
+        if let Some(track) = self.animation.track_mut(&bone_id) {
+            track.keyframes.remove(index);
+        }
+        self.animation.tracks.retain(|t| !t.keyframes.is_empty());
+
+        self.is_dirty = true;
+        self.resync_selected_keyframe();
+        self.sync_transform_inputs(window, cx);
+        cx.notify();
+    }
+
     /// Set the start of the playback range (inclusive frame number).
     pub fn set_play_range_start(&mut self, start: i32, cx: &mut Context<Self>) {
         self.play_range.0 = start;
@@ -223,10 +361,13 @@ impl SkeletalAnimEditorPanel {
         (start, end)
     }
 
-    /// Move the playhead to `time`, clamped to the playback range.
-    pub fn seek(&mut self, time: f32, cx: &mut Context<Self>) {
+    /// Move the playhead to `time`, clamped to the playback range, resyncing
+    /// the selected keyframe and properties panel to the new time.
+    pub fn seek(&mut self, time: f32, window: &mut Window, cx: &mut Context<Self>) {
         let (start, end) = self.play_range_seconds();
         self.playback.time = time.clamp(start, end);
+        self.resync_selected_keyframe();
+        self.sync_transform_inputs(window, cx);
         cx.notify();
     }
 

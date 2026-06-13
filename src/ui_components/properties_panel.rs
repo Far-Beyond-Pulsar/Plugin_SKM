@@ -2,9 +2,10 @@
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use ui::button::{Button, ButtonVariants};
 use ui::dock::PanelEvent;
 use ui::input::NumberInput;
-use ui::{h_flex, v_flex, ActiveTheme, Icon, IconName};
+use ui::{h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable};
 
 use crate::editor::SkeletalAnimEditorPanel;
 
@@ -94,12 +95,35 @@ impl BonePropertiesPanel {
             )
     }
 
+    /// A single X/Y/Z row: a label, the value input, and a "Key" icon button.
+    ///
+    /// The icon reflects whether the selected bone has a keyframe at the
+    /// current playhead time (filled diamond = keyed, hollow = not keyed).
+    /// Clicking it inserts a keyframe capturing the current pose (if not
+    /// keyed) or removes the keyframe at the playhead (if keyed); the value
+    /// inputs are only editable once keyed (or for non-animated bones, which
+    /// edit the bind pose directly).
     fn render_axis_row(
         &self,
+        section: &'static str,
         label: &'static str,
         input: &Entity<ui::input::InputState>,
+        keyed: bool,
+        disabled: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let editor = self.editor.clone();
+        let icon = if keyed {
+            IconName::Keyframe
+        } else {
+            IconName::KeyframePlus
+        };
+        let tooltip = if keyed {
+            "Remove keyframe at playhead"
+        } else {
+            "Insert keyframe at playhead"
+        };
+
         h_flex()
             .w_full()
             .gap_2()
@@ -111,13 +135,38 @@ impl BonePropertiesPanel {
                     .text_color(cx.theme().muted_foreground)
                     .child(label),
             )
-            .child(div().flex_1().child(NumberInput::new(input).w_full()))
+            .child(
+                div()
+                    .flex_1()
+                    .child(NumberInput::new(input).w_full().disabled(disabled)),
+            )
+            .child(
+                Button::new(SharedString::from(format!("key-{}-{}", section, label)))
+                    .icon(icon)
+                    .ghost()
+                    .xsmall()
+                    .tooltip(tooltip)
+                    .on_click(move |_, window, cx| {
+                        let Some(editor) = editor.upgrade() else {
+                            return;
+                        };
+                        editor.update(cx, |editor, cx| {
+                            if keyed {
+                                editor.delete_keyframe_at_playhead(window, cx);
+                            } else {
+                                editor.insert_keyframe(window, cx);
+                            }
+                        });
+                    }),
+            )
     }
 
     fn render_section(
         &self,
         title: &'static str,
         inputs: &[Entity<ui::input::InputState>; 3],
+        keyed: bool,
+        disabled: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         v_flex()
@@ -134,9 +183,9 @@ impl BonePropertiesPanel {
                     .text_color(cx.theme().muted_foreground)
                     .child(title),
             )
-            .child(self.render_axis_row("X", &inputs[0], cx))
-            .child(self.render_axis_row("Y", &inputs[1], cx))
-            .child(self.render_axis_row("Z", &inputs[2], cx))
+            .child(self.render_axis_row(title, "X", &inputs[0], keyed, disabled, cx))
+            .child(self.render_axis_row(title, "Y", &inputs[1], keyed, disabled, cx))
+            .child(self.render_axis_row(title, "Z", &inputs[2], keyed, disabled, cx))
     }
 }
 
@@ -165,12 +214,19 @@ impl Render for BonePropertiesPanel {
         };
 
         let has_selection = editor.read(cx).selected_bone.is_some();
-        let (translation, rotation, scale) = {
+        let (translation, rotation, scale, keyed, disabled) = {
             let editor = editor.read(cx);
+            let keyed = editor.selected_keyframe.is_some();
+            let has_track = editor
+                .selected_bone
+                .as_ref()
+                .is_some_and(|id| editor.animation.track(id).is_some());
             (
                 editor.transform_inputs.translation.clone(),
                 editor.transform_inputs.rotation.clone(),
                 editor.transform_inputs.scale.clone(),
+                keyed,
+                has_track && !keyed,
             )
         };
 
@@ -179,9 +235,9 @@ impl Render for BonePropertiesPanel {
             .bg(cx.theme().sidebar)
             .child(self.render_header(cx))
             .when(has_selection, |el| {
-                el.child(self.render_section("Translation", &translation, cx))
-                    .child(self.render_section("Rotation", &rotation, cx))
-                    .child(self.render_section("Scale", &scale, cx))
+                el.child(self.render_section("Translation", &translation, keyed, disabled, cx))
+                    .child(self.render_section("Rotation", &rotation, keyed, disabled, cx))
+                    .child(self.render_section("Scale", &scale, keyed, disabled, cx))
             })
             .when(!has_selection, |el| {
                 el.child(

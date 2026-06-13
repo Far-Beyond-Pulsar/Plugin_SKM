@@ -10,9 +10,10 @@ use std::collections::HashSet;
 use crate::editor::panel::SkeletalAnimEditorPanel;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use ui::button::Button;
 use ui::input::{InputEvent, InputState, NumberInput, NumberInputEvent, StepAction};
 use ui::PixelsExt;
-use ui::{dock::PanelEvent, h_flex, ActiveTheme};
+use ui::{dock::PanelEvent, h_flex, ActiveTheme, Disableable, IconName};
 
 use super::renderer::TimelineRenderer;
 use super::types::{RectInstance, TimelineUniforms};
@@ -335,7 +336,7 @@ impl TimelinePanel {
         if y < RULER_HEIGHT {
             self.dragging_playhead = true;
             let time = self.x_to_time(x);
-            editor.update(cx, |editor, cx| editor.seek(time, cx));
+            editor.update(cx, |editor, cx| editor.seek(time, window, cx));
             cx.notify();
             return;
         }
@@ -356,7 +357,7 @@ impl TimelinePanel {
                     let dx = kf_x - x;
                     let dy = kf_y - y;
                     if (dx * dx + dy * dy).sqrt() < HIT_RADIUS_PX + KEYFRAME_SIZE * 0.5 {
-                        found = Some((track.bone_id.clone(), k));
+                        found = Some((track.bone_id.clone(), k, kf.time));
                         break;
                     }
                 }
@@ -367,12 +368,15 @@ impl TimelinePanel {
             found
         });
 
-        if let Some((bone_id, index)) = hit {
+        if let Some((bone_id, index, time)) = hit {
             editor.update(cx, |editor, cx| {
                 if event.modifiers.shift {
                     editor.toggle_keyframe_selection((bone_id, index), window, cx);
                 } else {
+                    // Selecting a keyframe also moves the playhead to it, so
+                    // the properties panel shows it as keyed/editable.
                     editor.select_bone(Some(bone_id.clone()), window, cx);
+                    editor.seek(time, window, cx);
                     editor.select_keyframe(Some((bone_id, index)), window, cx);
                 }
             });
@@ -448,7 +452,7 @@ impl TimelinePanel {
         cx.notify();
     }
 
-    fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    fn handle_mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
         if self.panning {
             let x = event.position.x.as_f32();
             let delta_x = x - self.pan_last_x;
@@ -474,7 +478,20 @@ impl TimelinePanel {
         };
         let x = event.position.x.as_f32() - self.last_origin.x - GUTTER_WIDTH;
         let time = self.x_to_time(x);
-        editor.update(cx, |editor, cx| editor.seek(time, cx));
+        editor.update(cx, |editor, cx| editor.seek(time, window, cx));
+        cx.notify();
+    }
+
+    fn handle_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
+        match event.keystroke.key.as_str() {
+            "delete" | "backspace" => {
+                editor.update(cx, |editor, cx| editor.delete_selected_keyframes(window, cx));
+            }
+            _ => return,
+        }
         cx.notify();
     }
 
@@ -728,6 +745,7 @@ impl Render for TimelinePanel {
 
         // Gutter: ruler spacer + one row per animated track, naming the bone.
         let editor_ref = editor_entity.read(cx);
+        let has_keyframe_selected = !editor_ref.selected_keyframes.is_empty();
         let theme = cx.theme().clone();
         let mut gutter = div()
             .flex()
@@ -874,6 +892,7 @@ impl Render for TimelinePanel {
         let entity_up_mid = entity.clone();
         let entity_move = entity.clone();
         let entity_scroll = entity.clone();
+        let entity_key_down = entity.clone();
 
         let canvas_area = div()
             .id("skeletal-timeline-canvas")
@@ -907,18 +926,23 @@ impl Render for TimelinePanel {
                     entity_up_mid.update(cx, |panel, cx| panel.handle_mouse_up(event, window, cx));
                 },
             )
-            .on_mouse_move(move |event: &MouseMoveEvent, _window, cx| {
-                entity_move.update(cx, |panel, cx| panel.handle_mouse_move(event, cx));
+            .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
+                entity_move.update(cx, |panel, cx| panel.handle_mouse_move(event, window, cx));
             })
             .on_scroll_wheel(move |event: &ScrollWheelEvent, _window, cx| {
                 entity_scroll.update(cx, |panel, cx| panel.handle_scroll(event, cx));
             })
+            .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                entity_key_down.update(cx, |panel, cx| panel.handle_key_down(event, window, cx));
+            })
             .child(gpu_display)
             .child(driver);
 
-        // Top bar (outside the custom renderer) for editing the inclusive
-        // playback frame range, e.g. `-1` to `10` for an 11-frame clip.
+        // Top bar (outside the custom renderer): keyframe add/remove
+        // controls, plus editing the inclusive playback frame range, e.g.
+        // `-1` to `10` for an 11-frame clip.
         let range_bar: AnyElement = if let Some(range_inputs) = &self.range_inputs {
+            let editor_for_delete = self.editor.clone();
             h_flex()
                 .w_full()
                 .flex_shrink_0()
@@ -929,6 +953,19 @@ impl Render for TimelinePanel {
                 .bg(theme.secondary)
                 .border_b_1()
                 .border_color(theme.border)
+                .child(
+                    Button::new("timeline-delete-keyframe")
+                        .icon(IconName::KeyframeMinus)
+                        .tooltip("Delete selected keyframes (Del)")
+                        .disabled(!has_keyframe_selected)
+                        .on_click(move |_, window, cx| {
+                            if let Some(editor) = editor_for_delete.upgrade() {
+                                editor.update(cx, |editor, cx| {
+                                    editor.delete_selected_keyframes(window, cx)
+                                });
+                            }
+                        }),
+                )
                 .child(
                     div()
                         .text_xs()

@@ -171,10 +171,10 @@ impl Render for SkeletalAnimEditorPanel {
                     .tooltip("Return to start")
                     .on_click({
                         let entity = entity.clone();
-                        move |_, _window, cx| {
+                        move |_, window, cx| {
                             entity.update(cx, |editor, cx| {
                                 editor.playback.playing = false;
-                                editor.seek(0.0, cx);
+                                editor.seek(0.0, window, cx);
                             });
                         }
                     }),
