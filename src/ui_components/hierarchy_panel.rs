@@ -5,7 +5,8 @@
 //! box, expand/collapse all, tree guide lines, animated-bone badges, keyboard
 //! navigation, and hover that lights up the bone in the 3D viewport.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -18,6 +19,7 @@ use ui::status_bar::StatusBar;
 use ui::tag::Tag;
 use ui::{h_flex, v_flex, ActiveTheme, Icon, IconName, Sizable, StyledExt};
 
+use crate::core::Skeleton;
 use crate::editor::SkeletalAnimEditorPanel;
 use crate::ui_components::chrome::{empty_message, panel_header, MONO};
 
@@ -42,11 +44,79 @@ struct Entry {
     direct_match: bool,
 }
 
+/// Everything the tree displays, copied out of the editor.
+///
+/// The panel renders from this instead of reading the editor entity: a view
+/// that reads an entity while rendering is rebuilt on every notify of it, and
+/// the editor notifies on every playback frame. The snapshot is refreshed only
+/// when [`Model::signature`] says something shown here actually changed.
+#[derive(Default)]
+struct Model {
+    skeleton: Skeleton,
+    expanded: HashSet<String>,
+    selected: Option<String>,
+    hovered: Option<String>,
+    /// Keyframe count per animated bone.
+    keys: HashMap<String, usize>,
+    /// Bones with a key exactly at the playhead.
+    keyed_here: HashSet<String>,
+    signature: u64,
+}
+
+impl Model {
+    fn capture(e: &SkeletalAnimEditorPanel) -> Self {
+        Self {
+            skeleton: e.skeleton.clone(),
+            expanded: e.expanded_bones.clone(),
+            selected: e.selected_bone.clone(),
+            hovered: e.hovered_bone.clone(),
+            keys: e
+                .animation
+                .tracks
+                .iter()
+                .map(|t| (t.bone_id.clone(), t.keyframes.len()))
+                .collect(),
+            keyed_here: e
+                .animation
+                .tracks
+                .iter()
+                .filter(|t| e.keyframe_at_playhead(&t.bone_id).is_some())
+                .map(|t| t.bone_id.clone())
+                .collect(),
+            signature: Self::signature(e),
+        }
+    }
+
+    /// Cheap hash of the editor state the tree shows.
+    fn signature(e: &SkeletalAnimEditorPanel) -> u64 {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        e.selected_bone.hash(&mut h);
+        e.hovered_bone.hash(&mut h);
+        e.skeleton.bones.len().hash(&mut h);
+        // Sets hash order-independently.
+        let mut expanded = 0u64;
+        for id in &e.expanded_bones {
+            let mut item = std::collections::hash_map::DefaultHasher::new();
+            id.hash(&mut item);
+            expanded ^= item.finish();
+        }
+        expanded.hash(&mut h);
+        for t in &e.animation.tracks {
+            t.bone_id.hash(&mut h);
+            t.keyframes.len().hash(&mut h);
+            e.keyframe_at_playhead(&t.bone_id).is_some().hash(&mut h);
+        }
+        h.finish()
+    }
+}
+
 pub struct BoneHierarchyPanel {
     editor: WeakEntity<SkeletalAnimEditorPanel>,
     focus_handle: FocusHandle,
     filter: Option<Entity<InputState>>,
+    model: Model,
     _subscription: Option<Subscription>,
+    _editor_observer: Option<Subscription>,
 }
 
 impl BoneHierarchyPanel {
@@ -55,8 +125,27 @@ impl BoneHierarchyPanel {
             editor,
             focus_handle: cx.focus_handle(),
             filter: None,
+            model: Model::default(),
             _subscription: None,
+            _editor_observer: None,
         }
+    }
+
+    /// Start following the editor. Call once, outside of render.
+    pub fn attach(
+        &mut self,
+        state: &SkeletalAnimEditorPanel,
+        editor: &Entity<SkeletalAnimEditorPanel>,
+        cx: &mut Context<Self>,
+    ) {
+        self.model = Model::capture(state);
+        self._editor_observer = Some(cx.observe(editor, |this, editor, cx| {
+            let e = editor.read(cx);
+            if Model::signature(e) != this.model.signature {
+                this.model = Model::capture(e);
+                cx.notify();
+            }
+        }));
     }
 
     fn init_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -80,8 +169,9 @@ impl BoneHierarchyPanel {
     }
 
     /// The rows currently visible, honoring expansion and the filter.
-    fn entries(&self, editor: &SkeletalAnimEditorPanel, filter: &str) -> Vec<Entry> {
-        let skeleton = &editor.skeleton;
+    fn entries(&self, filter: &str) -> Vec<Entry> {
+        let model = &self.model;
+        let skeleton = &model.skeleton;
         let filtering = !filter.is_empty();
 
         // With a filter active, show matches plus the ancestors leading to them.
@@ -119,7 +209,7 @@ impl BoneHierarchyPanel {
             }
 
             let has_children = !skeleton.children_of(&bone.id).is_empty();
-            let expanded = has_children && (filtering || editor.is_bone_expanded(&bone.id));
+            let expanded = has_children && (filtering || model.expanded.contains(&bone.id));
             if !filtering && has_children && !expanded {
                 skip_below = Some(depth);
             }
@@ -130,10 +220,10 @@ impl BoneHierarchyPanel {
                 depth,
                 has_children,
                 expanded,
-                selected: editor.selected_bone.as_deref() == Some(bone.id.as_str()),
-                hovered: editor.hovered_bone.as_deref() == Some(bone.id.as_str()),
-                keys: editor.animation.track(&bone.id).map(|t| t.keyframes.len()),
-                keyed_here: editor.keyframe_at_playhead(&bone.id).is_some(),
+                selected: model.selected.as_deref() == Some(bone.id.as_str()),
+                hovered: model.hovered.as_deref() == Some(bone.id.as_str()),
+                keys: model.keys.get(&bone.id).copied(),
+                keyed_here: model.keyed_here.contains(&bone.id),
                 is_root: bone.parent.is_none(),
                 direct_match: !filtering || direct.contains(bone.id.as_str()),
             });
@@ -311,7 +401,7 @@ impl BoneHierarchyPanel {
             return;
         };
         let filter = self.filter_text(cx);
-        let entries = self.entries(editor.read(cx), &filter);
+        let entries = self.entries(&filter);
         if entries.is_empty() {
             return;
         }
@@ -350,8 +440,8 @@ impl BoneHierarchyPanel {
                 if entry.has_children && entry.expanded {
                     editor.update(cx, |e, cx| e.toggle_bone_expanded(&entry.id, cx));
                 } else {
-                    let parent = editor
-                        .read(cx)
+                    let parent = self
+                        .model
                         .skeleton
                         .bone(&entry.id)
                         .and_then(|b| b.parent.clone());
@@ -387,22 +477,14 @@ impl ui::dock::Panel for BoneHierarchyPanel {
 impl Render for BoneHierarchyPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let Some(editor) = self.editor.upgrade() else {
-            return v_flex().size_full().bg(theme.sidebar).into_any_element();
-        };
         if self.filter.is_none() {
             self.init_filter(window, cx);
         }
 
         let filter = self.filter_text(cx);
-        let (entries, total, animated) = {
-            let e = editor.read(cx);
-            (
-                self.entries(e, &filter),
-                e.skeleton.bones.len(),
-                e.animation.tracks.len(),
-            )
-        };
+        let entries = self.entries(&filter);
+        let total = self.model.skeleton.bones.len();
+        let animated = self.model.keys.len();
         let shown = entries.len();
         let rows: Vec<AnyElement> = entries
             .into_iter()

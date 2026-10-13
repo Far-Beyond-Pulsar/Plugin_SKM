@@ -36,6 +36,13 @@ impl SkeletalAnimEditorPanel {
         let hierarchy_panel = cx.new(|cx| BoneHierarchyPanel::new(editor_weak.clone(), cx));
         let properties_panel = cx.new(|cx| BonePropertiesPanel::new(editor_weak.clone(), cx));
 
+        // The sidebars render from their own snapshots and refresh only when
+        // what they show changes, instead of on every editor notify.
+        let editor_entity = cx.entity();
+        hierarchy_panel.update(cx, |panel, cx| panel.attach(self, &editor_entity, cx));
+        properties_panel.update(cx, |panel, cx| panel.attach(self, &editor_entity, cx));
+        timeline_panel.update(cx, |panel, cx| panel.attach(self, &editor_entity, cx));
+
         workspace.update(cx, |workspace, cx| {
             let dock_area_weak = workspace.dock_area().downgrade();
 

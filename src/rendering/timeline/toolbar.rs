@@ -1,21 +1,18 @@
-//! Chrome around the timeline canvas: transport toolbar, track gutter and the
-//! status bar. Everything here is stock engine components.
+//! Chrome around the timeline canvas: transport toolbar and the status bar (the track gutter is its own
+//! view, see `gutter.rs`). Everything here is stock engine components.
 
-use gpui::prelude::FluentBuilder;
 use gpui::*;
 use ui::button::{Button, ButtonVariants};
 use ui::input::NumberInput;
 use ui::status_bar::StatusBar;
 use ui::tag::Tag;
-use ui::{
-    h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, PixelsExt, Selectable, Sizable, StyledExt,
-};
+use ui::{h_flex, ActiveTheme, Disableable, IconName, Selectable, Sizable};
 
 use crate::editor::panel::SkeletalAnimEditorPanel;
 use crate::ui_components::chrome::{caption, toolbar_divider, MONO};
 
 use super::layout::*;
-use super::panel::{TimelinePanel, GUTTER_WIDTH};
+use super::panel::TimelinePanel;
 
 type EditorCx<'a> = Context<'a, SkeletalAnimEditorPanel>;
 
@@ -220,6 +217,8 @@ impl TimelinePanel {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.only_selected = !this.only_selected;
                         this.view.scroll_y = 0.0;
+                        let (gutter, on) = (this.gutter.clone(), this.only_selected);
+                        gutter.update(cx, |g, cx| g.set_only_selected(on, cx));
                         cx.notify();
                     })),
             )
@@ -319,233 +318,6 @@ impl TimelinePanel {
             .children(range)
             .child(toolbar_divider(cx))
             .child(zoom)
-            .into_any_element()
-    }
-
-    pub(super) fn render_gutter(&self, rows: &[usize], cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
-        let Some(editor) = self.editor.upgrade() else {
-            return div().into_any_element();
-        };
-        let e = editor.read(cx);
-        let total_keys = e.animation.key_count();
-
-        let header = h_flex()
-            .h(px(RULER_HEIGHT))
-            .w_full()
-            .flex_shrink_0()
-            .px_2()
-            .gap_2()
-            .items_center()
-            .bg(theme.secondary)
-            .border_b_1()
-            .border_color(theme.border)
-            .child(
-                Icon::new(IconName::List)
-                    .size(px(13.0))
-                    .text_color(theme.muted_foreground),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(theme.muted_foreground)
-                    .child("TRACKS"),
-            )
-            .child(div().flex_1())
-            .child(
-                Tag::secondary()
-                    .small()
-                    .rounded_full()
-                    .child(rows.len().to_string()),
-            );
-
-        let summary = h_flex()
-            .h(px(SUMMARY_HEIGHT))
-            .w_full()
-            .flex_shrink_0()
-            .px_2()
-            .gap_2()
-            .items_center()
-            .bg(theme.sidebar)
-            .border_b_1()
-            .border_color(theme.border)
-            .child(
-                Icon::new(IconName::Keyframes)
-                    .size(px(13.0))
-                    .text_color(theme.info),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(theme.foreground)
-                    .child("Summary"),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .font_family(MONO)
-                    .text_color(theme.muted_foreground)
-                    .child(total_keys.to_string()),
-            );
-
-        let mut list = div()
-            .absolute()
-            .left_0()
-            .right_0()
-            .top(px(-self.view.scroll_y))
-            .flex()
-            .flex_col();
-        for (i, &ti) in rows.iter().enumerate() {
-            let Some(track) = e.animation.tracks.get(ti) else {
-                continue;
-            };
-            let name = e
-                .skeleton
-                .bone(&track.bone_id)
-                .map_or_else(|| track.bone_id.clone(), |b| b.name.clone());
-            let selected = e.selected_bone.as_deref() == Some(track.bone_id.as_str());
-            let keyed_here = e.keyframe_at_playhead(&track.bone_id).is_some();
-            let key_count = track.keyframes.len();
-            let bone_id = track.bone_id.clone();
-            let key_bone = track.bone_id.clone();
-            let editor_row = self.editor.clone();
-            let editor_key = self.editor.clone();
-            let stripe = i % 2 == 1;
-
-            list = list.child(
-                h_flex()
-                    .id(SharedString::from(format!("timeline-track-{}", track.bone_id)))
-                    .relative()
-                    .h(px(ROW_HEIGHT))
-                    .w_full()
-                    .flex_shrink_0()
-                    .pl_3()
-                    .pr_1()
-                    .gap_2()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(theme.border.opacity(0.45))
-                    .bg(if selected {
-                        theme.primary.opacity(0.16)
-                    } else if stripe {
-                        theme.foreground.opacity(0.022)
-                    } else {
-                        theme.transparent
-                    })
-                    .cursor_pointer()
-                    .hover(|s| s.bg(theme.list_hover))
-                    .when(selected, |d| {
-                        d.child(
-                            div()
-                                .absolute()
-                                .left_0()
-                                .top_0()
-                                .bottom_0()
-                                .w(px(3.0))
-                                .bg(theme.primary),
-                        )
-                    })
-                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        let bone_id = bone_id.clone();
-                        let _ = editor_row.update(cx, |e, cx| e.select_bone(Some(bone_id), window, cx));
-                    })
-                    .child(
-                        Icon::new(IconName::Component)
-                            .size(px(12.0))
-                            .text_color(if selected {
-                                theme.primary
-                            } else {
-                                theme.info.opacity(0.8)
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_xs()
-                            .font_weight(if selected {
-                                FontWeight::SEMIBOLD
-                            } else {
-                                FontWeight::NORMAL
-                            })
-                            .text_color(theme.foreground)
-                            .child(name),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(10.0))
-                            .font_family(MONO)
-                            .text_color(theme.muted_foreground)
-                            .child(key_count.to_string()),
-                    )
-                    .child(
-                        Button::new(SharedString::from(format!("tl-key-{key_bone}")))
-                            .icon(if keyed_here {
-                                IconName::Keyframe
-                            } else {
-                                IconName::KeyframePlus
-                            })
-                            .ghost()
-                            .xsmall()
-                            .selected(keyed_here)
-                            .stop_propagation(true)
-                            .tooltip(if keyed_here {
-                                "Remove this track's key at the playhead"
-                            } else {
-                                "Key this track at the playhead"
-                            })
-                            .on_click(move |_, window, cx| {
-                                let bone = key_bone.clone();
-                                let _ =
-                                    editor_key.update(cx, |e, cx| e.toggle_key_for_bone(&bone, window, cx));
-                            }),
-                    ),
-            );
-        }
-
-        v_flex()
-            .w(px(GUTTER_WIDTH))
-            .h_full()
-            .flex_shrink_0()
-            .bg(theme.sidebar)
-            .border_r_1()
-            .border_color(theme.border)
-            .child(header)
-            .child(summary)
-            .child(
-                div()
-                    .id("timeline-gutter-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .overflow_hidden()
-                    .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _w, cx| {
-                        let dy = match event.delta {
-                            ScrollDelta::Lines(p) => p.y * 16.0,
-                            ScrollDelta::Pixels(p) => p.y.as_f32(),
-                        };
-                        this.view.scroll_y -= dy;
-                        if let Some(editor) = this.editor.upgrade() {
-                            let rows = this.visible_rows(editor.read(cx)).len();
-                            this.clamp_scroll(rows);
-                        }
-                        cx.notify();
-                    }))
-                    .child(list),
-            )
-            // Matches the canvas's scrollbar strip so the two stay aligned.
-            .child(
-                div()
-                    .h(px(SCROLLBAR_HEIGHT))
-                    .w_full()
-                    .flex_shrink_0()
-                    .border_t_1()
-                    .border_color(theme.border),
-            )
             .into_any_element()
     }
 

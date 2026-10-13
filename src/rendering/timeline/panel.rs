@@ -34,6 +34,7 @@ use crate::editor::panel::{KeyDrag, SkeletalAnimEditorPanel};
 use crate::style::Palette;
 use crate::ui_components::chrome::{self, MONO};
 
+use super::gutter::TimelineGutter;
 use super::layout::*;
 use super::renderer::TimelineRenderer;
 use super::types::TimelineUniforms;
@@ -89,6 +90,8 @@ pub struct TimelinePanel {
     /// Pointer position over the canvas, for the hover tooltip.
     pointer: Option<(f32, f32)>,
     pub(super) inputs: Option<TimelineInputs>,
+    /// Track list: a separate view that refreshes only when what it shows changes.
+    pub(super) gutter: Entity<TimelineGutter>,
     pub(super) palette: Palette,
     fit_pending: bool,
     canvas_origin: Point<f32>,
@@ -97,6 +100,7 @@ pub struct TimelinePanel {
 
 impl TimelinePanel {
     pub fn new(editor: WeakEntity<SkeletalAnimEditorPanel>, cx: &mut Context<Self>) -> Self {
+        let gutter = cx.new(|_| TimelineGutter::new(editor.clone()));
         Self {
             editor,
             focus_handle: cx.focus_handle(),
@@ -110,6 +114,7 @@ impl TimelinePanel {
             hover: None,
             pointer: None,
             inputs: None,
+            gutter,
             palette: Palette::from_theme(cx.theme()),
             fit_pending: true,
             canvas_origin: Point::new(0.0, 0.0),
@@ -118,6 +123,29 @@ impl TimelinePanel {
     }
 
     // ── Model plumbing ─────────────────────────────────────────────────────
+
+    /// Start the track list following the editor. `state` is the editor's
+    /// current state: the editor can't be read through its entity while it is
+    /// rendering, which is when its workspace (and this panel) is set up.
+    pub fn attach(
+        &mut self,
+        state: &SkeletalAnimEditorPanel,
+        editor: &Entity<SkeletalAnimEditorPanel>,
+        cx: &mut Context<Self>,
+    ) {
+        let panel = cx.weak_entity();
+        self.gutter
+            .update(cx, |gutter, cx| gutter.attach(state, editor, panel, cx));
+    }
+
+    /// Scroll the track rows by `dy` px (from the gutter's wheel handler).
+    pub fn scroll_tracks(&mut self, dy: f32, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.upgrade() else { return };
+        let rows = self.visible_rows(editor.read(cx)).len();
+        self.view.scroll_y += dy;
+        self.clamp_scroll(rows);
+        cx.notify();
+    }
 
     /// Track indices shown, honoring the "selected bone only" filter.
     pub(super) fn visible_rows(&self, editor: &SkeletalAnimEditorPanel) -> Vec<usize> {
@@ -788,7 +816,17 @@ impl Render for TimelinePanel {
 
         let theme = cx.theme().clone();
         let toolbar = self.render_toolbar(window, cx);
-        let gutter = self.render_gutter(&rows, cx);
+        // The gutter is its own cached view; it is only told where the list is
+        // scrolled to (a no-op unless that moved).
+        let scroll_y = self.view.scroll_y;
+        self.gutter
+            .update(cx, |gutter, cx| gutter.set_scroll_y(scroll_y, cx));
+        let gutter = AnyView::from(self.gutter.clone()).cached(
+            StyleRefinement::default()
+                .w(px(GUTTER_WIDTH))
+                .h_full()
+                .flex_shrink_0(),
+        );
         let status = self.render_status_bar(&rows, cx);
 
         let gpu_display: AnyElement = if let Some(ref s) = self.surface {

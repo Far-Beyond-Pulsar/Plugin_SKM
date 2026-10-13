@@ -2,6 +2,7 @@
 //! or keyframe.
 
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -21,6 +22,12 @@ pub struct BonePropertiesPanel {
     editor: WeakEntity<SkeletalAnimEditorPanel>,
     focus_handle: FocusHandle,
     collapsed: HashSet<&'static str>,
+    /// What the panel shows, copied out of the editor. Rendering reads only
+    /// this: a view that reads an entity while rendering is rebuilt on every
+    /// notify of it, and the editor notifies on every playback frame.
+    details: Option<Details>,
+    signature: u64,
+    _editor_observer: Option<Subscription>,
 }
 
 /// Snapshot of what the panel shows, read once per render.
@@ -49,12 +56,52 @@ impl BonePropertiesPanel {
             editor,
             focus_handle: cx.focus_handle(),
             collapsed: HashSet::new(),
+            details: None,
+            signature: 0,
+            _editor_observer: None,
         }
     }
 
-    fn details(&self, cx: &App) -> Option<Details> {
-        let editor = self.editor.upgrade()?;
-        let e = editor.read(cx);
+    /// Start following the editor. Call once, outside of render.
+    pub fn attach(
+        &mut self,
+        state: &SkeletalAnimEditorPanel,
+        editor: &Entity<SkeletalAnimEditorPanel>,
+        cx: &mut Context<Self>,
+    ) {
+        self.signature = Self::signature(state);
+        self.details = Self::capture(state);
+        self._editor_observer = Some(cx.observe(editor, |this, editor, cx| {
+            let e = editor.read(cx);
+            let signature = Self::signature(e);
+            if signature != this.signature {
+                this.signature = signature;
+                this.details = Self::capture(e);
+                cx.notify();
+            }
+        }));
+    }
+
+    /// Hash of the editor state this panel shows. While playing, the playhead
+    /// is left out so the panel doesn't rebuild every frame.
+    fn signature(e: &SkeletalAnimEditorPanel) -> u64 {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        e.selected_bone.hash(&mut h);
+        e.selected_keyframe.hash(&mut h);
+        e.playback.playing.hash(&mut h);
+        if !e.playback.playing {
+            ((e.playback.time * 1000.0).round() as i64).hash(&mut h);
+        }
+        if let Some(track) = e.selected_bone.as_ref().and_then(|id| e.animation.track(id)) {
+            for k in &track.keyframes {
+                k.time.to_bits().hash(&mut h);
+            }
+        }
+        h.finish()
+    }
+
+    fn capture(e: &SkeletalAnimEditorPanel) -> Option<Details> {
+        let playing = e.playback.playing;
         let id = e.selected_bone.clone()?;
         let bone = e.skeleton.bone(&id)?;
         let track = e.animation.track(&id);
@@ -66,6 +113,7 @@ impl BonePropertiesPanel {
         });
 
         let timing = match track {
+            _ if playing => "Playing".to_string(),
             None => "Not animated — edits change the bind pose".to_string(),
             Some(t) if t.keyframes.is_empty() => "No keys".to_string(),
             Some(t) => {
@@ -101,7 +149,11 @@ impl BonePropertiesPanel {
             keyed,
             locked: track.is_some() && !keyed,
             timing,
-            world: e.world_position(&id).map(|p| [p.x, p.y, p.z]),
+            world: if playing {
+                None
+            } else {
+                e.world_position(&id).map(|p| [p.x, p.y, p.z])
+            },
             translation: e.transform_inputs.translation.clone(),
             rotation: e.transform_inputs.rotation.clone(),
             scale: e.transform_inputs.scale.clone(),
@@ -490,7 +542,7 @@ impl ui::dock::Panel for BonePropertiesPanel {
 impl Render for BonePropertiesPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let details = self.details(cx);
+        let details = self.details.as_ref();
 
         let badge = match &details {
             Some(d) if d.selected_key.is_some() => Some(Tag::warning().small().child("Keyframe")),
@@ -520,8 +572,8 @@ impl Render for BonePropertiesPanel {
                 .flex_1()
                 .min_h_0()
                 .scrollable(ScrollbarAxis::Vertical)
-                .child(self.render_bone_card(&d, cx))
-                .child(self.render_key_card(&d, cx))
+                .child(self.render_bone_card(d, cx))
+                .child(self.render_key_card(d, cx))
                 .when(d.locked, |col| {
                     col.child(
                         h_flex()
