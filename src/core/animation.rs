@@ -128,3 +128,33 @@ pub fn evaluate_world_transforms(
     }
     world
 }
+
+/// World-space matrix of a single bone at `time`, composed along its chain of
+/// ancestors. Cheaper than [`evaluate_world_transforms`] when only one bone is
+/// needed (motion paths sample the same bone at many times).
+pub fn bone_world_transform(
+    skeleton: &Skeleton,
+    clip: &AnimationClip,
+    bone_id: &str,
+    time: f32,
+) -> Option<Mat4> {
+    let mut chain = Vec::new();
+    let mut current = skeleton.bone(bone_id);
+    // Bound the walk so a malformed (cyclic) hierarchy can't hang the editor.
+    while let Some(bone) = current {
+        chain.push(bone);
+        if chain.len() > skeleton.bones.len() {
+            return None;
+        }
+        current = bone.parent.as_deref().and_then(|p| skeleton.bone(p));
+    }
+    if chain.is_empty() {
+        return None;
+    }
+    let mut world = Mat4::IDENTITY;
+    for bone in chain.iter().rev() {
+        let local = clip.local_transform(skeleton, &bone.id, time).to_matrix();
+        world = world.mul(&local);
+    }
+    Some(world)
+}

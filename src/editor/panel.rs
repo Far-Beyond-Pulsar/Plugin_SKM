@@ -11,10 +11,12 @@ use std::path::PathBuf;
 use gpui::*;
 use ui::input::{InputEvent, NumberInputEvent, StepAction};
 
-use crate::core::{self, evaluate_world_transforms, AnimationClip, BoneTrack, Keyframe, Skeleton, Transform, Vec3};
+use crate::core::{
+    self, evaluate_world_transforms, AnimationClip, BoneTrack, Keyframe, Skeleton, Transform, Vec3,
+};
 use crate::rendering::{TimelinePanel, ViewportPanel};
 
-use super::transform_inputs::TransformInputs;
+use super::transform_inputs::{TransformGroup, TransformInputs};
 
 /// Maximum time difference, in seconds, for a keyframe to be considered "at"
 /// the playhead (and thus the properties panel's "Key" indicators to show as
@@ -101,11 +103,16 @@ impl TracerState {
             .iter()
             .map(|b| (b.id.clone(), Self::bone_color(&b.id)))
             .collect();
-        Self { trails: HashMap::new(), colors }
+        Self {
+            trails: HashMap::new(),
+            colors,
+        }
     }
 
     fn bone_color(id: &str) -> [f32; 4] {
-        let h = id.bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
+        let h = id
+            .bytes()
+            .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
         let hue = ((h % 997) as f32 * 0.6180339887).fract() * 360.0;
         let s = 0.65 + ((h >> 8) & 7) as f32 * 0.05;
         let l = 0.50 + ((h >> 11) & 7) as f32 * 0.05;
@@ -182,7 +189,13 @@ impl SkeletalAnimEditorPanel {
     ) -> anyhow::Result<Self> {
         let skeleton = core::serialization::load_skeleton(&file_path)?;
         let animation = core::serialization::load_animation(&file_path)?;
-        Ok(Self::new_internal(skeleton, animation, Some(file_path), window, cx))
+        Ok(Self::new_internal(
+            skeleton,
+            animation,
+            Some(file_path),
+            window,
+            cx,
+        ))
     }
 
     fn new_internal(
@@ -195,24 +208,32 @@ impl SkeletalAnimEditorPanel {
         let transform_inputs = TransformInputs::new(window, cx);
         let mut subscriptions = Vec::new();
         for input in transform_inputs.all() {
-            subscriptions.push(cx.subscribe_in(input, window, |this, _input, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change) {
+            subscriptions.push(cx.subscribe_in(
+                input,
+                window,
+                |this, _input, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        this.apply_transform_inputs(window, cx);
+                    }
+                },
+            ));
+            subscriptions.push(cx.subscribe_in(
+                input,
+                window,
+                |this, input, event: &NumberInputEvent, window, cx| {
+                    let NumberInputEvent::Step { action, fine } = event;
+                    let step = if *fine { 0.1 } else { 1.0 };
+                    input.update(cx, |input, cx| {
+                        let value = input.value().parse::<f32>().unwrap_or(0.0);
+                        let new_value = match action {
+                            StepAction::Increment => value + step,
+                            StepAction::Decrement => value - step,
+                        };
+                        input.set_value(format!("{:.3}", new_value), window, cx);
+                    });
                     this.apply_transform_inputs(window, cx);
-                }
-            }));
-            subscriptions.push(cx.subscribe_in(input, window, |this, input, event: &NumberInputEvent, window, cx| {
-                let NumberInputEvent::Step { action, fine } = event;
-                let step = if *fine { 0.1 } else { 1.0 };
-                input.update(cx, |input, cx| {
-                    let value = input.value().parse::<f32>().unwrap_or(0.0);
-                    let new_value = match action {
-                        StepAction::Increment => value + step,
-                        StepAction::Decrement => value - step,
-                    };
-                    input.set_value(format!("{:.3}", new_value), window, cx);
-                });
-                this.apply_transform_inputs(window, cx);
-            }));
+                },
+            ));
         }
 
         let root_id = skeleton.root_bones().first().map(|b| b.id.clone());
@@ -230,7 +251,12 @@ impl SkeletalAnimEditorPanel {
             expanded_bones: HashSet::new(),
             selected_keyframe: None,
             selected_keyframes: HashSet::new(),
-            playback: Playback { time: 0.0, playing: false, looping: true, speed: 1.0 },
+            playback: Playback {
+                time: 0.0,
+                playing: false,
+                looping: true,
+                speed: 1.0,
+            },
             play_range: default_play_range,
             viewport_panel: None,
             timeline_panel: None,
@@ -319,9 +345,11 @@ impl SkeletalAnimEditorPanel {
     /// `KEYFRAME_EPS`), if any. Used to drive the properties panel's "Key"
     /// indicators and to gate transform editing.
     pub fn keyframe_at_playhead(&self, bone_id: &str) -> Option<usize> {
-        self.animation
-            .track(bone_id)
-            .and_then(|t| t.keyframes.iter().position(|k| (k.time - self.playback.time).abs() < KEYFRAME_EPS))
+        self.animation.track(bone_id).and_then(|t| {
+            t.keyframes
+                .iter()
+                .position(|k| (k.time - self.playback.time).abs() < KEYFRAME_EPS)
+        })
     }
 
     /// Recompute `selected_keyframe`/`selected_keyframes` from the selected
@@ -329,10 +357,10 @@ impl SkeletalAnimEditorPanel {
     /// playhead, it becomes the (sole) selection; otherwise the keyframe
     /// selection is cleared. Does not touch `selected_bone` or notify.
     fn resync_selected_keyframe(&mut self) {
-        let key = self
-            .selected_bone
-            .as_ref()
-            .and_then(|bone_id| self.keyframe_at_playhead(bone_id).map(|idx| (bone_id.clone(), idx)));
+        let key = self.selected_bone.as_ref().and_then(|bone_id| {
+            self.keyframe_at_playhead(bone_id)
+                .map(|idx| (bone_id.clone(), idx))
+        });
         self.selected_keyframes.clear();
         if let Some(key) = &key {
             self.selected_keyframes.insert(key.clone());
@@ -373,7 +401,11 @@ impl SkeletalAnimEditorPanel {
 
         // Keyframes at (nearly) the same time are replaced in place rather
         // than duplicated.
-        let index = match track.keyframes.iter().position(|k| (k.time - time).abs() < KEYFRAME_EPS) {
+        let index = match track
+            .keyframes
+            .iter()
+            .position(|k| (k.time - time).abs() < KEYFRAME_EPS)
+        {
             Some(i) => {
                 track.keyframes[i].transform = transform;
                 i
@@ -535,6 +567,15 @@ impl SkeletalAnimEditorPanel {
         cx.notify();
     }
 
+    /// Turn the per-bone tracer trails on or off, starting from a clean slate.
+    pub fn toggle_tracers(&mut self, cx: &mut Context<Self>) {
+        self.debug.show_tracers = !self.debug.show_tracers;
+        if self.debug.show_tracers {
+            self.tracer_state = TracerState::new(&self.skeleton);
+        }
+        cx.notify();
+    }
+
     pub fn toggle_loop(&mut self, cx: &mut Context<Self>) {
         self.playback.looping = !self.playback.looping;
         cx.notify();
@@ -544,9 +585,11 @@ impl SkeletalAnimEditorPanel {
 
     /// Index of `bone_id`'s key at `time`, if one exists.
     fn key_index_at(&self, bone_id: &str, time: f32) -> Option<usize> {
-        self.animation
-            .track(bone_id)
-            .and_then(|t| t.keyframes.iter().position(|k| (k.time - time).abs() < KEYFRAME_EPS))
+        self.animation.track(bone_id).and_then(|t| {
+            t.keyframes
+                .iter()
+                .position(|k| (k.time - time).abs() < KEYFRAME_EPS)
+        })
     }
 
     /// Set `bone_id`'s pose at `time`, creating the track or key as needed.
@@ -559,7 +602,11 @@ impl SkeletalAnimEditorPanel {
             });
         }
         let track = self.animation.track_mut(bone_id).unwrap();
-        match track.keyframes.iter().position(|k| (k.time - time).abs() < KEYFRAME_EPS) {
+        match track
+            .keyframes
+            .iter()
+            .position(|k| (k.time - time).abs() < KEYFRAME_EPS)
+        {
             Some(i) => {
                 track.keyframes[i].transform = transform;
                 i
@@ -692,7 +739,10 @@ impl SkeletalAnimEditorPanel {
             for (i, kf) in track.keyframes.iter().enumerate() {
                 if selected.contains(&(track.bone_id.clone(), i)) {
                     keys.push((
-                        Keyframe { time: kf.time + delta, transform: kf.transform.clone() },
+                        Keyframe {
+                            time: kf.time + delta,
+                            transform: kf.transform.clone(),
+                        },
                         true,
                         i,
                     ));
@@ -768,7 +818,11 @@ impl SkeletalAnimEditorPanel {
         let origin = keys[0].1;
         self.clipboard = keys
             .into_iter()
-            .map(|(bone_id, time, transform)| ClipKey { bone_id, dt: time - origin, transform })
+            .map(|(bone_id, time, transform)| ClipKey {
+                bone_id,
+                dt: time - origin,
+                transform,
+            })
             .collect();
     }
 
@@ -850,6 +904,25 @@ impl SkeletalAnimEditorPanel {
 
     pub fn is_bone_expanded(&self, bone_id: &str) -> bool {
         self.expanded_bones.contains(bone_id)
+    }
+
+    /// Expand every bone that has children.
+    pub fn expand_all_bones(&mut self, cx: &mut Context<Self>) {
+        let parents: Vec<String> = self
+            .skeleton
+            .bones
+            .iter()
+            .filter(|b| !self.skeleton.children_of(&b.id).is_empty())
+            .map(|b| b.id.clone())
+            .collect();
+        self.expanded_bones.extend(parents);
+        cx.notify();
+    }
+
+    /// Collapse the whole tree down to its roots.
+    pub fn collapse_all_bones(&mut self, cx: &mut Context<Self>) {
+        self.expanded_bones.clear();
+        cx.notify();
     }
 
     /// Start or stop clip playback. While playing, the playhead advances at
@@ -975,6 +1048,35 @@ impl SkeletalAnimEditorPanel {
             }
         }
 
+        cx.notify();
+    }
+
+    /// Return one vector group (translation, rotation or scale) of the
+    /// selection to its default.
+    pub fn reset_transform_group(
+        &mut self,
+        group: TransformGroup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = format!("{:.3}", group.default_value());
+        for input in self.transform_inputs.group(group).iter() {
+            input.update(cx, |input, cx| input.set_value(value.clone(), window, cx));
+        }
+        self.apply_transform_inputs(window, cx);
+    }
+
+    /// World-space position of `bone_id`'s joint at the playhead.
+    pub fn world_position(&self, bone_id: &str) -> Option<Vec3> {
+        core::bone_world_transform(&self.skeleton, &self.animation, bone_id, self.playback.time)
+            .map(|m| m.transform_point(Vec3::ZERO))
+    }
+
+    /// Save, logging a failure instead of returning it (button / shortcut handlers).
+    pub fn save_and_report(&mut self, cx: &mut Context<Self>) {
+        if let Err(err) = self.save() {
+            log::error!("Failed to save skeletal animation asset: {err}");
+        }
         cx.notify();
     }
 

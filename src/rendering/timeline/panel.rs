@@ -140,13 +140,20 @@ impl TimelinePanel {
         size: (f32, f32),
     ) -> Scene<'a> {
         let marquee = match &self.drag {
-            DragState::Marquee { start, current, .. } => Some(Marquee { a: *start, b: *current }),
+            DragState::Marquee { start, current, .. } => Some(Marquee {
+                a: *start,
+                b: *current,
+            }),
             _ => None,
         };
         let drag_guide = match &self.drag {
-            DragState::Keys { drag, anchor_time, delta_frames, .. } if drag.moved => {
-                Some(anchor_time + *delta_frames as f32 / editor.animation.fps_clamped())
-                    .map(|t| t.max(0.0))
+            DragState::Keys {
+                drag,
+                anchor_time,
+                delta_frames,
+                ..
+            } if drag.moved => {
+                Some(anchor_time + *delta_frames as f32 / editor.animation.fps_clamped()).map(|t| t.max(0.0))
             }
             _ => None,
         };
@@ -191,7 +198,9 @@ impl TimelinePanel {
     }
 
     pub(super) fn fit_to_range(&mut self, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let (start, end) = {
             let e = editor.read(cx);
             (
@@ -204,7 +213,9 @@ impl TimelinePanel {
     }
 
     fn scrub(&mut self, x: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let time = self.view.x_to_time(x);
         let snapped = self.snapped(editor.read(cx), time);
         editor.update(cx, |editor, cx| editor.seek(snapped, window, cx));
@@ -218,7 +229,9 @@ impl TimelinePanel {
         let (x, y) = self.local(event.position);
         match event.button {
             MouseButton::Middle => {
-                self.drag = DragState::Pan { last_x: event.position.x.as_f32() };
+                self.drag = DragState::Pan {
+                    last_x: event.position.x.as_f32(),
+                };
             }
             MouseButton::Left => self.left_down(x, y, event.modifiers, window, cx),
             _ => {}
@@ -226,7 +239,9 @@ impl TimelinePanel {
     }
 
     fn left_down(&mut self, x: f32, y: f32, mods: Modifiers, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let (hit, thumb, bone_for_track) = {
             let e = editor.read(cx);
             let rows = self.visible_rows(e);
@@ -302,16 +317,28 @@ impl TimelinePanel {
         cx: &mut Context<Self>,
     ) {
         let e = editor.read(cx);
-        let Some(drag) = e.begin_key_drag(anchor.clone()) else { return };
+        let Some(drag) = e.begin_key_drag(anchor.clone()) else {
+            return;
+        };
         let anchor_time = e.key_drag_anchor_time(&drag);
         let grab_dt = self.view.x_to_time(x) - anchor_time;
-        self.drag = DragState::Keys { drag, anchor_time, grab_dt, clicked: anchor, delta_frames: 0 };
+        self.drag = DragState::Keys {
+            drag,
+            anchor_time,
+            grab_dt,
+            clicked: anchor,
+            delta_frames: 0,
+        };
         cx.notify();
     }
 
     fn drag_scrollbar(&mut self, x: f32, cx: &mut Context<Self>) {
-        let DragState::Scrollbar { grab } = self.drag else { return };
-        let Some(editor) = self.editor.upgrade() else { return };
+        let DragState::Scrollbar { grab } = self.drag else {
+            return;
+        };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let scroll = {
             let e = editor.read(cx);
             let rows = self.visible_rows(e);
@@ -334,7 +361,9 @@ impl TimelinePanel {
         match &mut self.drag {
             DragState::None => {
                 self.pointer = Some((x, y));
-                let Some(editor) = self.editor.upgrade() else { return };
+                let Some(editor) = self.editor.upgrade() else {
+                    return;
+                };
                 let hover = {
                     let e = editor.read(cx);
                     let rows = self.visible_rows(e);
@@ -384,10 +413,19 @@ impl TimelinePanel {
     }
 
     fn drag_keys(&mut self, x: f32, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let mouse_time = self.view.x_to_time(x);
         let snap = self.snap;
-        let DragState::Keys { drag, anchor_time, grab_dt, delta_frames, .. } = &mut self.drag else {
+        let DragState::Keys {
+            drag,
+            anchor_time,
+            grab_dt,
+            delta_frames,
+            ..
+        } = &mut self.drag
+        else {
             return;
         };
         let mut target = mouse_time - *grab_dt;
@@ -431,19 +469,23 @@ impl TimelinePanel {
                     });
                 }
             }
-            DragState::Marquee { start, current, additive, row_click } => {
+            DragState::Marquee {
+                start,
+                current,
+                additive,
+                row_click,
+            } => {
                 let dragged = (current.0 - start.0).abs() > 3.0 || (current.1 - start.1).abs() > 3.0;
                 if dragged {
                     let keys = {
                         let e = editor.read(cx);
                         let rows = self.visible_rows(e);
-                        let scene =
-                            self.scene(e, &rows, (self.canvas_size.width, self.canvas_size.height));
-                        scene.keys_in_rect(
-                            Marquee { a: start, b: current }.rect(),
-                        )
+                        let scene = self.scene(e, &rows, (self.canvas_size.width, self.canvas_size.height));
+                        scene.keys_in_rect(Marquee { a: start, b: current }.rect())
                     };
-                    editor.update(cx, |e, cx| e.set_selected_keyframes(keys, additive || mods.shift, window, cx));
+                    editor.update(cx, |e, cx| {
+                        e.set_selected_keyframes(keys, additive || mods.shift, window, cx)
+                    });
                 } else {
                     editor.update(cx, |e, cx| {
                         if !(additive || mods.shift) {
@@ -465,7 +507,9 @@ impl TimelinePanel {
             ScrollDelta::Lines(p) => (p.x, p.y, false),
             ScrollDelta::Pixels(p) => (p.x.as_f32(), p.y.as_f32(), true),
         };
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let row_count = self.visible_rows(editor.read(cx)).len();
         let step = if pixels { 1.0 } else { 16.0 };
 
@@ -491,7 +535,9 @@ impl TimelinePanel {
     // ── Keyboard ───────────────────────────────────────────────────────────
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let mods = event.keystroke.modifiers;
         let secondary = mods.secondary();
         let step = if mods.shift { 10 } else { 1 };
@@ -591,7 +637,13 @@ impl TimelinePanel {
         }
 
         // Key drag readout.
-        if let DragState::Keys { drag, anchor_time, delta_frames, .. } = &self.drag {
+        if let DragState::Keys {
+            drag,
+            anchor_time,
+            delta_frames,
+            ..
+        } = &self.drag
+        {
             if drag.moved {
                 let t = (anchor_time + *delta_frames as f32 / fps).max(0.0);
                 let x = self.view.time_to_x(t);
@@ -611,7 +663,10 @@ impl TimelinePanel {
                         .text_size(px(10.5))
                         .font_family(MONO)
                         .text_color(theme.warning)
-                        .child(format!("{sign}{delta_frames}f  →  frame {}", editor.animation.time_to_frame(t)))
+                        .child(format!(
+                            "{sign}{delta_frames}f  →  frame {}",
+                            editor.animation.time_to_frame(t)
+                        ))
                         .into_any_element(),
                 );
             }
@@ -666,7 +721,10 @@ impl TimelinePanel {
         // Empty state.
         if rows.is_empty() {
             let (title, hint) = if editor.animation.tracks.is_empty() {
-                ("No animation tracks", "Select a bone and press K to add a keyframe")
+                (
+                    "No animation tracks",
+                    "Select a bone and press K to add a keyframe",
+                )
             } else {
                 ("No tracks to show", "The selected-bone filter hides every track")
             };
@@ -775,14 +833,21 @@ impl Render for TimelinePanel {
                 },
                 move |_bounds, _pre, _window, cx| {
                     paint.update(cx, |panel, cx| {
-                        let Some(editor) = panel.editor.upgrade() else { return };
+                        let Some(editor) = panel.editor.upgrade() else {
+                            return;
+                        };
                         let Some(ref surface) = panel.surface else { return };
                         if surface.is_resize_pending() {
                             return;
                         }
-                        let Some((view, (w, h))) = surface.back_view_with_size() else { return };
+                        let Some((view, (w, h))) = surface.back_view_with_size() else {
+                            return;
+                        };
 
-                        let size = (panel.canvas_size.width.max(1.0), panel.canvas_size.height.max(1.0));
+                        let size = (
+                            panel.canvas_size.width.max(1.0),
+                            panel.canvas_size.height.max(1.0),
+                        );
                         let rects = {
                             let e = editor.read(cx);
                             let rows = panel.visible_rows(e);
@@ -795,11 +860,14 @@ impl Render for TimelinePanel {
                         };
                         let clear = panel.palette.background;
                         let Some(ref surface) = panel.surface else { return };
-                        let (device, queue, fmt) =
-                            (surface.device().clone(), surface.queue().clone(), surface.format());
-                        panel.renderer.render_frame(
-                            &device, &queue, &view, w, h, fmt, &uniforms, clear, &rects,
+                        let (device, queue, fmt) = (
+                            surface.device().clone(),
+                            surface.queue().clone(),
+                            surface.format(),
                         );
+                        panel
+                            .renderer
+                            .render_frame(&device, &queue, &view, w, h, fmt, &uniforms, clear, &rects);
                         drop(view);
                         if let Some(ref surface) = panel.surface {
                             surface.swap_buffers();
@@ -821,12 +889,30 @@ impl Render for TimelinePanel {
             .relative()
             .overflow_hidden()
             .track_focus(&self.focus_handle)
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, w, cx| this.on_mouse_down(e, w, cx)))
-            .on_mouse_down(MouseButton::Middle, cx.listener(|this, e: &MouseDownEvent, w, cx| this.on_mouse_down(e, w, cx)))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)))
-            .on_mouse_up(MouseButton::Middle, cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)))
-            .on_mouse_up_out(MouseButton::Middle, cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, e: &MouseDownEvent, w, cx| this.on_mouse_down(e, w, cx)),
+            )
+            .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener(|this, e: &MouseDownEvent, w, cx| this.on_mouse_down(e, w, cx)),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)),
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Middle,
+                cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)),
+            )
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, w, cx| this.on_mouse_move(e, w, cx)))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _w, cx| this.on_scroll(e, cx)))
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, w, cx| this.on_key_down(e, w, cx)))
@@ -857,7 +943,9 @@ fn v_flex_root(theme: &ui::Theme) -> Div {
 impl TimelinePanel {
     /// Create the toolbar inputs and wire edits back to the editor.
     fn init_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let (start, end, frame) = {
             let e = editor.read(cx);
             (e.play_range.0, e.play_range.1, e.current_frame())
@@ -873,15 +961,19 @@ impl TimelinePanel {
         macro_rules! range_input {
             ($input:expr, $setter:ident) => {{
                 let ew = editor_weak.clone();
-                subs.push(cx.subscribe_in(&$input, window, move |_this, input, event: &InputEvent, _w, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        if let (Ok(value), Some(editor)) =
-                            (input.read(cx).value().trim().parse::<i32>(), ew.upgrade())
-                        {
-                            editor.update(cx, |e, cx| e.$setter(value, cx));
+                subs.push(cx.subscribe_in(
+                    &$input,
+                    window,
+                    move |_this, input, event: &InputEvent, _w, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            if let (Ok(value), Some(editor)) =
+                                (input.read(cx).value().trim().parse::<i32>(), ew.upgrade())
+                            {
+                                editor.update(cx, |e, cx| e.$setter(value, cx));
+                            }
                         }
-                    }
-                }));
+                    },
+                ));
                 let ew = editor_weak.clone();
                 subs.push(cx.subscribe_in(
                     &$input,
@@ -906,29 +998,32 @@ impl TimelinePanel {
 
         // Current-frame field: typing a number jumps the playhead.
         let ew = editor_weak.clone();
-        subs.push(cx.subscribe_in(&frame_input, window, move |_this, input, event: &InputEvent, window, cx| {
-            if matches!(event, InputEvent::Change) {
-                if let (Ok(value), Some(editor)) =
-                    (input.read(cx).value().trim().parse::<i32>(), ew.upgrade())
-                {
-                    editor.update(cx, |e, cx| {
-                        if e.current_frame() != value {
-                            e.goto_frame(value, window, cx);
-                        }
-                    });
+        subs.push(cx.subscribe_in(
+            &frame_input,
+            window,
+            move |_this, input, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    if let (Ok(value), Some(editor)) =
+                        (input.read(cx).value().trim().parse::<i32>(), ew.upgrade())
+                    {
+                        editor.update(cx, |e, cx| {
+                            if e.current_frame() != value {
+                                e.goto_frame(value, window, cx);
+                            }
+                        });
+                    }
                 }
-            }
-        }));
+            },
+        ));
         let ew = editor_weak.clone();
         subs.push(cx.subscribe_in(
             &frame_input,
             window,
             move |_this, _input, event: &ui::input::NumberInputEvent, window, cx| {
-                let ui::input::NumberInputEvent::Step { action, fine } = event;
-                let step = if *fine { 1 } else { 1 };
+                let ui::input::NumberInputEvent::Step { action, .. } = event;
                 let delta = match action {
-                    ui::input::StepAction::Increment => step,
-                    ui::input::StepAction::Decrement => -step,
+                    ui::input::StepAction::Increment => 1,
+                    ui::input::StepAction::Decrement => -1,
                 };
                 if let Some(editor) = ew.upgrade() {
                     editor.update(cx, |e, cx| e.step_frame(delta, window, cx));
@@ -947,7 +1042,9 @@ impl TimelinePanel {
     /// Keep the toolbar fields in step with the editor unless being typed in.
     fn sync_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(inputs) = &self.inputs else { return };
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let (start, end, frame) = {
             let e = editor.read(cx);
             (e.play_range.0, e.play_range.1, e.current_frame())
@@ -961,4 +1058,3 @@ impl TimelinePanel {
         }
     }
 }
-

@@ -7,6 +7,24 @@ use ui::input::InputState;
 
 use crate::core::{Transform, Vec3};
 
+/// One of the three vector groups edited in the properties panel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TransformGroup {
+    Translation,
+    Rotation,
+    Scale,
+}
+
+impl TransformGroup {
+    /// Value every axis returns to on reset.
+    pub fn default_value(self) -> f32 {
+        match self {
+            TransformGroup::Scale => 1.0,
+            _ => 0.0,
+        }
+    }
+}
+
 pub struct TransformInputs {
     pub translation: [Entity<InputState>; 3],
     pub rotation: [Entity<InputState>; 3],
@@ -26,12 +44,27 @@ impl TransformInputs {
         }
     }
 
+    /// The three axis inputs of `group`.
+    pub fn group(&self, group: TransformGroup) -> &[Entity<InputState>; 3] {
+        match group {
+            TransformGroup::Translation => &self.translation,
+            TransformGroup::Rotation => &self.rotation,
+            TransformGroup::Scale => &self.scale,
+        }
+    }
+
     /// All nine input entities, in display order.
     pub fn all(&self) -> [&Entity<InputState>; 9] {
         [
-            &self.translation[0], &self.translation[1], &self.translation[2],
-            &self.rotation[0], &self.rotation[1], &self.rotation[2],
-            &self.scale[0], &self.scale[1], &self.scale[2],
+            &self.translation[0],
+            &self.translation[1],
+            &self.translation[2],
+            &self.rotation[0],
+            &self.rotation[1],
+            &self.rotation[2],
+            &self.scale[0],
+            &self.scale[1],
+            &self.scale[2],
         ]
     }
 

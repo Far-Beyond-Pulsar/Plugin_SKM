@@ -14,17 +14,17 @@ mod shader_tests {
     /// is a panic. Validate every shader with the same front end here.
     #[test]
     fn every_shader_validates() {
-        for (name, source) in [
-            ("timeline", include_str!("timeline/shaders/timeline.wgsl")),
-            ("scene", include_str!("viewport/shaders/scene.wgsl")),
-            ("gizmo", include_str!("viewport/shaders/gizmo.wgsl")),
-            ("resolve", include_str!("viewport/shaders/resolve.wgsl")),
-        ] {
-            let module = naga::front::wgsl::parse_str(source)
-                .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(source)));
+        let mut sources: Vec<(&str, String)> = vec![(
+            "timeline",
+            include_str!("timeline/shaders/timeline.wgsl").to_string(),
+        )];
+        sources.extend(super::viewport::shaders::all());
+        for (name, source) in sources {
+            let module = naga::front::wgsl::parse_str(&source)
+                .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
             Validator::new(ValidationFlags::all(), Capabilities::all())
                 .validate(&module)
-                .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(source)));
+                .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
         }
     }
 }

@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
@@ -152,15 +152,19 @@ impl Mat4 {
         )
     }
 
-    /// Right-handed perspective projection (WGPU clip space: depth 0..1).
+    /// Right-handed perspective projection for WGPU clip space (depth 0..1).
+    ///
+    /// Matches [`Mat4::look_at`], where the camera looks down view-space -Z:
+    /// a point `d` in front of the camera has `w = d`, and depth runs from 0 at
+    /// `near` to 1 at `far`.
     pub fn perspective(fov_y_deg: f32, aspect: f32, near: f32, far: f32) -> Mat4 {
         let f = 1.0 / (fov_y_deg.to_radians() * 0.5).tan();
-        let nf_range = far - near;
+        let range = near - far;
         Mat4([
             f / aspect, 0.0, 0.0, 0.0,
             0.0, f, 0.0, 0.0,
-            0.0, 0.0, far / nf_range, 1.0,
-            0.0, 0.0, -(far * near) / nf_range, 0.0,
+            0.0, 0.0, far / range, -1.0,
+            0.0, 0.0, (far * near) / range, 0.0,
         ])
     }
 
@@ -268,6 +272,48 @@ impl Transform {
             translation: self.translation.lerp(other.translation, t),
             rotation: self.rotation.lerp(other.rotation, t),
             scale: self.scale.lerp(other.scale, t),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn points_in_front_of_the_camera_project_inside_the_depth_range() {
+        let eye = Vec3::new(2.0, 1.5, 3.0);
+        let target = Vec3::new(0.0, 1.0, 0.0);
+        let view = Mat4::look_at(eye, target, Vec3::new(0.0, 1.0, 0.0));
+        let proj = Mat4::perspective(45.0, 1.6, 0.05, 100.0);
+        let vp = proj.mul(&view);
+
+        let dist = target.sub(eye).length();
+        let (x, y, z, w) = vp.transform_clip(target);
+        assert!((w - dist).abs() < 1e-3, "w should be the distance in front, got {w}");
+        assert!(x.abs() < 1e-4 && y.abs() < 1e-4, "the target is centered");
+        assert!(z / w > 0.0 && z / w < 1.0, "depth {} out of range", z / w);
+
+        // Near and far planes land on 0 and 1.
+        let fwd = target.sub(eye).normalize();
+        let (_, _, zn, wn) = vp.transform_clip(eye.add(fwd.scale(0.05)));
+        let (_, _, zf, wf) = vp.transform_clip(eye.add(fwd.scale(100.0)));
+        assert!((zn / wn).abs() < 1e-3);
+        assert!((zf / wf - 1.0).abs() < 1e-3);
+
+        // Behind the camera has non-positive w.
+        let (_, _, _, wb) = vp.transform_clip(eye.sub(fwd.scale(1.0)));
+        assert!(wb < 0.0);
+    }
+
+    #[test]
+    fn inverse_round_trips() {
+        let view = Mat4::look_at(Vec3::new(2.0, 1.5, 3.0), Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0));
+        let vp = Mat4::perspective(45.0, 1.3, 0.05, 200.0).mul(&view);
+        let id = vp.mul(&vp.inverse());
+        for (i, v) in id.0.iter().enumerate() {
+            let want = if i % 5 == 0 { 1.0 } else { 0.0 };
+            assert!((v - want).abs() < 1e-3, "element {i} = {v}");
         }
     }
 }

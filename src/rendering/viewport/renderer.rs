@@ -1,11 +1,22 @@
-//! `ViewportRenderer` — owns the WGPU pipelines that draw the 3D bone scene:
-//! a ground grid, bone segments, and joint markers, all depth-tested against
-//! a depth buffer that is recreated whenever the surface is resized.
+//! `ViewportRenderer` — owns the WGPU pipelines that draw the 3D bone scene.
+//!
+//! A frame is built from these passes:
+//!
+//! 1. **Scene** (jittered, offscreen HDR color + depth): gradient backdrop,
+//!    lit bone meshes, an x-ray ghost of occluded bone parts, onion-skin
+//!    poses, anti-aliased ribbon lines, the analytic ground grid, and joint
+//!    markers.
+//! 2. **Resolve**: temporal anti-aliasing against last frame's output, written
+//!    to the swapchain and the history texture.
+//! 3. **Gizmo**: the orientation widget, drawn unjittered on top.
+
+use bytemuck::Pod;
 
 use crate::core::Mat4;
 
+use super::shaders;
 use super::types::{
-    GizmoBubbleInstance, JointInstance, LineVertex, MeshVertex, ResolveUniforms, ViewportUniforms,
+    GizmoBubbleInstance, JointInstance, MeshVertex, ResolveUniforms, RibbonSegment, ViewportUniforms,
 };
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -14,19 +25,15 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// Internal scene render resolution as a fraction of the output size.
-/// `1.0` runs TAA at native resolution; values below `1.0` additionally
-/// upscale (the resolve pass's bilinear `scene_color` sample does the
-/// upscaling).
 const RENDER_SCALE: f32 = 1.0;
 
-/// Fraction of the previous frame's resolved color kept when blending with
-/// the current frame.
-const HISTORY_BLEND: f32 = 0.9;
+/// Weight of the reprojected history sample in the TAA resolve.
+const HISTORY_BLEND: f32 = 0.85;
 
 /// Halton(2,3) sequence, mapped to `[-0.5, 0.5)` sub-pixel offsets, used to
 /// jitter the camera projection for TAA sampling.
 const JITTER_SAMPLES: [[f32; 2]; 8] = [
-    [0.5 - 0.5, 0.333333 - 0.5],
+    [0.0, 0.333333 - 0.5],
     [0.25 - 0.5, 0.666667 - 0.5],
     [0.75 - 0.5, 0.111111 - 0.5],
     [0.125 - 0.5, 0.444444 - 0.5],
@@ -36,49 +43,95 @@ const JITTER_SAMPLES: [[f32; 2]; 8] = [
     [0.0625 - 0.5, 0.888889 - 0.5],
 ];
 
-struct LineState {
-    pipeline: wgpu::RenderPipeline,
-    uni_buf: wgpu::Buffer,
-    uni_bg: wgpu::BindGroup,
-    vert_buf: wgpu::Buffer,
-    vert_cap: u64,
+/// Everything one frame draws.
+pub struct SceneFrame<'a> {
+    pub uniforms: &'a ViewportUniforms,
+    pub mesh: &'a [MeshVertex],
+    /// Translucent onion-skin geometry.
+    pub ghost: &'a [MeshVertex],
+    pub ribbons: &'a [RibbonSegment],
+    pub joints: &'a [JointInstance],
+    pub gizmo_ribbons: &'a [RibbonSegment],
+    /// Backdrop disc first, then the bubbles back to front.
+    pub gizmo_bubbles: &'a [GizmoBubbleInstance],
+    pub show_grid: bool,
+    pub xray: bool,
 }
 
-struct JointState {
-    pipeline: wgpu::RenderPipeline,
-    uni_buf: wgpu::Buffer,
-    uni_bg: wgpu::BindGroup,
-    inst_buf: wgpu::Buffer,
-    inst_cap: u64,
+/// A GPU buffer that grows to fit what's uploaded to it.
+struct GrowBuf {
+    buf: wgpu::Buffer,
+    cap: u64,
+    label: &'static str,
+    usage: wgpu::BufferUsages,
 }
 
-struct MeshState {
-    pipeline: wgpu::RenderPipeline,
-    uni_buf: wgpu::Buffer,
-    uni_bg: wgpu::BindGroup,
-    vert_buf: wgpu::Buffer,
-    vert_cap: u64,
+impl GrowBuf {
+    fn new(device: &wgpu::Device, label: &'static str, usage: wgpu::BufferUsages, init: u64) -> Self {
+        let usage = usage | wgpu::BufferUsages::COPY_DST;
+        Self {
+            buf: Self::alloc(device, label, usage, init),
+            cap: init,
+            label,
+            usage,
+        }
+    }
+
+    fn alloc(
+        device: &wgpu::Device,
+        label: &'static str,
+        usage: wgpu::BufferUsages,
+        size: u64,
+    ) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage,
+            mapped_at_creation: false,
+        })
+    }
+
+    /// Upload `data`, reallocating if it doesn't fit. Returns the item count.
+    fn upload<T: Pod>(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[T]) -> u32 {
+        let bytes = bytemuck::cast_slice::<T, u8>(data);
+        let needed = bytes.len() as u64;
+        if needed > self.cap {
+            self.cap = (needed * 2).max(256);
+            self.buf = Self::alloc(device, self.label, self.usage, self.cap);
+        }
+        if !bytes.is_empty() {
+            queue.write_buffer(&self.buf, 0, bytes);
+        }
+        data.len() as u32
+    }
 }
 
-/// Orientation gizmo: axis spokes (lines) + colored end bubbles, drawn into a
-/// small square viewport in the corner of the frame.
-struct GizmoState {
-    axis_pipeline: wgpu::RenderPipeline,
-    bubble_pipeline: wgpu::RenderPipeline,
-    uni_buf: wgpu::Buffer,
-    uni_bg: wgpu::BindGroup,
-    axis_vert_buf: wgpu::Buffer,
-    axis_vert_cap: u64,
-    bubble_inst_buf: wgpu::Buffer,
-    bubble_inst_cap: u64,
-    bg_inst_buf: wgpu::Buffer,
-    bg_inst_cap: u64,
+/// Uniform buffer plus the bind group that exposes it to the shaders.
+struct UniformSet {
+    buf: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
 }
 
-struct DepthState {
-    view: wgpu::TextureView,
-    width: u32,
-    height: u32,
+struct Pipelines {
+    sky: wgpu::RenderPipeline,
+    grid: wgpu::RenderPipeline,
+    mesh: wgpu::RenderPipeline,
+    xray: wgpu::RenderPipeline,
+    ghost: wgpu::RenderPipeline,
+    ribbon: wgpu::RenderPipeline,
+    joints: wgpu::RenderPipeline,
+    gizmo_ribbon: wgpu::RenderPipeline,
+    gizmo_bubble: wgpu::RenderPipeline,
+    scene_uniforms: UniformSet,
+    gizmo_uniforms: UniformSet,
+    mesh_buf: GrowBuf,
+    ghost_buf: GrowBuf,
+    ribbon_buf: GrowBuf,
+    joint_buf: GrowBuf,
+    gizmo_ribbon_buf: GrowBuf,
+    gizmo_bubble_buf: GrowBuf,
+    resolve: ResolveState,
+    fmt: wgpu::TextureFormat,
 }
 
 /// Offscreen targets for the TAA/upscale pipeline: the jittered scene is
@@ -102,13 +155,8 @@ struct ResolveState {
 }
 
 pub struct ViewportRenderer {
-    lines: Option<LineState>,
-    joints: Option<JointState>,
-    mesh: Option<MeshState>,
-    gizmo: Option<GizmoState>,
-    depth: Option<DepthState>,
+    pipelines: Option<Pipelines>,
     offscreen: Option<OffscreenState>,
-    resolve: Option<ResolveState>,
     /// Index into `OffscreenState::history` that was written *last* frame,
     /// i.e. the one to read from this frame.
     history_idx: usize,
@@ -123,13 +171,8 @@ pub struct ViewportRenderer {
 impl ViewportRenderer {
     pub fn new() -> Self {
         Self {
-            lines: None,
-            joints: None,
-            mesh: None,
-            gizmo: None,
-            depth: None,
+            pipelines: None,
             offscreen: None,
-            resolve: None,
             history_idx: 0,
             history_valid: false,
             prev_view_proj: Mat4::IDENTITY,
@@ -137,10 +180,7 @@ impl ViewportRenderer {
         }
     }
 
-    /// Called every frame. `lines` covers both the ground grid and bone
-    /// segments; `joints` is one billboard per bone; `mesh` is the shaded
-    /// octahedral bone geometry. `gizmo_axes` and `gizmo_bubbles` are
-    /// pre-projected NDC geometry for the orientation gizmo in the corner.
+    #[allow(clippy::too_many_arguments)]
     pub fn render_frame(
         &mut self,
         device: &wgpu::Device,
@@ -149,43 +189,45 @@ impl ViewportRenderer {
         w: u32,
         h: u32,
         fmt: wgpu::TextureFormat,
-        uniforms: &ViewportUniforms,
-        lines: &[LineVertex],
-        joints: &[JointInstance],
-        mesh: &[MeshVertex],
-        gizmo_axes: &[LineVertex],
-        gizmo_bubbles: &[GizmoBubbleInstance],
-        gizmo_background: &[GizmoBubbleInstance],
+        frame: &SceneFrame,
     ) {
-        if self.lines.is_none() {
-            // Lines/mesh/joints render into the offscreen scene target (see
-            // Pass 1 below), not the swapchain, so their pipelines must match
-            // `OFFSCREEN_FORMAT` rather than the swapchain's `fmt`.
-            self.lines = Some(Self::create_lines(device, OFFSCREEN_FORMAT));
-            self.joints = Some(Self::create_joints(device, OFFSCREEN_FORMAT));
-            self.mesh = Some(Self::create_mesh(device, OFFSCREEN_FORMAT));
-            self.gizmo = Some(Self::create_gizmo(device, fmt));
-            self.resolve = Some(Self::create_resolve(device, fmt));
+        if self.pipelines.as_ref().is_none_or(|p| p.fmt != fmt) {
+            self.pipelines = Some(Pipelines::new(device, fmt));
         }
-        self.ensure_depth(device, w, h);
         self.ensure_offscreen(device, w, h);
 
-        let off = self.offscreen.as_ref().unwrap();
-        let render_w = off.render_w;
-        let render_h = off.render_h;
+        let (render_w, render_h) = {
+            let off = self.offscreen.as_ref().unwrap();
+            (off.render_w, off.render_h)
+        };
 
-        // Sub-pixel jitter for this frame, in NDC units (so it can be added
-        // directly to clip-space x/y after multiplying by clip.w).
+        // Sub-pixel jitter for this frame, in NDC units.
         let sample = JITTER_SAMPLES[(self.frame_index as usize) % JITTER_SAMPLES.len()];
         let jitter = [
             sample[0] * 2.0 / render_w as f32,
             sample[1] * 2.0 / render_h as f32,
         ];
 
-        let mut scene_uniforms = *uniforms;
+        let mut scene_uniforms = *frame.uniforms;
         scene_uniforms.jitter = jitter;
         scene_uniforms.viewport = [render_w as f32, render_h as f32];
-        let uni_bytes = bytemuck::bytes_of(&scene_uniforms);
+
+        // The gizmo draws in pre-projected NDC with no camera.
+        let mut gizmo_uniforms = *frame.uniforms;
+        gizmo_uniforms.view_proj = Mat4::IDENTITY.0;
+        gizmo_uniforms.inv_view_proj = Mat4::IDENTITY.0;
+        gizmo_uniforms.jitter = [0.0, 0.0];
+        gizmo_uniforms.viewport = [w as f32, h as f32];
+
+        let p = self.pipelines.as_mut().unwrap();
+        queue.write_buffer(&p.scene_uniforms.buf, 0, bytemuck::bytes_of(&scene_uniforms));
+        queue.write_buffer(&p.gizmo_uniforms.buf, 0, bytemuck::bytes_of(&gizmo_uniforms));
+        let mesh_n = p.mesh_buf.upload(device, queue, frame.mesh);
+        let ghost_n = p.ghost_buf.upload(device, queue, frame.ghost);
+        let ribbon_n = p.ribbon_buf.upload(device, queue, frame.ribbons);
+        let joint_n = p.joint_buf.upload(device, queue, frame.joints);
+        let gizmo_ribbon_n = p.gizmo_ribbon_buf.upload(device, queue, frame.gizmo_ribbons);
+        let gizmo_bubble_n = p.gizmo_bubble_buf.upload(device, queue, frame.gizmo_bubbles);
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("viewport_encoder"),
@@ -201,12 +243,7 @@ impl ViewportRenderer {
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.06,
-                            g: 0.065,
-                            b: 0.075,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -222,75 +259,49 @@ impl ViewportRenderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            pass.set_bind_group(0, &p.scene_uniforms.bind_group, &[]);
 
-            if !lines.is_empty() {
-                if let Some(ls) = &mut self.lines {
-                    queue.write_buffer(&ls.uni_buf, 0, uni_bytes);
-                    let bytes = bytemuck::cast_slice(lines);
-                    Self::ensure_buf(
-                        device,
-                        &mut ls.vert_buf,
-                        &mut ls.vert_cap,
-                        bytes,
-                        wgpu::BufferUsages::VERTEX,
-                    );
-                    queue.write_buffer(&ls.vert_buf, 0, bytes);
-                    pass.set_pipeline(&ls.pipeline);
-                    pass.set_bind_group(0, &ls.uni_bg, &[]);
-                    pass.set_vertex_buffer(0, ls.vert_buf.slice(..));
-                    pass.draw(0..lines.len() as u32, 0..1);
+            pass.set_pipeline(&p.sky);
+            pass.draw(0..3, 0..1);
+
+            if mesh_n > 0 {
+                pass.set_pipeline(&p.mesh);
+                pass.set_vertex_buffer(0, p.mesh_buf.buf.slice(..));
+                pass.draw(0..mesh_n, 0..1);
+                if frame.xray {
+                    pass.set_pipeline(&p.xray);
+                    pass.draw(0..mesh_n, 0..1);
                 }
             }
-
-            if !mesh.is_empty() {
-                if let Some(ms) = &mut self.mesh {
-                    queue.write_buffer(&ms.uni_buf, 0, uni_bytes);
-                    let bytes = bytemuck::cast_slice(mesh);
-                    Self::ensure_buf(
-                        device,
-                        &mut ms.vert_buf,
-                        &mut ms.vert_cap,
-                        bytes,
-                        wgpu::BufferUsages::VERTEX,
-                    );
-                    queue.write_buffer(&ms.vert_buf, 0, bytes);
-                    pass.set_pipeline(&ms.pipeline);
-                    pass.set_bind_group(0, &ms.uni_bg, &[]);
-                    pass.set_vertex_buffer(0, ms.vert_buf.slice(..));
-                    pass.draw(0..mesh.len() as u32, 0..1);
-                }
+            if ghost_n > 0 {
+                pass.set_pipeline(&p.ghost);
+                pass.set_vertex_buffer(0, p.ghost_buf.buf.slice(..));
+                pass.draw(0..ghost_n, 0..1);
             }
-
-            if !joints.is_empty() {
-                if let Some(js) = &mut self.joints {
-                    queue.write_buffer(&js.uni_buf, 0, uni_bytes);
-                    let bytes = bytemuck::cast_slice(joints);
-                    Self::ensure_buf(
-                        device,
-                        &mut js.inst_buf,
-                        &mut js.inst_cap,
-                        bytes,
-                        wgpu::BufferUsages::VERTEX,
-                    );
-                    queue.write_buffer(&js.inst_buf, 0, bytes);
-                    pass.set_pipeline(&js.pipeline);
-                    pass.set_bind_group(0, &js.uni_bg, &[]);
-                    pass.set_vertex_buffer(0, js.inst_buf.slice(..));
-                    pass.draw(0..6, 0..joints.len() as u32);
-                }
+            if ribbon_n > 0 {
+                pass.set_pipeline(&p.ribbon);
+                pass.set_vertex_buffer(0, p.ribbon_buf.buf.slice(..));
+                pass.draw(0..6, 0..ribbon_n);
+            }
+            if frame.show_grid {
+                pass.set_pipeline(&p.grid);
+                pass.draw(0..3, 0..1);
+            }
+            if joint_n > 0 {
+                pass.set_pipeline(&p.joints);
+                pass.set_vertex_buffer(0, p.joint_buf.buf.slice(..));
+                pass.draw(0..6, 0..joint_n);
             }
         }
 
         // ── Pass 2: TAA/upscale resolve -> swapchain + history ──────────────
         {
             let off = self.offscreen.as_ref().unwrap();
-            let resolve = self.resolve.as_ref().unwrap();
             let read_idx = 1 - self.history_idx;
             let write_idx = self.history_idx;
 
-            let inv_view_proj = Mat4(uniforms.view_proj).inverse();
             let resolve_uniforms = ResolveUniforms {
-                inv_view_proj: inv_view_proj.0,
+                inv_view_proj: Mat4(frame.uniforms.view_proj).inverse().0,
                 prev_view_proj: self.prev_view_proj.0,
                 render_size: [off.render_w as f32, off.render_h as f32],
                 output_size: [off.output_w as f32, off.output_h as f32],
@@ -298,9 +309,8 @@ impl ViewportRenderer {
                 history_valid: if self.history_valid { 1.0 } else { 0.0 },
                 _pad: [0.0, 0.0],
             };
-            queue.write_buffer(&resolve.uni_buf, 0, bytemuck::bytes_of(&resolve_uniforms));
-
-            let bind_group = Self::resolve_bind_group(device, resolve, off, read_idx);
+            queue.write_buffer(&p.resolve.uni_buf, 0, bytemuck::bytes_of(&resolve_uniforms));
+            let bind_group = Self::resolve_bind_group(device, &p.resolve, off, read_idx);
 
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewport_resolve_pass"),
@@ -329,15 +339,13 @@ impl ViewportRenderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-
-            pass.set_pipeline(&resolve.pipeline);
+            pass.set_pipeline(&p.resolve.pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 
         // ── Pass 3: orientation gizmo -> swapchain (unjittered, on top) ─────
-        {
-            let depth_view = &self.depth.as_ref().unwrap().view;
+        if gizmo_ribbon_n > 0 || gizmo_bubble_n > 0 {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewport_gizmo_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -349,141 +357,42 @@ impl ViewportRenderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
-                    }),
-                    stencil_ops: None,
-                }),
+                depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            pass.set_bind_group(0, &p.gizmo_uniforms.bind_group, &[]);
 
-            // Orientation gizmo. Its vertex positions are pre-baked into NDC
-            // space (identity projection) and never jittered, so it stays
-            // crisp and stable on top of the resolved scene.
-            if let Some(gz) = &mut self.gizmo {
-                let gizmo_uniforms = ViewportUniforms {
-                    view_proj: Mat4::IDENTITY.0,
-                    viewport: [w as f32, h as f32],
-                    time: uniforms.time,
-                    _pad: 0.0,
-                    jitter: [0.0, 0.0],
-                    _pad2: [0.0, 0.0],
-                };
-                queue.write_buffer(&gz.uni_buf, 0, bytemuck::bytes_of(&gizmo_uniforms));
-
-                if !gizmo_background.is_empty() {
-                    let bytes = bytemuck::cast_slice(gizmo_background);
-                    Self::ensure_buf(
-                        device,
-                        &mut gz.bg_inst_buf,
-                        &mut gz.bg_inst_cap,
-                        bytes,
-                        wgpu::BufferUsages::VERTEX,
-                    );
-                    queue.write_buffer(&gz.bg_inst_buf, 0, bytes);
-                    pass.set_pipeline(&gz.bubble_pipeline);
-                    pass.set_bind_group(0, &gz.uni_bg, &[]);
-                    pass.set_vertex_buffer(0, gz.bg_inst_buf.slice(..));
-                    pass.draw(0..6, 0..gizmo_background.len() as u32);
-                }
-
-                if !gizmo_axes.is_empty() {
-                    let bytes = bytemuck::cast_slice(gizmo_axes);
-                    Self::ensure_buf(
-                        device,
-                        &mut gz.axis_vert_buf,
-                        &mut gz.axis_vert_cap,
-                        bytes,
-                        wgpu::BufferUsages::VERTEX,
-                    );
-                    queue.write_buffer(&gz.axis_vert_buf, 0, bytes);
-                    pass.set_pipeline(&gz.axis_pipeline);
-                    pass.set_bind_group(0, &gz.uni_bg, &[]);
-                    pass.set_vertex_buffer(0, gz.axis_vert_buf.slice(..));
-                    pass.draw(0..gizmo_axes.len() as u32, 0..1);
-                }
-
-                if !gizmo_bubbles.is_empty() {
-                    let bytes = bytemuck::cast_slice(gizmo_bubbles);
-                    Self::ensure_buf(
-                        device,
-                        &mut gz.bubble_inst_buf,
-                        &mut gz.bubble_inst_cap,
-                        bytes,
-                        wgpu::BufferUsages::VERTEX,
-                    );
-                    queue.write_buffer(&gz.bubble_inst_buf, 0, bytes);
-                    pass.set_pipeline(&gz.bubble_pipeline);
-                    pass.set_bind_group(0, &gz.uni_bg, &[]);
-                    pass.set_vertex_buffer(0, gz.bubble_inst_buf.slice(..));
-                    pass.draw(0..6, 0..gizmo_bubbles.len() as u32);
-                }
+            // Backdrop first (the first bubble), then spokes, then the rest,
+            // so spokes tuck under the end bubbles.
+            if gizmo_bubble_n > 0 {
+                pass.set_pipeline(&p.gizmo_bubble);
+                pass.set_vertex_buffer(0, p.gizmo_bubble_buf.buf.slice(..));
+                pass.draw(0..6, 0..1);
+            }
+            if gizmo_ribbon_n > 0 {
+                pass.set_pipeline(&p.gizmo_ribbon);
+                pass.set_vertex_buffer(0, p.gizmo_ribbon_buf.buf.slice(..));
+                pass.draw(0..6, 0..gizmo_ribbon_n);
+            }
+            if gizmo_bubble_n > 1 {
+                pass.set_pipeline(&p.gizmo_bubble);
+                pass.set_vertex_buffer(0, p.gizmo_bubble_buf.buf.slice(..));
+                pass.draw(0..6, 1..gizmo_bubble_n);
             }
         }
 
         queue.submit(std::iter::once(encoder.finish()));
 
-        self.prev_view_proj = Mat4(uniforms.view_proj);
+        self.prev_view_proj = Mat4(frame.uniforms.view_proj);
         self.history_valid = true;
         self.history_idx = 1 - self.history_idx;
         self.frame_index += 1;
     }
 
-    // ── helpers ────────────────────────────────────────────────────────────
+    // ── targets ────────────────────────────────────────────────────────────
 
-    fn ensure_buf(
-        device: &wgpu::Device,
-        buf: &mut wgpu::Buffer,
-        cap: &mut u64,
-        data: &[u8],
-        usage: wgpu::BufferUsages,
-    ) {
-        let needed = data.len() as u64;
-        if needed > *cap {
-            *cap = (needed * 2).max(256);
-            *buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: *cap,
-                usage: usage | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-        }
-    }
-
-    fn ensure_depth(&mut self, device: &wgpu::Device, w: u32, h: u32) {
-        if let Some(d) = &self.depth {
-            if d.width == w && d.height == h {
-                return;
-            }
-        }
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewport_depth"),
-            size: wgpu::Extent3d {
-                width: w.max(1),
-                height: h.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.depth = Some(DepthState {
-            view,
-            width: w,
-            height: h,
-        });
-    }
-
-    /// Creates a single-mip, single-layer 2D render target view.
     fn create_target(
         device: &wgpu::Device,
         label: &str,
@@ -510,13 +419,11 @@ impl ViewportRenderer {
     }
 
     /// (Re)creates the offscreen render-resolution scene targets and the
-    /// output-resolution TAA history pair, if the output size (or the
-    /// derived render resolution) has changed since the last frame.
+    /// output-resolution TAA history pair when the size changes.
     fn ensure_offscreen(&mut self, device: &wgpu::Device, w: u32, h: u32) {
         let render_w = ((w as f32 * RENDER_SCALE).round() as u32).max(1);
         let render_h = ((h as f32 * RENDER_SCALE).round() as u32).max(1);
-        let output_w = w.max(1);
-        let output_h = h.max(1);
+        let (output_w, output_h) = (w.max(1), h.max(1));
 
         if let Some(off) = &self.offscreen {
             if off.render_w == render_w
@@ -528,32 +435,42 @@ impl ViewportRenderer {
             }
         }
 
-        let target_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
-        let scene_color = Self::create_target(
-            device,
-            "viewport_scene_color",
-            render_w,
-            render_h,
-            OFFSCREEN_FORMAT,
-            target_usage,
-        );
-        let scene_depth = Self::create_target(
-            device,
-            "viewport_scene_depth",
-            render_w,
-            render_h,
-            DEPTH_FORMAT,
-            target_usage,
-        );
-        let history = [
-            Self::create_target(device, "viewport_history_0", output_w, output_h, OFFSCREEN_FORMAT, target_usage),
-            Self::create_target(device, "viewport_history_1", output_w, output_h, OFFSCREEN_FORMAT, target_usage),
-        ];
-
+        let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
         self.offscreen = Some(OffscreenState {
-            scene_color,
-            scene_depth,
-            history,
+            scene_color: Self::create_target(
+                device,
+                "viewport_scene_color",
+                render_w,
+                render_h,
+                OFFSCREEN_FORMAT,
+                usage,
+            ),
+            scene_depth: Self::create_target(
+                device,
+                "viewport_scene_depth",
+                render_w,
+                render_h,
+                DEPTH_FORMAT,
+                usage,
+            ),
+            history: [
+                Self::create_target(
+                    device,
+                    "viewport_history_0",
+                    output_w,
+                    output_h,
+                    OFFSCREEN_FORMAT,
+                    usage,
+                ),
+                Self::create_target(
+                    device,
+                    "viewport_history_1",
+                    output_w,
+                    output_h,
+                    OFFSCREEN_FORMAT,
+                    usage,
+                ),
+            ],
             render_w,
             render_h,
             output_w,
@@ -564,9 +481,6 @@ impl ViewportRenderer {
         self.history_valid = false;
     }
 
-    /// Builds the per-frame bind group for the resolve pass: the
-    /// just-rendered scene color/depth, plus last frame's history texture
-    /// (`history[read_idx]`) to reproject from.
     fn resolve_bind_group(
         device: &wgpu::Device,
         resolve: &ResolveState,
@@ -600,17 +514,333 @@ impl ViewportRenderer {
             ],
         })
     }
+}
 
-    /// Builds the fullscreen-triangle TAA/upscale resolve pipeline: it reads
-    /// the render-resolution scene color/depth and the previous frame's
-    /// history, and writes both the final (output-resolution) swapchain
-    /// image and the new history texture in one pass (MRT).
-    fn create_resolve(device: &wgpu::Device, fmt: wgpu::TextureFormat) -> ResolveState {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("viewport_resolve"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/resolve.wgsl").into()),
+// ── pipeline construction ──────────────────────────────────────────────────
+
+fn module(device: &wgpu::Device, label: &str, source: String) -> wgpu::ShaderModule {
+    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    })
+}
+
+fn depth_state(write: bool, compare: wgpu::CompareFunction) -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        format: DEPTH_FORMAT,
+        depth_write_enabled: Some(write),
+        depth_compare: Some(compare),
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    }
+}
+
+fn target(format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>) -> Option<wgpu::ColorTargetState> {
+    Some(wgpu::ColorTargetState {
+        format,
+        blend,
+        write_mask: wgpu::ColorWrites::ALL,
+    })
+}
+
+struct PipelineSpec<'a> {
+    label: &'a str,
+    layout: &'a wgpu::PipelineLayout,
+    shader: &'a wgpu::ShaderModule,
+    vs: &'a str,
+    fs: &'a str,
+    buffers: &'a [Option<wgpu::VertexBufferLayout<'a>>],
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+    depth: Option<wgpu::DepthStencilState>,
+}
+
+fn pipeline(device: &wgpu::Device, spec: PipelineSpec) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(spec.label),
+        layout: Some(spec.layout),
+        vertex: wgpu::VertexState {
+            module: spec.shader,
+            entry_point: Some(spec.vs),
+            buffers: spec.buffers,
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: spec.shader,
+            entry_point: Some(spec.fs),
+            targets: &[target(spec.format, spec.blend)],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: spec.depth,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+fn vertex_layout<'a>(
+    stride: usize,
+    step_mode: wgpu::VertexStepMode,
+    attributes: &'a [wgpu::VertexAttribute],
+) -> wgpu::VertexBufferLayout<'a> {
+    wgpu::VertexBufferLayout {
+        array_stride: stride as wgpu::BufferAddress,
+        step_mode,
+        attributes,
+    }
+}
+
+impl Pipelines {
+    fn new(device: &wgpu::Device, fmt: wgpu::TextureFormat) -> Self {
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("viewport_uni_bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
         });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("viewport_layout"),
+            bind_group_layouts: &[Some(&bgl)],
+            immediate_size: 0,
+        });
+        let uniform_set = |label: &str| {
+            let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: std::mem::size_of::<ViewportUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &bgl,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buf.as_entire_binding(),
+                }],
+            });
+            UniformSet { buf, bind_group }
+        };
 
+        let backdrop = module(device, "viewport_backdrop", shaders::backdrop());
+        let scene = module(device, "viewport_scene", shaders::scene());
+        let ribbon = module(device, "viewport_ribbon", shaders::ribbon());
+        let gizmo = module(device, "viewport_gizmo", shaders::gizmo());
+
+        use wgpu::CompareFunction as Cmp;
+        let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
+        let premul = Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING);
+
+        let mesh_attrs = wgpu::vertex_attr_array![
+            0 => Float32x3, // pos
+            1 => Float32x3, // normal
+            2 => Float32x4, // color
+            3 => Float32,   // glow
+        ];
+        let mesh_vbl = || {
+            vertex_layout(
+                std::mem::size_of::<MeshVertex>(),
+                wgpu::VertexStepMode::Vertex,
+                &mesh_attrs,
+            )
+        };
+        let mesh_pipeline = |label: &str, fs: &str, blend, depth| {
+            pipeline(
+                device,
+                PipelineSpec {
+                    label,
+                    layout: &layout,
+                    shader: &scene,
+                    vs: "vs_mesh",
+                    fs,
+                    buffers: &[Some(mesh_vbl())],
+                    format: OFFSCREEN_FORMAT,
+                    blend,
+                    depth: Some(depth),
+                },
+            )
+        };
+
+        let ribbon_attrs = wgpu::vertex_attr_array![
+            0 => Float32x3, // a
+            1 => Float32,   // width
+            2 => Float32x3, // b
+            3 => Float32,   // bias
+            4 => Float32x4, // color a
+            5 => Float32x4, // color b
+        ];
+        let ribbon_vbl = || {
+            vertex_layout(
+                std::mem::size_of::<RibbonSegment>(),
+                wgpu::VertexStepMode::Instance,
+                &ribbon_attrs,
+            )
+        };
+
+        let joint_attrs = wgpu::vertex_attr_array![
+            0 => Float32x3, // center
+            1 => Float32,   // size
+            2 => Float32x4, // color
+            3 => Float32,   // style
+        ];
+        let bubble_attrs = wgpu::vertex_attr_array![
+            0 => Float32x3, // center
+            1 => Float32,   // size
+            2 => Float32x4, // color
+            3 => Float32,   // letter
+            4 => Float32,   // kind
+        ];
+
+        let sky = pipeline(
+            device,
+            PipelineSpec {
+                label: "viewport_sky",
+                layout: &layout,
+                shader: &backdrop,
+                vs: "vs_fullscreen",
+                fs: "fs_sky",
+                buffers: &[],
+                format: OFFSCREEN_FORMAT,
+                blend: None,
+                depth: Some(depth_state(false, Cmp::Always)),
+            },
+        );
+        let grid = pipeline(
+            device,
+            PipelineSpec {
+                label: "viewport_grid",
+                layout: &layout,
+                shader: &backdrop,
+                vs: "vs_fullscreen",
+                fs: "fs_grid",
+                buffers: &[],
+                format: OFFSCREEN_FORMAT,
+                blend: premul,
+                depth: Some(depth_state(false, Cmp::Less)),
+            },
+        );
+        let mesh = mesh_pipeline("viewport_mesh", "fs_mesh", alpha, depth_state(true, Cmp::Less));
+        let xray = mesh_pipeline(
+            "viewport_xray",
+            "fs_xray",
+            alpha,
+            depth_state(false, Cmp::Greater),
+        );
+        let ghost = mesh_pipeline("viewport_ghost", "fs_ghost", alpha, depth_state(false, Cmp::Less));
+        let ribbon_pipeline = pipeline(
+            device,
+            PipelineSpec {
+                label: "viewport_ribbon",
+                layout: &layout,
+                shader: &ribbon,
+                vs: "vs_ribbon",
+                fs: "fs_ribbon",
+                buffers: &[Some(ribbon_vbl())],
+                format: OFFSCREEN_FORMAT,
+                blend: alpha,
+                depth: Some(depth_state(false, Cmp::Less)),
+            },
+        );
+        let joints = pipeline(
+            device,
+            PipelineSpec {
+                label: "viewport_joints",
+                layout: &layout,
+                shader: &scene,
+                vs: "vs_joint",
+                fs: "fs_joint",
+                buffers: &[Some(vertex_layout(
+                    std::mem::size_of::<JointInstance>(),
+                    wgpu::VertexStepMode::Instance,
+                    &joint_attrs,
+                ))],
+                format: OFFSCREEN_FORMAT,
+                blend: premul,
+                depth: Some(depth_state(false, Cmp::Always)),
+            },
+        );
+        let gizmo_ribbon = pipeline(
+            device,
+            PipelineSpec {
+                label: "viewport_gizmo_ribbon",
+                layout: &layout,
+                shader: &ribbon,
+                vs: "vs_ribbon",
+                fs: "fs_ribbon",
+                buffers: &[Some(ribbon_vbl())],
+                format: fmt,
+                blend: alpha,
+                depth: None,
+            },
+        );
+        let gizmo_bubble = pipeline(
+            device,
+            PipelineSpec {
+                label: "viewport_gizmo_bubble",
+                layout: &layout,
+                shader: &gizmo,
+                vs: "vs_bubble",
+                fs: "fs_bubble",
+                buffers: &[Some(vertex_layout(
+                    std::mem::size_of::<GizmoBubbleInstance>(),
+                    wgpu::VertexStepMode::Instance,
+                    &bubble_attrs,
+                ))],
+                format: fmt,
+                blend: alpha,
+                depth: None,
+            },
+        );
+
+        use wgpu::BufferUsages as Usage;
+        Self {
+            sky,
+            grid,
+            mesh,
+            xray,
+            ghost,
+            ribbon: ribbon_pipeline,
+            joints,
+            gizmo_ribbon,
+            gizmo_bubble,
+            scene_uniforms: uniform_set("viewport_scene_uniforms"),
+            gizmo_uniforms: uniform_set("viewport_gizmo_uniforms"),
+            mesh_buf: GrowBuf::new(device, "viewport_mesh", Usage::VERTEX, 4096),
+            ghost_buf: GrowBuf::new(device, "viewport_ghost", Usage::VERTEX, 4096),
+            ribbon_buf: GrowBuf::new(device, "viewport_ribbons", Usage::VERTEX, 4096),
+            joint_buf: GrowBuf::new(device, "viewport_joints", Usage::VERTEX, 1024),
+            gizmo_ribbon_buf: GrowBuf::new(device, "viewport_gizmo_ribbons", Usage::VERTEX, 1024),
+            gizmo_bubble_buf: GrowBuf::new(device, "viewport_gizmo_bubbles", Usage::VERTEX, 1024),
+            resolve: Self::create_resolve(device, fmt),
+            fmt,
+        }
+    }
+
+    /// Fullscreen-triangle TAA/upscale resolve pipeline: reads the
+    /// render-resolution scene color/depth and the previous frame's history,
+    /// and writes both the final swapchain image and the new history texture
+    /// in one pass (MRT).
+    fn create_resolve(device: &wgpu::Device, fmt: wgpu::TextureFormat) -> ResolveState {
+        let shader = module(device, "viewport_resolve", shaders::resolve());
+
+        let texture_entry = |binding, sample_type| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let float = wgpu::TextureSampleType::Float { filterable: true };
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("viewport_resolve_bgl"),
             entries: &[
@@ -624,36 +854,9 @@ impl ViewportRenderer {
                     },
                     count: None,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
+                texture_entry(1, float),
+                texture_entry(2, wgpu::TextureSampleType::Depth),
+                texture_entry(3, float),
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -662,13 +865,11 @@ impl ViewportRenderer {
                 },
             ],
         });
-
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("viewport_resolve_layout"),
             bind_group_layouts: &[Some(&bgl)],
             immediate_size: 0,
         });
-
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("viewport_resolve"),
             layout: Some(&layout),
@@ -681,18 +882,7 @@ impl ViewportRenderer {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: Some("fs_resolve"),
-                targets: &[
-                    Some(wgpu::ColorTargetState {
-                        format: fmt,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: OFFSCREEN_FORMAT,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                ],
+                targets: &[target(fmt, None), target(OFFSCREEN_FORMAT, None)],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
@@ -701,7 +891,6 @@ impl ViewportRenderer {
             multiview_mask: None,
             cache: None,
         });
-
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("viewport_resolve_sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -712,414 +901,17 @@ impl ViewportRenderer {
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
-
         let uni_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("viewport_resolve_uni"),
             size: std::mem::size_of::<ResolveUniforms>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-
         ResolveState {
             pipeline,
             bgl,
             sampler,
             uni_buf,
-        }
-    }
-
-    fn uni_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("viewport_uni_bgl"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        })
-    }
-
-    fn uni_buf_and_bg(
-        device: &wgpu::Device,
-        bgl: &wgpu::BindGroupLayout,
-    ) -> (wgpu::Buffer, wgpu::BindGroup) {
-        let buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport_uni"),
-            size: std::mem::size_of::<ViewportUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewport_uni_bg"),
-            layout: bgl,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buf.as_entire_binding(),
-            }],
-        });
-        (buf, bg)
-    }
-
-    fn depth_stencil_state() -> wgpu::DepthStencilState {
-        wgpu::DepthStencilState {
-            format: DEPTH_FORMAT,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Less),
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }
-    }
-
-    fn create_lines(device: &wgpu::Device, fmt: wgpu::TextureFormat) -> LineState {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("viewport_lines"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/scene.wgsl").into()),
-        });
-        let bgl = Self::uni_bind_group_layout(device);
-        let (uni_buf, uni_bg) = Self::uni_buf_and_bg(device, &bgl);
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("viewport_lines_layout"),
-            bind_group_layouts: &[Some(&bgl)],
-            immediate_size: 0,
-        });
-
-        let attrs = wgpu::vertex_attr_array![
-            0 => Float32x3, // pos
-            1 => Float32x4, // color
-        ];
-        let vbl = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<LineVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &attrs,
-        };
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewport_lines"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_line"),
-                buffers: &[Some(vbl)],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_line"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: fmt,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                ..Default::default()
-            },
-            depth_stencil: Some(Self::depth_stencil_state()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-
-        let init_cap = 1024 * std::mem::size_of::<LineVertex>() as u64;
-        let vert_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport_line_verts"),
-            size: init_cap,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        LineState {
-            pipeline,
-            uni_buf,
-            uni_bg,
-            vert_buf,
-            vert_cap: init_cap,
-        }
-    }
-
-    fn create_joints(device: &wgpu::Device, fmt: wgpu::TextureFormat) -> JointState {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("viewport_joints"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/scene.wgsl").into()),
-        });
-        let bgl = Self::uni_bind_group_layout(device);
-        let (uni_buf, uni_bg) = Self::uni_buf_and_bg(device, &bgl);
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("viewport_joints_layout"),
-            bind_group_layouts: &[Some(&bgl)],
-            immediate_size: 0,
-        });
-
-        let attrs = wgpu::vertex_attr_array![
-            0 => Float32x3, // center
-            1 => Float32,   // size
-            2 => Float32x4, // color
-        ];
-        let vbl = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<JointInstance>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &attrs,
-        };
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewport_joints"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_joint"),
-                buffers: &[Some(vbl)],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_joint"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: fmt,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(Self::depth_stencil_state()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-
-        let init_cap = 256 * std::mem::size_of::<JointInstance>() as u64;
-        let inst_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport_joint_inst"),
-            size: init_cap,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        JointState {
-            pipeline,
-            uni_buf,
-            uni_bg,
-            inst_buf,
-            inst_cap: init_cap,
-        }
-    }
-
-    /// Depth state for overlay geometry (the orientation gizmo): tested
-    /// against nothing, so it always draws on top regardless of what's
-    /// already in the depth buffer for that screen region.
-    fn overlay_depth_stencil_state() -> wgpu::DepthStencilState {
-        wgpu::DepthStencilState {
-            format: DEPTH_FORMAT,
-            depth_write_enabled: Some(false),
-            depth_compare: Some(wgpu::CompareFunction::Always),
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }
-    }
-
-    fn create_mesh(device: &wgpu::Device, fmt: wgpu::TextureFormat) -> MeshState {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("viewport_mesh"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/scene.wgsl").into()),
-        });
-        let bgl = Self::uni_bind_group_layout(device);
-        let (uni_buf, uni_bg) = Self::uni_buf_and_bg(device, &bgl);
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("viewport_mesh_layout"),
-            bind_group_layouts: &[Some(&bgl)],
-            immediate_size: 0,
-        });
-
-        let attrs = wgpu::vertex_attr_array![
-            0 => Float32x3, // pos
-            1 => Float32x3, // normal
-            2 => Float32x4, // color
-        ];
-        let vbl = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<MeshVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &attrs,
-        };
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewport_mesh"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_mesh"),
-                buffers: &[Some(vbl)],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_mesh"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: fmt,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(Self::depth_stencil_state()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-
-        let init_cap = 512 * std::mem::size_of::<MeshVertex>() as u64;
-        let vert_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport_mesh_verts"),
-            size: init_cap,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        MeshState {
-            pipeline,
-            uni_buf,
-            uni_bg,
-            vert_buf,
-            vert_cap: init_cap,
-        }
-    }
-
-    fn create_gizmo(device: &wgpu::Device, fmt: wgpu::TextureFormat) -> GizmoState {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("viewport_gizmo"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gizmo.wgsl").into()),
-        });
-        let bgl = Self::uni_bind_group_layout(device);
-        let (uni_buf, uni_bg) = Self::uni_buf_and_bg(device, &bgl);
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("viewport_gizmo_layout"),
-            bind_group_layouts: &[Some(&bgl)],
-            immediate_size: 0,
-        });
-
-        let axis_attrs = wgpu::vertex_attr_array![
-            0 => Float32x3, // pos
-            1 => Float32x4, // color
-        ];
-        let axis_vbl = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<LineVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &axis_attrs,
-        };
-
-        let axis_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewport_gizmo_axes"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_axis"),
-                buffers: &[Some(axis_vbl)],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_axis"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: fmt,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                ..Default::default()
-            },
-            depth_stencil: Some(Self::overlay_depth_stencil_state()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-
-        let bubble_attrs = wgpu::vertex_attr_array![
-            0 => Float32x3, // center
-            1 => Float32,   // size
-            2 => Float32x4, // color
-            3 => Float32,   // letter
-        ];
-        let bubble_vbl = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<GizmoBubbleInstance>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &bubble_attrs,
-        };
-
-        let bubble_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewport_gizmo_bubbles"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_bubble"),
-                buffers: &[Some(bubble_vbl)],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_bubble"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: fmt,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(Self::overlay_depth_stencil_state()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-
-        let axis_init_cap = 16 * std::mem::size_of::<LineVertex>() as u64;
-        let axis_vert_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport_gizmo_axis_verts"),
-            size: axis_init_cap,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let bubble_init_cap = 8 * std::mem::size_of::<GizmoBubbleInstance>() as u64;
-        let bubble_inst_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport_gizmo_bubble_inst"),
-            size: bubble_init_cap,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let bg_init_cap = std::mem::size_of::<GizmoBubbleInstance>() as u64;
-        let bg_inst_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport_gizmo_bg_inst"),
-            size: bg_init_cap,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        GizmoState {
-            axis_pipeline,
-            bubble_pipeline,
-            uni_buf,
-            uni_bg,
-            axis_vert_buf,
-            axis_vert_cap: axis_init_cap,
-            bubble_inst_buf,
-            bubble_inst_cap: bubble_init_cap,
-            bg_inst_buf,
-            bg_inst_cap: bg_init_cap,
         }
     }
 }

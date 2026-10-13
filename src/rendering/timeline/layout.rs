@@ -36,7 +36,11 @@ pub struct TimelineView {
 
 impl Default for TimelineView {
     fn default() -> Self {
-        Self { scroll_x: 0.0, scroll_y: 0.0, zoom: 1.0 }
+        Self {
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+            zoom: 1.0,
+        }
     }
 }
 
@@ -279,7 +283,9 @@ impl<'a> Scene<'a> {
         let mut raw: Vec<(f32, bool)> = Vec::new();
         let mut probe = (String::new(), 0usize);
         for &ti in self.rows {
-            let Some(track) = self.clip.tracks.get(ti) else { continue };
+            let Some(track) = self.clip.tracks.get(ti) else {
+                continue;
+            };
             for (k, kf) in track.keyframes.iter().enumerate() {
                 raw.push((kf.time, self.key_selected(&track.bone_id, k, &mut probe)));
             }
@@ -322,7 +328,9 @@ impl<'a> Scene<'a> {
         let track_w = (self.size.0 - pad * 2.0).max(1.0);
         let pps = self.view.px_per_sec();
         let content_l = (self.view.scroll_x / pps).min(0.0);
-        let content_r = self.content_seconds().max((self.view.scroll_x + self.size.0) / pps);
+        let content_r = self
+            .content_seconds()
+            .max((self.view.scroll_x + self.size.0) / pps);
         let total = (content_r - content_l).max(0.001);
         let view_l = self.view.scroll_x / pps;
         let view_w = self.size.0 / pps;
@@ -336,7 +344,9 @@ impl<'a> Scene<'a> {
         let (track_x, track_w, _, thumb_w) = self.scrollbar();
         let pps = self.view.px_per_sec();
         let content_l = (self.view.scroll_x / pps).min(0.0);
-        let content_r = self.content_seconds().max((self.view.scroll_x + self.size.0) / pps);
+        let content_r = self
+            .content_seconds()
+            .max((self.view.scroll_x + self.size.0) / pps);
         let total = (content_r - content_l).max(0.001);
         let frac = ((thumb_x - track_x) / (track_w - thumb_w).max(1.0)).clamp(0.0, 1.0);
         let view_w = self.size.0 / pps;
@@ -354,7 +364,7 @@ impl<'a> Scene<'a> {
             let mut best: Option<(f32, f32)> = None;
             for key in self.summary_keys() {
                 let dx = (self.view.time_to_x(key.time) - x).abs();
-                if dx <= KEY_HIT_RADIUS && best.map_or(true, |(d, _)| dx < d) {
+                if dx <= KEY_HIT_RADIUS && best.is_none_or(|(d, _)| dx < d) {
                     best = Some((dx, key.time));
                 }
             }
@@ -376,12 +386,15 @@ impl<'a> Scene<'a> {
         let mut best: Option<(f32, usize)> = None;
         for (k, kf) in track.keyframes.iter().enumerate() {
             let dx = (self.view.time_to_x(kf.time) - x).abs();
-            if dx <= KEY_HIT_RADIUS && best.map_or(true, |(d, _)| dx < d) {
+            if dx <= KEY_HIT_RADIUS && best.is_none_or(|(d, _)| dx < d) {
                 best = Some((dx, k));
             }
         }
         match best {
-            Some((_, index)) => Hit::Key { track: track_index, index },
+            Some((_, index)) => Hit::Key {
+                track: track_index,
+                index,
+            },
             None => Hit::Row { track: track_index },
         }
     }
@@ -391,7 +404,9 @@ impl<'a> Scene<'a> {
         let (min_x, min_y, max_x, max_y) = rect;
         let mut out = HashSet::new();
         for (row, &ti) in self.rows.iter().enumerate() {
-            let Some(track) = self.clip.tracks.get(ti) else { continue };
+            let Some(track) = self.clip.tracks.get(ti) else {
+                continue;
+            };
             let cy = self.row_top(row) + ROW_HEIGHT * 0.5;
             if cy < min_y || cy > max_y || cy < HEADER_HEIGHT {
                 continue;
@@ -424,7 +439,9 @@ impl<'a> Scene<'a> {
         // ── Track rows (scrolled vertically; the header is drawn over them) ──
         let area_bottom = h - SCROLLBAR_HEIGHT;
         for (row, &ti) in self.rows.iter().enumerate() {
-            let Some(track) = self.clip.tracks.get(ti) else { continue };
+            let Some(track) = self.clip.tracks.get(ti) else {
+                continue;
+            };
             let top = self.row_top(row);
             if top + ROW_HEIGHT < HEADER_HEIGHT || top > area_bottom {
                 continue;
@@ -435,7 +452,11 @@ impl<'a> Scene<'a> {
             } else {
                 mix(p.background, p.text, 0.022)
             };
-            let bg = if selected_row { mix(base, p.primary, 0.16) } else { base };
+            let bg = if selected_row {
+                mix(base, p.primary, 0.16)
+            } else {
+                base
+            };
             r.push(RectInstance::new([0.0, top], [w, ROW_HEIGHT], bg).fixed());
             if selected_row {
                 r.push(RectInstance::new([0.0, top], [3.0, ROW_HEIGHT], p.primary).fixed());
@@ -458,15 +479,12 @@ impl<'a> Scene<'a> {
                 break;
             }
             if top + ROW_HEIGHT > HEADER_HEIGHT {
-                let base = if filler_row % 2 == 0 {
+                let base = if filler_row.is_multiple_of(2) {
                     p.background
                 } else {
                     mix(p.background, p.text, 0.022)
                 };
-                r.push(
-                    RectInstance::new([0.0, top], [w, ROW_HEIGHT], mix(base, p.background, 0.4))
-                        .fixed(),
-                );
+                r.push(RectInstance::new([0.0, top], [w, ROW_HEIGHT], mix(base, p.background, 0.4)).fixed());
             }
             filler_row += 1;
         }
@@ -498,7 +516,9 @@ impl<'a> Scene<'a> {
             _ => None,
         };
         for (row, &ti) in self.rows.iter().enumerate() {
-            let Some(track) = self.clip.tracks.get(ti) else { continue };
+            let Some(track) = self.clip.tracks.get(ti) else {
+                continue;
+            };
             let top = self.row_top(row);
             if top + ROW_HEIGHT < HEADER_HEIGHT || top > area_bottom {
                 continue;
@@ -595,14 +615,10 @@ impl<'a> Scene<'a> {
 
         // ── Header: ruler + summary row, opaque over scrolled rows ──
         r.push(
-            RectInstance::new(
-                [0.0, 0.0],
-                [w, RULER_HEIGHT],
-                mix(p.surface, p.panel, 0.25),
-            )
-            .shape(SHAPE_GRADIENT)
-            .outline(mix(p.surface, p.background, 0.3), 0.0)
-            .fixed(),
+            RectInstance::new([0.0, 0.0], [w, RULER_HEIGHT], mix(p.surface, p.panel, 0.25))
+                .shape(SHAPE_GRADIENT)
+                .outline(mix(p.surface, p.background, 0.3), 0.0)
+                .fixed(),
         );
         r.push(
             RectInstance::new(
@@ -617,17 +633,9 @@ impl<'a> Scene<'a> {
         if range_r > 0.0 && range_l < w {
             let l = range_l.max(0.0);
             let rr = range_r.min(w);
+            r.push(RectInstance::new([l, 0.0], [rr - l, RULER_HEIGHT], with_alpha(p.primary, 0.10)).fixed());
             r.push(
-                RectInstance::new([l, 0.0], [rr - l, RULER_HEIGHT], with_alpha(p.primary, 0.10))
-                    .fixed(),
-            );
-            r.push(
-                RectInstance::new(
-                    [l, RULER_HEIGHT - 3.0],
-                    [rr - l, 3.0],
-                    with_alpha(p.primary, 0.9),
-                )
-                .fixed(),
+                RectInstance::new([l, RULER_HEIGHT - 3.0], [rr - l, 3.0], with_alpha(p.primary, 0.9)).fixed(),
             );
         }
         // Range handles.
@@ -649,22 +657,19 @@ impl<'a> Scene<'a> {
                 continue;
             }
             let (len, alpha) = if t.major { (11.0, 0.75) } else { (5.0, 0.38) };
-            r.push(RectInstance::new(
-                [sx - 0.5, RULER_HEIGHT - len],
-                [1.0, len],
-                with_alpha(p.text_muted, alpha),
-            ).fixed());
+            r.push(
+                RectInstance::new(
+                    [sx - 0.5, RULER_HEIGHT - len],
+                    [1.0, len],
+                    with_alpha(p.text_muted, alpha),
+                )
+                .fixed(),
+            );
         }
 
         // Separators.
-        r.push(
-            RectInstance::new([0.0, RULER_HEIGHT - 1.0], [w, 1.0], with_alpha(p.border, 0.8))
-                .fixed(),
-        );
-        r.push(
-            RectInstance::new([0.0, HEADER_HEIGHT - 1.0], [w, 1.0], with_alpha(p.border, 0.9))
-                .fixed(),
-        );
+        r.push(RectInstance::new([0.0, RULER_HEIGHT - 1.0], [w, 1.0], with_alpha(p.border, 0.8)).fixed());
+        r.push(RectInstance::new([0.0, HEADER_HEIGHT - 1.0], [w, 1.0], with_alpha(p.border, 0.9)).fixed());
 
         // Summary diamonds.
         let sum_cy = RULER_HEIGHT + SUMMARY_HEIGHT * 0.5;
@@ -674,13 +679,15 @@ impl<'a> Scene<'a> {
             _ => None,
         };
         for pair in summary.windows(2) {
-            let (xa, xb) = (self.view.time_to_x(pair[0].time), self.view.time_to_x(pair[1].time));
+            let (xa, xb) = (
+                self.view.time_to_x(pair[0].time),
+                self.view.time_to_x(pair[1].time),
+            );
             if xb < 0.0 || xa > w {
                 continue;
             }
             r.push(
-                RectInstance::new([xa, sum_cy - 0.5], [xb - xa, 1.0], with_alpha(p.text_muted, 0.22))
-                    .fixed(),
+                RectInstance::new([xa, sum_cy - 0.5], [xb - xa, 1.0], with_alpha(p.text_muted, 0.22)).fixed(),
             );
         }
         for key in &summary {
@@ -688,13 +695,16 @@ impl<'a> Scene<'a> {
             if sx < -KEY_SIZE || sx > w + KEY_SIZE {
                 continue;
             }
-            let hovered = hover_summary.map_or(false, |t| (t - key.time).abs() < TIME_EPS);
+            let hovered = hover_summary.is_some_and(|t| (t - key.time).abs() < TIME_EPS);
             let (fill, edge) = if key.selected {
                 (sel_color, sel_edge)
             } else if hovered {
                 (mix(p.text, p.info, 0.3), [1.0, 1.0, 1.0, 0.9])
             } else {
-                (mix(p.text_muted, p.text, 0.35), mix(p.background, p.text_muted, 0.4))
+                (
+                    mix(p.text_muted, p.text, 0.35),
+                    mix(p.background, p.text_muted, 0.4),
+                )
             };
             let mut inst = RectInstance::new(
                 [sx - SUMMARY_KEY_SIZE * 0.5, sum_cy - SUMMARY_KEY_SIZE * 0.5],
@@ -716,10 +726,7 @@ impl<'a> Scene<'a> {
             let gx = self.view.time_to_x(t);
             let mut y = HEADER_HEIGHT;
             while y < area_bottom {
-                r.push(
-                    RectInstance::new([gx - 0.5, y], [1.0, 4.0], with_alpha(p.warning, 0.75))
-                        .fixed(),
-                );
+                r.push(RectInstance::new([gx - 0.5, y], [1.0, 4.0], with_alpha(p.warning, 0.75)).fixed());
                 y += 8.0;
             }
         }
@@ -728,12 +735,20 @@ impl<'a> Scene<'a> {
         let px = self.view.time_to_x(self.time);
         if (-8.0..=w + 8.0).contains(&px) {
             r.push(
-                RectInstance::new([px - 3.0, RULER_HEIGHT - 2.0], [6.0, area_bottom - RULER_HEIGHT + 2.0], with_alpha(p.danger, 0.10))
-                    .fixed(),
+                RectInstance::new(
+                    [px - 3.0, RULER_HEIGHT - 2.0],
+                    [6.0, area_bottom - RULER_HEIGHT + 2.0],
+                    with_alpha(p.danger, 0.10),
+                )
+                .fixed(),
             );
             r.push(
-                RectInstance::new([px - 1.0, RULER_HEIGHT - 2.0], [2.0, area_bottom - RULER_HEIGHT + 2.0], p.danger)
-                    .fixed(),
+                RectInstance::new(
+                    [px - 1.0, RULER_HEIGHT - 2.0],
+                    [2.0, area_bottom - RULER_HEIGHT + 2.0],
+                    p.danger,
+                )
+                .fixed(),
             );
             r.push(
                 RectInstance::new([px - 6.0, RULER_HEIGHT - 9.0], [12.0, 9.0], p.danger)
@@ -757,7 +772,14 @@ impl<'a> Scene<'a> {
         // ── Horizontal scrollbar ──
         let (track_x, track_w, thumb_x, thumb_w) = self.scrollbar();
         let sb_y = h - SCROLLBAR_HEIGHT + 3.0;
-        r.push(RectInstance::new([0.0, h - SCROLLBAR_HEIGHT], [w, SCROLLBAR_HEIGHT], mix(p.panel, p.background, 0.3)).fixed());
+        r.push(
+            RectInstance::new(
+                [0.0, h - SCROLLBAR_HEIGHT],
+                [w, SCROLLBAR_HEIGHT],
+                mix(p.panel, p.background, 0.3),
+            )
+            .fixed(),
+        );
         r.push(RectInstance::new([0.0, h - SCROLLBAR_HEIGHT], [w, 1.0], with_alpha(p.border, 0.8)).fixed());
         r.push(
             RectInstance::new([track_x, sb_y], [track_w, 6.0], with_alpha(p.text, 0.05))
@@ -785,7 +807,11 @@ mod tests {
         keys: &'a HashSet<(String, usize)>,
     ) -> Scene<'a> {
         Scene {
-            view: TimelineView { scroll_x: 0.0, scroll_y: 0.0, zoom: 4.0 },
+            view: TimelineView {
+                scroll_x: 0.0,
+                scroll_y: 0.0,
+                zoom: 4.0,
+            },
             size: (900.0, 320.0),
             clip,
             rows,
@@ -812,7 +838,10 @@ mod tests {
 
     #[test]
     fn ticks_have_labels_on_majors_only() {
-        let v = TimelineView { zoom: 3.0, ..Default::default() };
+        let v = TimelineView {
+            zoom: 3.0,
+            ..Default::default()
+        };
         let ticks = ruler_ticks(&v, 30.0, 800.0, RulerMode::Frames);
         assert!(ticks.iter().any(|t| t.label.is_some()));
         assert!(ticks.iter().all(|t| t.label.is_none() || t.major));
@@ -826,10 +855,16 @@ mod tests {
         let clip = sample::run_animation(&skeleton);
         let rows: Vec<usize> = (0..clip.tracks.len()).collect();
         let keys = HashSet::new();
-        let scene = scene_fixture(&clip, &rows, &keys);
+        let mut scene = scene_fixture(&clip, &rows, &keys);
+        // Zoomed in far enough that neighbouring keys are further apart than
+        // twice the hit radius.
+        scene.view.zoom = 16.0;
 
         assert_eq!(scene.hit_test(100.0, 10.0), Hit::Ruler);
-        assert!(matches!(scene.hit_test(100.0, RULER_HEIGHT + 5.0), Hit::SummaryRow | Hit::SummaryKey { .. }));
+        assert!(matches!(
+            scene.hit_test(100.0, RULER_HEIGHT + 5.0),
+            Hit::SummaryRow | Hit::SummaryKey { .. }
+        ));
         assert_eq!(scene.hit_test(100.0, 319.0), Hit::Scrollbar);
 
         // Second key of the first track.
@@ -892,7 +927,9 @@ mod tests {
         let scene = scene_fixture(&clip, &rows, &keys);
         let rects = scene.build_rects();
         assert!(rects.len() > 100);
-        assert!(rects.iter().all(|r| r.pos.iter().chain(r.size.iter()).all(|v| v.is_finite())));
+        assert!(rects
+            .iter()
+            .all(|r| r.pos.iter().chain(r.size.iter()).all(|v| v.is_finite())));
     }
 }
 
@@ -925,7 +962,11 @@ mod render_tests {
         }
         let (w, h) = (1100.0_f32, 420.0_f32);
         let scene = Scene {
-            view: TimelineView { scroll_x: -24.0, scroll_y: 0.0, zoom: 6.0 },
+            view: TimelineView {
+                scroll_x: -24.0,
+                scroll_y: 0.0,
+                zoom: 6.0,
+            },
             size: (w, h),
             clip: &clip,
             rows: &rows,
@@ -934,7 +975,10 @@ mod render_tests {
             time: 0.27,
             play_range: (1, 16),
             hover: Some(HoverTarget::Key { track: 6, index: 5 }),
-            marquee: Some(Marquee { a: (620.0, 200.0), b: (760.0, 290.0) }),
+            marquee: Some(Marquee {
+                a: (620.0, 200.0),
+                b: (760.0, 290.0),
+            }),
             ruler: RulerMode::Frames,
             drag_guide: Some(0.35),
             palette: Palette::test_dark(),
@@ -950,7 +994,11 @@ mod render_tests {
                 w as u32,
                 h as u32,
                 preview::TARGET_FORMAT,
-                &TimelineUniforms { viewport: [w, h], scroll_x: scene.view.scroll_x, _pad: 0.0 },
+                &TimelineUniforms {
+                    viewport: [w, h],
+                    scroll_x: scene.view.scroll_x,
+                    _pad: 0.0,
+                },
                 scene.palette.background,
                 &rects,
             );

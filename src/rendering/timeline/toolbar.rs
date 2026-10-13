@@ -7,7 +7,9 @@ use ui::button::{Button, ButtonVariants};
 use ui::input::NumberInput;
 use ui::status_bar::StatusBar;
 use ui::tag::Tag;
-use ui::{h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, PixelsExt, Selectable, Sizable, StyledExt};
+use ui::{
+    h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, PixelsExt, Selectable, Sizable, StyledExt,
+};
 
 use crate::editor::panel::SkeletalAnimEditorPanel;
 use crate::ui_components::chrome::{caption, toolbar_divider, MONO};
@@ -118,7 +120,11 @@ impl TimelinePanel {
                     .ghost()
                     .small()
                     .selected(looping)
-                    .tooltip(if looping { "Looping — click for one-shot" } else { "One-shot — click to loop" })
+                    .tooltip(if looping {
+                        "Looping — click for one-shot"
+                    } else {
+                        "One-shot — click to loop"
+                    })
                     .on_click(self.editor_click(|e, _w, cx| e.toggle_loop(cx))),
             )
             .child(
@@ -137,16 +143,14 @@ impl TimelinePanel {
                 .child(caption("Frame", cx))
                 .child(
                     div().w(px(92.0)).child(
-                        NumberInput::new(&inputs.frame)
-                            .small()
-                            .suffix(
-                                div()
-                                    .pr_1()
-                                    .text_xs()
-                                    .font_family(MONO)
-                                    .text_color(theme.muted_foreground)
-                                    .child(format!("/ {last_frame}")),
-                            ),
+                        NumberInput::new(&inputs.frame).small().suffix(
+                            div()
+                                .pr_1()
+                                .text_xs()
+                                .font_family(MONO)
+                                .text_color(theme.muted_foreground)
+                                .child(format!("/ {last_frame}")),
+                        ),
                     ),
                 )
         });
@@ -349,7 +353,12 @@ impl TimelinePanel {
                     .child("TRACKS"),
             )
             .child(div().flex_1())
-            .child(Tag::secondary().small().rounded_full().child(rows.len().to_string()));
+            .child(
+                Tag::secondary()
+                    .small()
+                    .rounded_full()
+                    .child(rows.len().to_string()),
+            );
 
         let summary = h_flex()
             .h(px(SUMMARY_HEIGHT))
@@ -390,7 +399,9 @@ impl TimelinePanel {
             .flex()
             .flex_col();
         for (i, &ti) in rows.iter().enumerate() {
-            let Some(track) = e.animation.tracks.get(ti) else { continue };
+            let Some(track) = e.animation.tracks.get(ti) else {
+                continue;
+            };
             let name = e
                 .skeleton
                 .bone(&track.bone_id)
@@ -444,7 +455,11 @@ impl TimelinePanel {
                     .child(
                         Icon::new(IconName::Component)
                             .size(px(12.0))
-                            .text_color(if selected { theme.primary } else { theme.info.opacity(0.8) }),
+                            .text_color(if selected {
+                                theme.primary
+                            } else {
+                                theme.info.opacity(0.8)
+                            }),
                     )
                     .child(
                         div()
@@ -452,7 +467,11 @@ impl TimelinePanel {
                             .min_w_0()
                             .truncate()
                             .text_xs()
-                            .font_weight(if selected { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                            .font_weight(if selected {
+                                FontWeight::SEMIBOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
                             .text_color(theme.foreground)
                             .child(name),
                     )
@@ -465,7 +484,11 @@ impl TimelinePanel {
                     )
                     .child(
                         Button::new(SharedString::from(format!("tl-key-{key_bone}")))
-                            .icon(if keyed_here { IconName::Keyframe } else { IconName::KeyframePlus })
+                            .icon(if keyed_here {
+                                IconName::Keyframe
+                            } else {
+                                IconName::KeyframePlus
+                            })
                             .ghost()
                             .xsmall()
                             .selected(keyed_here)
@@ -477,7 +500,8 @@ impl TimelinePanel {
                             })
                             .on_click(move |_, window, cx| {
                                 let bone = key_bone.clone();
-                                let _ = editor_key.update(cx, |e, cx| e.toggle_key_for_bone(&bone, window, cx));
+                                let _ =
+                                    editor_key.update(cx, |e, cx| e.toggle_key_for_bone(&bone, window, cx));
                             }),
                     ),
             );
@@ -540,7 +564,11 @@ impl TimelinePanel {
                 rows.len(),
                 if rows.len() == 1 { "track" } else { "tracks" },
                 e.animation.key_count(),
-                if selected > 0 { format!(" · {selected} selected") } else { String::new() },
+                if selected > 0 {
+                    format!(" · {selected} selected")
+                } else {
+                    String::new()
+                },
             ))
             .child(mono(format!(
                 "Frame {} / {}   {:.3}s   {:.0} fps",

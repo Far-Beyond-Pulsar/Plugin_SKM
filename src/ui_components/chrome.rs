@@ -26,11 +26,7 @@ pub fn panel_header(
         .bg(theme.secondary)
         .border_b_1()
         .border_color(theme.border)
-        .child(
-            Icon::new(icon)
-                .size(px(16.0))
-                .text_color(theme.info),
-        )
+        .child(Icon::new(icon).size(px(16.0)).text_color(theme.info))
         .child(
             div()
                 .text_sm()

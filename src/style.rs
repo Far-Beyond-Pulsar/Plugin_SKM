@@ -11,9 +11,24 @@ use ui::Theme;
 
 /// Per-axis colors shared by the viewport gizmo, the ground grid axes and the
 /// X/Y/Z labels in the properties panel (sRGB).
-pub const AXIS_X: Hsla = Hsla { h: 0.0, s: 0.72, l: 0.58, a: 1.0 };
-pub const AXIS_Y: Hsla = Hsla { h: 0.36, s: 0.62, l: 0.52, a: 1.0 };
-pub const AXIS_Z: Hsla = Hsla { h: 0.60, s: 0.76, l: 0.62, a: 1.0 };
+pub const AXIS_X: Hsla = Hsla {
+    h: 0.0,
+    s: 0.72,
+    l: 0.58,
+    a: 1.0,
+};
+pub const AXIS_Y: Hsla = Hsla {
+    h: 0.36,
+    s: 0.62,
+    l: 0.52,
+    a: 1.0,
+};
+pub const AXIS_Z: Hsla = Hsla {
+    h: 0.60,
+    s: 0.76,
+    l: 0.62,
+    a: 1.0,
+};
 
 pub fn srgb_to_linear(c: f32) -> f32 {
     if c <= 0.04045 {
@@ -60,7 +75,6 @@ pub struct Palette {
     pub text: [f32; 4],
     pub text_muted: [f32; 4],
     pub primary: [f32; 4],
-    pub accent: [f32; 4],
     pub info: [f32; 4],
     pub danger: [f32; 4],
     pub warning: [f32; 4],
@@ -81,7 +95,6 @@ impl Palette {
             text: linear(theme.foreground),
             text_muted: linear(theme.muted_foreground),
             primary: linear(theme.primary),
-            accent: linear(theme.accent),
             info: linear(theme.info),
             danger: linear(theme.danger),
             warning: linear(theme.warning),
@@ -92,12 +105,33 @@ impl Palette {
         }
     }
 
+    /// A fixed light palette, used by headless renders and tests.
+    #[cfg(test)]
+    pub fn test_light() -> Self {
+        let c = |r: f32, g: f32, b: f32| [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0];
+        Self {
+            dark: false,
+            background: c(0.94, 0.945, 0.955),
+            panel: c(0.91, 0.915, 0.93),
+            surface: c(0.88, 0.885, 0.90),
+            border: c(0.78, 0.79, 0.82),
+            text: c(0.13, 0.14, 0.17),
+            text_muted: c(0.42, 0.44, 0.50),
+            primary: c(0.15, 0.42, 0.90),
+            info: c(0.15, 0.50, 0.90),
+            danger: c(0.85, 0.22, 0.25),
+            warning: c(0.90, 0.50, 0.08),
+            success: c(0.15, 0.62, 0.38),
+            axis_x: linear(AXIS_X),
+            axis_y: linear(AXIS_Y),
+            axis_z: linear(AXIS_Z),
+        }
+    }
+
     /// A fixed dark palette, used by headless renders and tests.
     #[cfg(test)]
     pub fn test_dark() -> Self {
-        let c = |r: f32, g: f32, b: f32| {
-            [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0]
-        };
+        let c = |r: f32, g: f32, b: f32| [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0];
         Self {
             dark: true,
             background: c(0.105, 0.110, 0.125),
@@ -107,7 +141,6 @@ impl Palette {
             text: c(0.90, 0.91, 0.93),
             text_muted: c(0.58, 0.60, 0.65),
             primary: c(0.25, 0.52, 0.96),
-            accent: c(0.22, 0.30, 0.46),
             info: c(0.35, 0.65, 0.98),
             danger: c(0.93, 0.30, 0.33),
             warning: c(0.98, 0.70, 0.22),

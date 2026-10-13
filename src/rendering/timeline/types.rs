@@ -83,10 +83,4 @@ impl RectInstance {
         self.border = width;
         self
     }
-
-    pub fn glow(mut self, color: [f32; 4], radius: f32) -> Self {
-        self.border_color = color;
-        self.glow = radius;
-        self
-    }
 }

@@ -40,7 +40,11 @@ impl Gpu {
     ) -> Vec<u8> {
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("preview_target"),
-            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -76,7 +80,11 @@ impl Gpu {
                     rows_per_image: Some(h),
                 },
             },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
         self.queue.submit(std::iter::once(encoder.finish()));
 
@@ -111,7 +119,9 @@ pub fn coverage(rgba: &[u8]) -> f32 {
 
 /// Write `rgba` to `$SKM_PREVIEW_DIR/<name>.png` when that variable is set.
 pub fn save(name: &str, w: u32, h: u32, rgba: &[u8]) {
-    let Some(dir) = std::env::var_os("SKM_PREVIEW_DIR") else { return };
+    let Some(dir) = std::env::var_os("SKM_PREVIEW_DIR") else {
+        return;
+    };
     let dir = PathBuf::from(dir);
     std::fs::create_dir_all(&dir).expect("create preview dir");
     std::fs::write(dir.join(format!("{name}.png")), encode_png(w, h, rgba)).expect("write png");
@@ -124,7 +134,11 @@ fn encode_png(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
         for (n, slot) in table.iter_mut().enumerate() {
             let mut c = n as u32;
             for _ in 0..8 {
-                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+                c = if c & 1 != 0 {
+                    0xEDB8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
             }
             *slot = c;
         }

@@ -20,6 +20,7 @@ impl TimelineRenderer {
         Self { rects: None }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render_frame(
         &mut self,
         device: &wgpu::Device,

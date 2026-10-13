@@ -7,16 +7,17 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use ui::button::Button;
+use ui::button::{Button, ButtonVariants};
 use ui::dock::{DockItem, PanelEvent};
+use ui::tag::Tag;
 use ui::workspace::Workspace;
-use ui::button::ButtonVariants;
-use ui::{h_flex, ActiveTheme, Disableable, IconName, Selectable};
+use ui::{h_flex, ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt};
 
 use crate::rendering::{TimelinePanel, ViewportPanel};
 use crate::ui_components::{BoneHierarchyPanel, BonePropertiesPanel};
 
-use super::panel::{SkeletalAnimEditorPanel, TracerState};
+use super::panel::SkeletalAnimEditorPanel;
+use crate::ui_components::chrome::{toolbar_divider, MONO};
 
 impl SkeletalAnimEditorPanel {
     pub fn initialize_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -27,12 +28,7 @@ impl SkeletalAnimEditorPanel {
         let editor_weak = cx.entity().downgrade();
 
         let workspace = cx.new(|cx| {
-            Workspace::new_with_channel(
-                "skeletal-anim-workspace",
-                ui::dock::DockChannel(1),
-                window,
-                cx,
-            )
+            Workspace::new_with_channel("skeletal-anim-workspace", ui::dock::DockChannel(1), window, cx)
         });
 
         let viewport_panel = cx.new(|cx| ViewportPanel::new(editor_weak.clone(), cx));
@@ -118,37 +114,48 @@ impl Render for SkeletalAnimEditorPanel {
         }
 
         let entity = cx.entity().clone();
+        let theme = cx.theme().clone();
         let is_playing = self.playback.playing;
-        let time = self.playback.time;
-        let duration = self.animation.duration;
         let is_dirty = self.is_dirty;
         let has_path = self.current_asset_path.is_some();
+        let fps = self.animation.fps_clamped();
+
+        let save_entity = entity.clone();
+        let play_entity = entity.clone();
+        let start_entity = entity.clone();
 
         let toolbar = h_flex()
             .w_full()
             .flex_shrink_0()
-            .items_center()
-            .gap_2()
+            .h(px(38.0))
             .px_2()
-            .py_1()
-            .bg(cx.theme().secondary)
+            .gap_1p5()
+            .items_center()
+            .bg(theme.secondary)
             .border_b_1()
-            .border_color(cx.theme().border)
+            .border_color(theme.border)
             .child(
                 Button::new("skeletal-save")
                     .icon(IconName::FloppyDisk)
-                    .tooltip("Save")
+                    .label("Save")
+                    .small()
+                    .when(is_dirty, |b| b.primary())
+                    .when(!is_dirty, |b| b.ghost())
                     .disabled(!has_path)
-                    .on_click({
-                        let entity = entity.clone();
-                        move |_, _window, cx| {
-                            entity.update(cx, |editor, cx| {
-                                if let Err(err) = editor.save() {
-                                    log::error!("Failed to save skeletal animation asset: {err}");
-                                }
-                                cx.notify();
-                            });
-                        }
+                    .tooltip("Save the skeleton and animation (Ctrl+S)")
+                    .on_click(move |_, _window, cx| {
+                        save_entity.update(cx, |editor, cx| editor.save_and_report(cx));
+                    }),
+            )
+            .child(toolbar_divider(cx))
+            .child(
+                Button::new("skeletal-to-start")
+                    .icon(IconName::SkipPrev)
+                    .ghost()
+                    .small()
+                    .tooltip("Return to the start of the play range")
+                    .on_click(move |_, window, cx| {
+                        start_entity.update(cx, |editor, cx| editor.goto_start(window, cx));
                     }),
             )
             .child(
@@ -158,67 +165,77 @@ impl Render for SkeletalAnimEditorPanel {
                     } else {
                         IconName::Play
                     })
-                    .tooltip(if is_playing { "Pause" } else { "Play" })
-                    .on_click({
-                        let entity = entity.clone();
-                        move |_, _window, cx| {
-                            entity.update(cx, |editor, cx| editor.toggle_play(cx));
-                        }
-                    }),
-            )
-            .child(
-                Button::new("skeletal-stop")
-                    .icon(IconName::SkipPrev)
-                    .tooltip("Return to start")
-                    .on_click({
-                        let entity = entity.clone();
-                        move |_, window, cx| {
-                            entity.update(cx, |editor, cx| {
-                                editor.playback.playing = false;
-                                editor.seek(0.0, window, cx);
-                            });
-                        }
+                    .primary()
+                    .small()
+                    .tooltip(if is_playing {
+                        "Pause (Space)"
+                    } else {
+                        "Play (Space)"
+                    })
+                    .on_click(move |_, _window, cx| {
+                        play_entity.update(cx, |editor, cx| editor.toggle_play(cx));
                     }),
             )
             .child(
                 div()
+                    .px_2()
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!("{:.2}s / {:.2}s", time, duration)),
+                    .font_family(MONO)
+                    .text_color(theme.foreground)
+                    .child(format!("{:.2}s", self.playback.time))
+                    .child(
+                        div()
+                            .text_color(theme.muted_foreground)
+                            .child(format!(" / {:.2}s", self.animation.duration)),
+                    ),
             )
+            .child(toolbar_divider(cx))
             .child(
-                Button::new("debug-tracers")
-                    .label("Tracers")
-                    .selected(self.debug.show_tracers)
-                    .ghost()
-                    .tooltip("Toggle tracer debug visualization")
-                    .on_click({
-                        let entity = entity.clone();
-                        move |_, _window, cx| {
-                            entity.update(cx, |editor, cx| {
-                                editor.debug.show_tracers = !editor.debug.show_tracers;
-                                if editor.debug.show_tracers {
-                                    editor.tracer_state = TracerState::new(&editor.skeleton);
-                                }
-                                cx.notify();
-                            });
-                        }
-                    }),
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .child(
+                        Icon::new(IconName::Keyframes)
+                            .size(px(14.0))
+                            .text_color(theme.info),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .text_color(theme.foreground)
+                            .child(self.animation.name.clone()),
+                    )
+                    .child(Tag::secondary().small().child(format!("{fps:.0} fps")))
+                    .child(
+                        Tag::secondary()
+                            .small()
+                            .child(format!("{} frames", self.animation.last_frame() + 1)),
+                    ),
             )
-            .when(is_dirty, |el| {
-                el.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().warning)
-                        .child("\u{25cf} Unsaved changes"),
-                )
+            .child(div().flex_1())
+            .child(if is_dirty {
+                Tag::warning().small().child("Unsaved changes").into_any_element()
+            } else if has_path {
+                Tag::success().small().child("Saved").into_any_element()
+            } else {
+                Tag::secondary()
+                    .small()
+                    .child("Sample (not saved)")
+                    .into_any_element()
             });
 
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(cx.theme().background)
+            .bg(theme.background)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                if event.keystroke.modifiers.secondary() && event.keystroke.key == "s" {
+                    this.save_and_report(cx);
+                    cx.stop_propagation();
+                }
+            }))
             .child(toolbar)
             .child(div().flex_1().min_h_0().map(|el| {
                 if let Some(workspace) = &self.workspace {

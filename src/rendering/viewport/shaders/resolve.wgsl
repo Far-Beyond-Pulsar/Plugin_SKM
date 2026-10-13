@@ -84,17 +84,29 @@ fn fs_resolve(@builtin(position) frag_coord: vec4<f32>) -> ResolveOut {
     // Clamp the history sample to the local neighborhood's color bounding
     // box, to suppress ghosting trails on disocclusion/fast motion.
     let texel = 1.0 / u.render_size;
-    let n0 = textureSampleLevel(scene_color, tex_sampler, uv + vec2<f32>(texel.x, 0.0), 0.0).rgb;
-    let n1 = textureSampleLevel(scene_color, tex_sampler, uv - vec2<f32>(texel.x, 0.0), 0.0).rgb;
-    let n2 = textureSampleLevel(scene_color, tex_sampler, uv + vec2<f32>(0.0, texel.y), 0.0).rgb;
-    let n3 = textureSampleLevel(scene_color, tex_sampler, uv - vec2<f32>(0.0, texel.y), 0.0).rgb;
-    let nmin = min(current.rgb, min(min(n0, n1), min(n2, n3)));
-    let nmax = max(current.rgb, max(max(n0, n1), max(n2, n3)));
+    var nmin = current.rgb;
+    var nmax = current.rgb;
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let s = textureSampleLevel(
+                scene_color,
+                tex_sampler,
+                uv + vec2<f32>(f32(dx), f32(dy)) * texel,
+                0.0,
+            ).rgb;
+            nmin = min(nmin, s);
+            nmax = max(nmax, s);
+        }
+    }
 
     let hist = textureSampleLevel(history, tex_sampler, prev_uv, 0.0).rgb;
     let hist_clamped = clamp(hist, nmin, nmax);
 
-    let resolved = mix(hist_clamped, current.rgb, u.blend);
+    // `blend` is the weight of the history sample (0 = current frame only).
+    let resolved = mix(current.rgb, hist_clamped, u.blend);
     out.color = vec4<f32>(resolved, current.a);
     out.history = out.color;
     return out;
