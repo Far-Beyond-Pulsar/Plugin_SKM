@@ -26,6 +26,61 @@ pub struct Playback {
     /// Current playhead position, in seconds.
     pub time: f32,
     pub playing: bool,
+    /// Wrap back to the start of the play range instead of stopping at the end.
+    pub looping: bool,
+    /// Playback rate multiplier (1.0 = real time).
+    pub speed: f32,
+}
+
+/// Playback rates the transport cycles through.
+pub const PLAYBACK_SPEEDS: [f32; 5] = [0.25, 0.5, 1.0, 1.5, 2.0];
+
+/// What the 3D viewport draws, toggled from its overlay toolbar.
+#[derive(Clone, Copy)]
+pub struct ViewOptions {
+    pub grid: bool,
+    pub bones: bool,
+    /// Pivot dots on every joint.
+    pub joints: bool,
+    /// Ghosted bones where they are hidden behind other geometry.
+    pub xray: bool,
+    /// Translucent poses a few frames either side of the playhead.
+    pub onion_skin: bool,
+    /// The selected bone's path through the play range.
+    pub motion_path: bool,
+}
+
+impl Default for ViewOptions {
+    fn default() -> Self {
+        Self {
+            grid: true,
+            bones: true,
+            joints: true,
+            xray: true,
+            onion_skin: false,
+            motion_path: true,
+        }
+    }
+}
+
+/// One copied keyframe: its track, time relative to the earliest copied key,
+/// and pose.
+#[derive(Clone)]
+pub struct ClipKey {
+    pub bone_id: String,
+    pub dt: f32,
+    pub transform: Transform,
+}
+
+/// Snapshot taken when a keyframe drag begins; every move is computed from it
+/// so the drag is lossless and can be cancelled.
+pub struct KeyDrag {
+    tracks: Vec<BoneTrack>,
+    selection: Vec<(String, usize)>,
+    anchor: (String, usize),
+    min_time: f32,
+    was_dirty: bool,
+    pub moved: bool,
 }
 
 #[derive(Default)]
@@ -100,7 +155,11 @@ pub struct SkeletalAnimEditorPanel {
 
     pub transform_inputs: TransformInputs,
     pub debug: DebugOverlay,
+    pub view_options: ViewOptions,
     pub tracer_state: TracerState,
+    /// Bone under the viewport cursor, for hover highlighting.
+    pub hovered_bone: Option<String>,
+    pub clipboard: Vec<ClipKey>,
 
     subscriptions: Vec<Subscription>,
 }
@@ -171,13 +230,16 @@ impl SkeletalAnimEditorPanel {
             expanded_bones: HashSet::new(),
             selected_keyframe: None,
             selected_keyframes: HashSet::new(),
-            playback: Playback { time: 0.0, playing: false },
+            playback: Playback { time: 0.0, playing: false, looping: true, speed: 1.0 },
             play_range: default_play_range,
             viewport_panel: None,
             timeline_panel: None,
             transform_inputs,
             debug: DebugOverlay::default(),
+            view_options: ViewOptions::default(),
             tracer_state,
+            hovered_bone: None,
+            clipboard: Vec::new(),
             subscriptions,
         };
 
@@ -385,6 +447,367 @@ impl SkeletalAnimEditorPanel {
         cx.notify();
     }
 
+    // ── Frame navigation ───────────────────────────────────────────────────
+
+    /// Frame the playhead is on.
+    pub fn current_frame(&self) -> i32 {
+        self.animation.time_to_frame(self.playback.time)
+    }
+
+    /// Move the playhead to a whole `frame`, clamped to the play range.
+    pub fn goto_frame(&mut self, frame: i32, window: &mut Window, cx: &mut Context<Self>) {
+        let time = self.animation.frame_to_time(frame);
+        self.seek(time, window, cx);
+    }
+
+    /// Step the playhead by `delta` frames.
+    pub fn step_frame(&mut self, delta: i32, window: &mut Window, cx: &mut Context<Self>) {
+        self.playback.playing = false;
+        let frame = self.current_frame() + delta;
+        self.goto_frame(frame, window, cx);
+    }
+
+    /// Jump to the first frame of the play range.
+    pub fn goto_start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.playback.playing = false;
+        self.goto_frame(self.play_range.0, window, cx);
+    }
+
+    /// Jump to the last frame of the play range.
+    pub fn goto_end(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.playback.playing = false;
+        self.goto_frame(self.play_range.1, window, cx);
+    }
+
+    /// Key times that previous/next-keyframe navigation considers: the
+    /// selected bone's track when it has one, otherwise every track.
+    fn navigation_times(&self) -> Vec<f32> {
+        let tracks: Vec<&BoneTrack> = match self
+            .selected_bone
+            .as_ref()
+            .and_then(|id| self.animation.track(id))
+        {
+            Some(track) => vec![track],
+            None => self.animation.tracks.iter().collect(),
+        };
+        let mut times: Vec<f32> = tracks
+            .iter()
+            .flat_map(|t| t.keyframes.iter().map(|k| k.time))
+            .collect();
+        times.sort_by(|a, b| a.total_cmp(b));
+        times
+    }
+
+    /// Move the playhead to the next keyframe after it, if there is one.
+    pub fn goto_next_keyframe(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let now = self.playback.time;
+        if let Some(t) = self
+            .navigation_times()
+            .into_iter()
+            .find(|t| *t > now + KEYFRAME_EPS)
+        {
+            self.playback.playing = false;
+            self.seek(t, window, cx);
+        }
+    }
+
+    /// Move the playhead to the closest keyframe before it, if there is one.
+    pub fn goto_prev_keyframe(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let now = self.playback.time;
+        if let Some(t) = self
+            .navigation_times()
+            .into_iter()
+            .rev()
+            .find(|t| *t < now - KEYFRAME_EPS)
+        {
+            self.playback.playing = false;
+            self.seek(t, window, cx);
+        }
+    }
+
+    /// Cycle through [`PLAYBACK_SPEEDS`].
+    pub fn cycle_speed(&mut self, cx: &mut Context<Self>) {
+        let next = PLAYBACK_SPEEDS
+            .iter()
+            .position(|s| (*s - self.playback.speed).abs() < 1e-3)
+            .map_or(2, |i| (i + 1) % PLAYBACK_SPEEDS.len());
+        self.playback.speed = PLAYBACK_SPEEDS[next];
+        cx.notify();
+    }
+
+    pub fn toggle_loop(&mut self, cx: &mut Context<Self>) {
+        self.playback.looping = !self.playback.looping;
+        cx.notify();
+    }
+
+    // ── Keyframe editing ───────────────────────────────────────────────────
+
+    /// Index of `bone_id`'s key at `time`, if one exists.
+    fn key_index_at(&self, bone_id: &str, time: f32) -> Option<usize> {
+        self.animation
+            .track(bone_id)
+            .and_then(|t| t.keyframes.iter().position(|k| (k.time - time).abs() < KEYFRAME_EPS))
+    }
+
+    /// Set `bone_id`'s pose at `time`, creating the track or key as needed.
+    /// Returns the key's index.
+    fn upsert_key(&mut self, bone_id: &str, time: f32, transform: Transform) -> usize {
+        if self.animation.track(bone_id).is_none() {
+            self.animation.tracks.push(BoneTrack {
+                bone_id: bone_id.to_string(),
+                keyframes: Vec::new(),
+            });
+        }
+        let track = self.animation.track_mut(bone_id).unwrap();
+        match track.keyframes.iter().position(|k| (k.time - time).abs() < KEYFRAME_EPS) {
+            Some(i) => {
+                track.keyframes[i].transform = transform;
+                i
+            }
+            None => {
+                let pos = track
+                    .keyframes
+                    .iter()
+                    .position(|k| k.time > time)
+                    .unwrap_or(track.keyframes.len());
+                track.keyframes.insert(pos, Keyframe { time, transform });
+                pos
+            }
+        }
+    }
+
+    /// Key or un-key one specific bone at the playhead (the per-track button
+    /// in the timeline gutter).
+    pub fn toggle_key_for_bone(&mut self, bone_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let time = self.playback.time;
+        if let Some(index) = self.key_index_at(bone_id, time) {
+            if let Some(track) = self.animation.track_mut(bone_id) {
+                track.keyframes.remove(index);
+            }
+            self.animation.tracks.retain(|t| !t.keyframes.is_empty());
+            self.is_dirty = true;
+            self.resync_selected_keyframe();
+            self.sync_transform_inputs(window, cx);
+            cx.notify();
+        } else {
+            let pose = self.animation.local_transform(&self.skeleton, bone_id, time);
+            let index = self.upsert_key(bone_id, time, pose);
+            self.is_dirty = true;
+            self.selected_bone = Some(bone_id.to_string());
+            self.select_keyframe(Some((bone_id.to_string(), index)), window, cx);
+        }
+    }
+
+    /// Select every keyframe of every track.
+    pub fn select_all_keyframes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let all: HashSet<(String, usize)> = self
+            .animation
+            .tracks
+            .iter()
+            .flat_map(|t| (0..t.keyframes.len()).map(move |k| (t.bone_id.clone(), k)))
+            .collect();
+        self.set_selected_keyframes(all, false, window, cx);
+    }
+
+    /// Select every key sitting at `time` across all tracks (summary row).
+    pub fn select_keys_at_time(
+        &mut self,
+        time: f32,
+        additive: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let hits: HashSet<(String, usize)> = self
+            .animation
+            .tracks
+            .iter()
+            .flat_map(|t| {
+                t.keyframes
+                    .iter()
+                    .enumerate()
+                    .filter(move |(_, k)| (k.time - time).abs() < KEYFRAME_EPS)
+                    .map(move |(i, _)| (t.bone_id.clone(), i))
+            })
+            .collect();
+        self.set_selected_keyframes(hits, additive, window, cx);
+    }
+
+    /// Begin dragging the current keyframe selection, anchored on `anchor`.
+    pub fn begin_key_drag(&self, anchor: (String, usize)) -> Option<KeyDrag> {
+        if self.selected_keyframes.is_empty() {
+            return None;
+        }
+        let selection: Vec<(String, usize)> = self.selected_keyframes.iter().cloned().collect();
+        let min_time = selection
+            .iter()
+            .filter_map(|(bone, i)| self.animation.track(bone)?.keyframes.get(*i).map(|k| k.time))
+            .fold(f32::MAX, f32::min);
+        Some(KeyDrag {
+            tracks: self.animation.tracks.clone(),
+            selection,
+            anchor,
+            min_time: if min_time.is_finite() { min_time } else { 0.0 },
+            was_dirty: self.is_dirty,
+            moved: false,
+        })
+    }
+
+    /// Time of the drag's anchor key when the drag began.
+    pub fn key_drag_anchor_time(&self, drag: &KeyDrag) -> f32 {
+        drag.tracks
+            .iter()
+            .find(|t| t.bone_id == drag.anchor.0)
+            .and_then(|t| t.keyframes.get(drag.anchor.1))
+            .map_or(0.0, |k| k.time)
+    }
+
+    /// Lay the dragged keys out `delta` seconds from where they started. The
+    /// result is always derived from the drag snapshot, so this can be called
+    /// repeatedly with a changing delta. Keys can't be pushed before time 0,
+    /// and a moved key replaces any other key it lands on.
+    pub fn apply_key_drag(
+        &mut self,
+        drag: &mut KeyDrag,
+        delta: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let delta = delta.max(-drag.min_time);
+        drag.moved |= delta.abs() > KEYFRAME_EPS;
+
+        let selected: HashSet<(String, usize)> = drag.selection.iter().cloned().collect();
+        let mut tracks = Vec::with_capacity(drag.tracks.len());
+        let mut new_selection = HashSet::new();
+        let mut new_primary = None;
+
+        for track in &drag.tracks {
+            let mut keys: Vec<(Keyframe, bool, usize)> = Vec::with_capacity(track.keyframes.len());
+            let moved_times: Vec<f32> = track
+                .keyframes
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| selected.contains(&(track.bone_id.clone(), *i)))
+                .map(|(_, k)| k.time + delta)
+                .collect();
+            for (i, kf) in track.keyframes.iter().enumerate() {
+                if selected.contains(&(track.bone_id.clone(), i)) {
+                    keys.push((
+                        Keyframe { time: kf.time + delta, transform: kf.transform.clone() },
+                        true,
+                        i,
+                    ));
+                } else if !moved_times.iter().any(|t| (t - kf.time).abs() < KEYFRAME_EPS) {
+                    keys.push((kf.clone(), false, i));
+                }
+            }
+            keys.sort_by(|a, b| a.0.time.total_cmp(&b.0.time));
+            for (new_index, (_, moved, old_index)) in keys.iter().enumerate() {
+                if *moved {
+                    new_selection.insert((track.bone_id.clone(), new_index));
+                    if (track.bone_id.as_str(), *old_index) == (drag.anchor.0.as_str(), drag.anchor.1) {
+                        new_primary = Some((track.bone_id.clone(), new_index));
+                    }
+                }
+            }
+            tracks.push(BoneTrack {
+                bone_id: track.bone_id.clone(),
+                keyframes: keys.into_iter().map(|(k, _, _)| k).collect(),
+            });
+        }
+
+        self.animation.tracks = tracks;
+        self.selected_keyframes = new_selection;
+        self.selected_keyframe = new_primary.or_else(|| self.selected_keyframes.iter().next().cloned());
+        if drag.moved {
+            self.is_dirty = true;
+        }
+        self.sync_transform_inputs(window, cx);
+        cx.notify();
+    }
+
+    /// Finish a drag: grow the clip if keys were pushed past its end.
+    pub fn finish_key_drag(&mut self, drag: KeyDrag, cx: &mut Context<Self>) {
+        if drag.moved {
+            let last = self
+                .animation
+                .tracks
+                .iter()
+                .filter_map(|t| t.keyframes.last().map(|k| k.time))
+                .fold(0.0_f32, f32::max);
+            if last > self.animation.duration {
+                self.animation.duration = last;
+            }
+        }
+        cx.notify();
+    }
+
+    /// Abandon a drag, restoring the keys exactly as they were.
+    pub fn cancel_key_drag(&mut self, drag: KeyDrag, window: &mut Window, cx: &mut Context<Self>) {
+        self.animation.tracks = drag.tracks;
+        self.selected_keyframes = drag.selection.into_iter().collect();
+        self.selected_keyframe = Some(drag.anchor).filter(|k| self.selected_keyframes.contains(k));
+        self.is_dirty = drag.was_dirty;
+        self.sync_transform_inputs(window, cx);
+        cx.notify();
+    }
+
+    /// Copy the selected keys to the editor clipboard.
+    pub fn copy_selected_keyframes(&mut self) {
+        let mut keys: Vec<(String, f32, Transform)> = self
+            .selected_keyframes
+            .iter()
+            .filter_map(|(bone, i)| {
+                let kf = self.animation.track(bone)?.keyframes.get(*i)?;
+                Some((bone.clone(), kf.time, kf.transform.clone()))
+            })
+            .collect();
+        if keys.is_empty() {
+            return;
+        }
+        keys.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let origin = keys[0].1;
+        self.clipboard = keys
+            .into_iter()
+            .map(|(bone_id, time, transform)| ClipKey { bone_id, dt: time - origin, transform })
+            .collect();
+    }
+
+    /// Cut = copy + delete.
+    pub fn cut_selected_keyframes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.copy_selected_keyframes();
+        self.delete_selected_keyframes(window, cx);
+    }
+
+    /// Paste the clipboard with its earliest key on the playhead.
+    pub fn paste_keyframes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.clipboard.is_empty() {
+            return;
+        }
+        let origin = self.animation.snap_time(self.playback.time);
+        let pasted: Vec<(String, f32)> = self
+            .clipboard
+            .clone()
+            .into_iter()
+            .map(|key| {
+                let time = origin + key.dt;
+                self.upsert_key(&key.bone_id, time, key.transform);
+                (key.bone_id, time)
+            })
+            .collect();
+
+        // Indices shift as keys are inserted, so resolve them at the end.
+        let selection: HashSet<(String, usize)> = pasted
+            .iter()
+            .filter_map(|(bone, time)| self.key_index_at(bone, *time).map(|i| (bone.clone(), i)))
+            .collect();
+        let last = pasted.iter().map(|(_, t)| *t).fold(0.0_f32, f32::max);
+        if last > self.animation.duration {
+            self.animation.duration = last;
+        }
+        self.is_dirty = true;
+        self.set_selected_keyframes(selection, false, window, cx);
+    }
+
     /// Set the start of the playback range (inclusive frame number).
     pub fn set_play_range_start(&mut self, start: i32, cx: &mut Context<Self>) {
         self.play_range.0 = start;
@@ -399,7 +822,7 @@ impl SkeletalAnimEditorPanel {
 
     /// The `(start, end)` playhead bounds in seconds, derived from
     /// `play_range` (inclusive frame range) and the clip's `fps`.
-    fn play_range_seconds(&self) -> (f32, f32) {
+    pub(crate) fn play_range_seconds(&self) -> (f32, f32) {
         let fps = self.animation.fps.max(1.0);
         let (start_frame, end_frame) = self.play_range;
         let start = start_frame as f32 / fps;
@@ -434,6 +857,11 @@ impl SkeletalAnimEditorPanel {
     pub fn toggle_play(&mut self, cx: &mut Context<Self>) {
         self.playback.playing = !self.playback.playing;
         if self.playback.playing {
+            // Pressing play on the final frame of a one-shot restarts it.
+            let (start, end) = self.play_range_seconds();
+            if self.playback.time >= end - 1.0 / self.animation.fps_clamped() * 0.5 {
+                self.playback.time = start;
+            }
             if self.debug.show_tracers {
                 self.tracer_state.trails.clear();
             }
@@ -448,10 +876,19 @@ impl SkeletalAnimEditorPanel {
                         }
                         let (start, end) = this.play_range_seconds();
                         let span = (end - start).max(0.001);
-                        this.playback.time += FRAME.as_secs_f32();
+                        this.playback.time += FRAME.as_secs_f32() * this.playback.speed;
                         let wrapped = this.playback.time >= end;
                         if wrapped {
-                            this.playback.time = start + (this.playback.time - start) % span;
+                            if this.playback.looping {
+                                this.playback.time = start + (this.playback.time - start) % span;
+                            } else {
+                                // One-shot: park on the last frame and stop.
+                                this.playback.time = (end - 1.0 / this.animation.fps_clamped()).max(start);
+                                this.playback.playing = false;
+                            }
+                        }
+                        if this.playback.time < start {
+                            this.playback.time = start;
                         }
                         if this.debug.show_tracers {
                             let world = evaluate_world_transforms(
@@ -480,7 +917,7 @@ impl SkeletalAnimEditorPanel {
                             }
                         }
                         cx.notify();
-                        true
+                        this.playback.playing
                     });
                     match still_playing {
                         Ok(true) => {}

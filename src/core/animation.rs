@@ -58,6 +58,35 @@ pub struct AnimationClip {
 }
 
 impl AnimationClip {
+    /// Frames per second, never below 1.
+    pub fn fps_clamped(&self) -> f32 {
+        self.fps.max(1.0)
+    }
+
+    /// Nearest frame to `time`.
+    pub fn time_to_frame(&self, time: f32) -> i32 {
+        (time * self.fps_clamped()).round() as i32
+    }
+
+    pub fn frame_to_time(&self, frame: i32) -> f32 {
+        frame as f32 / self.fps_clamped()
+    }
+
+    /// `time` snapped to the nearest frame boundary.
+    pub fn snap_time(&self, time: f32) -> f32 {
+        self.frame_to_time(self.time_to_frame(time))
+    }
+
+    /// Index of the last whole frame of the clip.
+    pub fn last_frame(&self) -> i32 {
+        self.time_to_frame(self.duration).max(0)
+    }
+
+    /// Total number of keyframes across all tracks.
+    pub fn key_count(&self) -> usize {
+        self.tracks.iter().map(|t| t.keyframes.len()).sum()
+    }
+
     pub fn track(&self, bone_id: &str) -> Option<&BoneTrack> {
         self.tracks.iter().find(|t| t.bone_id == bone_id)
     }

@@ -1,158 +1,98 @@
-//! `TimelinePanel` — dock panel hosting the keyframe timeline.
+//! `TimelinePanel` — the keyframe dope sheet.
 //!
-//! A GPUI gutter on the left lists animated bone tracks; a WGPU canvas to
-//! the right draws the time ruler, track row backgrounds, keyframe
-//! diamonds, and the playhead. Click-drag in the canvas scrubs the
-//! playhead; clicking a diamond selects that keyframe.
+//! GPUI draws the chrome (transport toolbar, track gutter, ruler labels,
+//! status bar) from the engine's shared components, and one WGPU canvas draws
+//! the time grid, track rows, keyframes and playhead. All geometry comes from
+//! [`super::layout::Scene`], which is also what hit testing runs against.
+//!
+//! | Input                     | Action                                   |
+//! |---------------------------|------------------------------------------|
+//! | Click / drag ruler        | Scrub the playhead (snaps to frames)     |
+//! | Click key                 | Select key and park the playhead on it   |
+//! | Drag key                  | Move the selected keys (snaps to frames) |
+//! | Shift+click key           | Add / remove from the selection          |
+//! | Drag empty space          | Marquee select                           |
+//! | Scroll                    | Zoom around the cursor                   |
+//! | Ctrl+Scroll / MMB drag    | Pan                                      |
+//! | Shift+Scroll              | Scroll the track list                    |
+//! | Space                     | Play / pause                             |
+//! | Left / Right              | Step a frame (Shift = 10)                |
+//! | `[` / `]`                 | Previous / next keyframe                 |
+//! | K                         | Key the selected bone at the playhead    |
+//! | Ctrl+A / C / X / V        | Select all / copy / cut / paste          |
+//! | Del                       | Delete selected keys                     |
+//! | F                         | Fit the play range                       |
+//! | Esc                       | Cancel a key drag                        |
 
 use std::collections::HashSet;
 
-use crate::editor::panel::SkeletalAnimEditorPanel;
-use gpui::prelude::FluentBuilder;
 use gpui::*;
-use ui::button::Button;
-use ui::input::{InputEvent, InputState, NumberInput, NumberInputEvent, StepAction};
-use ui::PixelsExt;
-use ui::{dock::PanelEvent, h_flex, ActiveTheme, Disableable, IconName};
+use ui::input::{InputEvent, InputState};
+use ui::{dock::PanelEvent, ActiveTheme, IconName, PixelsExt, StyledExt};
 
+use crate::editor::panel::{KeyDrag, SkeletalAnimEditorPanel};
+use crate::style::Palette;
+use crate::ui_components::chrome::{self, MONO};
+
+use super::layout::*;
 use super::renderer::TimelineRenderer;
-use super::types::{RectInstance, TimelineUniforms};
+use super::types::TimelineUniforms;
 
-const GUTTER_WIDTH: f32 = 160.0;
-const ROW_HEIGHT: f32 = 28.0;
-const RULER_HEIGHT: f32 = 24.0;
-const PX_PER_SEC: f32 = 150.0;
-const KEYFRAME_SIZE: f32 = 10.0;
-const HIT_RADIUS_PX: f32 = 8.0;
+pub(super) const GUTTER_WIDTH: f32 = 208.0;
 
-const RULER_BG: [f32; 4] = [0.13, 0.13, 0.15, 1.0];
-const ROW_BG_EVEN: [f32; 4] = [0.16, 0.16, 0.18, 1.0];
-const ROW_BG_ODD: [f32; 4] = [0.13, 0.13, 0.15, 1.0];
-const ROW_BG_SELECTED: [f32; 4] = [0.22, 0.24, 0.30, 1.0];
-const KEYFRAME_COLOR: [f32; 4] = [0.55, 0.75, 1.0, 1.0];
-const KEYFRAME_SELECTED_COLOR: [f32; 4] = [1.0, 0.65, 0.15, 1.0];
-const PLAYHEAD_COLOR: [f32; 4] = [0.95, 0.30, 0.30, 1.0];
-const TICK_LINE_COLOR: [f32; 4] = [0.40, 0.40, 0.45, 1.0];
-const TICK_LABEL_COLOR: [f32; 4] = [0.75, 0.75, 0.78, 1.0];
-const CURRENT_FRAME_BG: [f32; 4] = [0.95, 0.30, 0.30, 1.0];
-const CURRENT_FRAME_LABEL_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-const BOX_SELECT_COLOR: [f32; 4] = [0.35, 0.55, 0.95, 0.25];
-const BOX_SELECT_BORDER: [f32; 4] = [0.55, 0.75, 1.0, 0.9];
-const BOX_SELECT_BORDER_PX: f32 = 1.0;
-/// Fill color for the diagonally-hatched, out-of-play-range track area.
-const HATCH_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.35];
-
-/// Width/height of a single "pixel" in the bitmap digit font, in screen px.
-const DIGIT_CELL: f32 = 2.0;
-/// Digits are laid out on a 3 (wide) x 5 (tall) grid, MSB-first per row.
-const DIGIT_PATTERNS: [[u8; 5]; 10] = [
-    [0b111, 0b101, 0b101, 0b101, 0b111], // 0
-    [0b010, 0b110, 0b010, 0b010, 0b111], // 1
-    [0b111, 0b001, 0b111, 0b100, 0b111], // 2
-    [0b111, 0b001, 0b111, 0b001, 0b111], // 3
-    [0b101, 0b101, 0b111, 0b001, 0b001], // 4
-    [0b111, 0b100, 0b111, 0b001, 0b111], // 5
-    [0b111, 0b100, 0b111, 0b101, 0b111], // 6
-    [0b111, 0b001, 0b001, 0b001, 0b001], // 7
-    [0b111, 0b101, 0b111, 0b101, 0b111], // 8
-    [0b111, 0b101, 0b111, 0b001, 0b111], // 9
-];
-/// Width of a single digit glyph, in screen px.
-const DIGIT_WIDTH: f32 = 3.0 * DIGIT_CELL;
-/// Height of a single digit glyph, in screen px.
-const DIGIT_HEIGHT: f32 = 5.0 * DIGIT_CELL;
-/// Horizontal gap between digits of a multi-digit number, in screen px.
-const DIGIT_GAP: f32 = DIGIT_CELL;
-
-/// Push the rects for a single digit glyph (0-9) at `(x, y)`.
-fn push_digit(rects: &mut Vec<RectInstance>, x: f32, y: f32, digit: usize, color: [f32; 4], kind: u32) {
-    let pattern = DIGIT_PATTERNS[digit];
-    for (row, bits) in pattern.iter().enumerate() {
-        for col in 0..3 {
-            if bits & (1 << (2 - col)) != 0 {
-                rects.push(RectInstance {
-                    pos: [x + col as f32 * DIGIT_CELL, y + row as f32 * DIGIT_CELL],
-                    size: [DIGIT_CELL, DIGIT_CELL],
-                    color,
-                    kind,
-                    _pad: [0; 3],
-                });
-            }
-        }
-    }
+/// What a pointer drag started on the canvas is doing.
+pub(super) enum DragState {
+    None,
+    Playhead,
+    Pan {
+        last_x: f32,
+    },
+    Marquee {
+        start: (f32, f32),
+        current: (f32, f32),
+        additive: bool,
+        /// Plain click on a row (no drag) selects that row's bone.
+        row_click: Option<String>,
+    },
+    Keys {
+        drag: KeyDrag,
+        anchor_time: f32,
+        /// Offset between the grab point and the anchor key, so keys don't jump.
+        grab_dt: f32,
+        clicked: (String, usize),
+        delta_frames: i32,
+    },
+    Scrollbar {
+        grab: f32,
+    },
 }
 
-/// Push the rect for a minus-sign glyph (a single bar on the middle row) at
-/// `(x, y)`, matching the digit grid's dimensions.
-fn push_minus(rects: &mut Vec<RectInstance>, x: f32, y: f32, color: [f32; 4], kind: u32) {
-    rects.push(RectInstance {
-        pos: [x, y + 2.0 * DIGIT_CELL],
-        size: [DIGIT_WIDTH, DIGIT_CELL],
-        color,
-        kind,
-        _pad: [0; 3],
-    });
-}
-
-/// Push the rects for an integer (negative numbers get a leading minus
-/// sign) at `(x, y)`. Returns the total width drawn, in screen px.
-fn push_number(rects: &mut Vec<RectInstance>, x: f32, y: f32, number: i64, color: [f32; 4], kind: u32) -> f32 {
-    let mut cursor = x;
-    if number < 0 {
-        push_minus(rects, cursor, y, color, kind);
-        cursor += DIGIT_WIDTH + DIGIT_GAP;
-    }
-    let digits: Vec<usize> = number
-        .unsigned_abs()
-        .to_string()
-        .chars()
-        .map(|c| c.to_digit(10).unwrap() as usize)
-        .collect();
-    for d in digits {
-        push_digit(rects, cursor, y, d, color, kind);
-        cursor += DIGIT_WIDTH + DIGIT_GAP;
-    }
-    (cursor - DIGIT_GAP - x).max(0.0)
-}
-
-/// Width, in screen px, that [`push_number`] would draw for `number`.
-fn number_width(number: i64) -> f32 {
-    let digit_count = number.unsigned_abs().to_string().len() as f32;
-    let sign_count = if number < 0 { 1.0 } else { 0.0 };
-    let glyph_count = digit_count + sign_count;
-    glyph_count * DIGIT_WIDTH + (glyph_count - 1.0).max(0.0) * DIGIT_GAP
-}
-
-/// Lazily-created inputs for the playback range top bar, plus the
-/// subscriptions that push edits back into the editor's `play_range`.
-struct RangeInputs {
-    start: Entity<InputState>,
-    end: Entity<InputState>,
-    _subscriptions: [Subscription; 4],
+/// Inputs in the toolbar, created on first render once a `Window` exists.
+pub(super) struct TimelineInputs {
+    pub start: Entity<InputState>,
+    pub end: Entity<InputState>,
+    pub frame: Entity<InputState>,
+    pub _subscriptions: Vec<Subscription>,
 }
 
 pub struct TimelinePanel {
-    editor: WeakEntity<SkeletalAnimEditorPanel>,
-    focus_handle: FocusHandle,
+    pub(super) editor: WeakEntity<SkeletalAnimEditorPanel>,
+    pub(super) focus_handle: FocusHandle,
     renderer: TimelineRenderer,
     surface: Option<WgpuSurfaceHandle>,
-    scroll_x: f32,
-    /// Vertical scroll offset (px) over the track rows, when they overflow
-    /// the visible area. Only adjustable via shift+scroll.
-    scroll_y: f32,
-    zoom: f32,
-    dragging_playhead: bool,
-    panning: bool,
-    pan_last_x: f32,
-    /// Anchor point (canvas-relative) of an in-progress box-select drag.
-    box_select_start: Option<(f32, f32)>,
-    /// Current point (canvas-relative) of an in-progress box-select drag.
-    box_select_current: Option<(f32, f32)>,
-    /// Playback-range start/end frame inputs shown in the top bar,
-    /// initialized lazily on first render once a `Window` is available.
-    range_inputs: Option<RangeInputs>,
-    last_origin: Point<f32>,
-    last_size: Size<f32>,
+    pub(super) view: TimelineView,
+    pub(super) ruler: RulerMode,
+    pub(super) snap: bool,
+    pub(super) only_selected: bool,
+    pub(super) drag: DragState,
+    pub(super) hover: Option<HoverTarget>,
+    /// Pointer position over the canvas, for the hover tooltip.
+    pointer: Option<(f32, f32)>,
+    pub(super) inputs: Option<TimelineInputs>,
+    pub(super) palette: Palette,
+    fit_pending: bool,
+    canvas_origin: Point<f32>,
+    pub(super) canvas_size: Size<f32>,
 }
 
 impl TimelinePanel {
@@ -162,586 +102,587 @@ impl TimelinePanel {
             focus_handle: cx.focus_handle(),
             renderer: TimelineRenderer::new(),
             surface: None,
-            scroll_x: 0.0,
-            scroll_y: 0.0,
-            zoom: 1.0,
-            dragging_playhead: false,
-            panning: false,
-            pan_last_x: 0.0,
-            box_select_start: None,
-            box_select_current: None,
-            range_inputs: None,
-            last_origin: Point::new(0.0, 0.0),
-            last_size: Size::new(1.0, 1.0),
+            view: TimelineView::default(),
+            ruler: RulerMode::Frames,
+            snap: true,
+            only_selected: false,
+            drag: DragState::None,
+            hover: None,
+            pointer: None,
+            inputs: None,
+            palette: Palette::from_theme(cx.theme()),
+            fit_pending: true,
+            canvas_origin: Point::new(0.0, 0.0),
+            canvas_size: Size::new(1.0, 1.0),
         }
     }
 
-    /// Create the playback-range start/end inputs and wire them up to push
-    /// edits back into `editor.play_range`. Called once a `Window` is
-    /// available, on first render.
-    fn init_range_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.upgrade() else {
-            return;
-        };
-        let (start, end) = editor.read(cx).play_range;
+    // ── Model plumbing ─────────────────────────────────────────────────────
 
-        let start_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(start.to_string()));
-        let end_input = cx.new(|cx| InputState::new(window, cx).default_value(end.to_string()));
-
-        let editor_weak = self.editor.clone();
-        let sub_start = cx.subscribe_in(&start_input, window, {
-            let editor_weak = editor_weak.clone();
-            move |_this, input, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change) {
-                    if let Ok(value) = input.read(cx).value().parse::<i32>() {
-                        if let Some(editor) = editor_weak.upgrade() {
-                            editor.update(cx, |editor, cx| {
-                                editor.set_play_range_start(value, cx)
-                            });
-                        }
-                        window.refresh();
-                    }
-                }
-            }
-        });
-        let sub_end = cx.subscribe_in(&end_input, window, {
-            let editor_weak = editor_weak.clone();
-            move |_this, input, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change) {
-                    if let Ok(value) = input.read(cx).value().parse::<i32>() {
-                        if let Some(editor) = editor_weak.upgrade() {
-                            editor.update(cx, |editor, cx| editor.set_play_range_end(value, cx));
-                        }
-                        window.refresh();
-                    }
-                }
-            }
-        });
-
-        let sub_start_step = cx.subscribe_in(&start_input, window, {
-            let editor_weak = editor_weak.clone();
-            move |_this, input, event: &NumberInputEvent, window, cx| {
-                let NumberInputEvent::Step { action, .. } = event;
-                let current = input.read(cx).value().parse::<i32>().unwrap_or(0);
-                let new_value = match action {
-                    StepAction::Increment => current + 1,
-                    StepAction::Decrement => current - 1,
-                };
-                input.update(cx, |input, cx| {
-                    input.set_value(new_value.to_string(), window, cx);
-                });
-                if let Some(editor) = editor_weak.upgrade() {
-                    editor.update(cx, |editor, cx| editor.set_play_range_start(new_value, cx));
-                }
-                window.refresh();
-            }
-        });
-        let sub_end_step = cx.subscribe_in(&end_input, window, {
-            let editor_weak = editor_weak.clone();
-            move |_this, input, event: &NumberInputEvent, window, cx| {
-                let NumberInputEvent::Step { action, .. } = event;
-                let current = input.read(cx).value().parse::<i32>().unwrap_or(0);
-                let new_value = match action {
-                    StepAction::Increment => current + 1,
-                    StepAction::Decrement => current - 1,
-                };
-                input.update(cx, |input, cx| {
-                    input.set_value(new_value.to_string(), window, cx);
-                });
-                if let Some(editor) = editor_weak.upgrade() {
-                    editor.update(cx, |editor, cx| editor.set_play_range_end(new_value, cx));
-                }
-                window.refresh();
-            }
-        });
-
-        self.range_inputs = Some(RangeInputs {
-            start: start_input,
-            end: end_input,
-            _subscriptions: [sub_start, sub_end, sub_start_step, sub_end_step],
-        });
-    }
-
-    /// Current horizontal scale, in pixels per second of clip time.
-    fn px_per_sec(&self) -> f32 {
-        PX_PER_SEC * self.zoom
-    }
-
-    /// The largest valid `scroll_y`, given `track_count` rows of track area
-    /// and the panel's last-measured size. Zero if all rows already fit.
-    fn max_scroll_y(&self, track_count: usize) -> f32 {
-        let track_area_height = track_count as f32 * ROW_HEIGHT;
-        let visible_height = (self.last_size.height - RULER_HEIGHT).max(0.0);
-        (track_area_height - visible_height).max(0.0)
-    }
-
-    /// Convert a canvas-relative x coordinate (pixels) to a clip time. May
-    /// be negative if the view has been panned to show time before 0;
-    /// `Editor::seek` clamps this back into the clip's valid range.
-    fn x_to_time(&self, x: f32) -> f32 {
-        (x + self.scroll_x) / self.px_per_sec()
-    }
-
-    /// Frame-spacing steps tried (in frames) when picking ruler tick
-    /// intervals, smallest first.
-    const FRAME_STEPS: [f32; 12] = [
-        1.0, 2.0, 5.0, 10.0, 15.0, 24.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1500.0,
-    ];
-
-    /// Tick spacing (in frames) that keeps ruler labels at least ~60px apart.
-    fn tick_interval_frames(px_per_frame: f32) -> f32 {
-        for &step in &Self::FRAME_STEPS {
-            if step * px_per_frame >= 60.0 {
-                return step;
-            }
-        }
-        *Self::FRAME_STEPS.last().unwrap()
-    }
-
-    /// Compute ruler tick positions visible across `canvas_width`, as
-    /// `(world-space x in px, frame number)`. `fps` is the clip's frame rate.
-    fn build_frame_ticks(&self, fps: f32, canvas_width: f32) -> Vec<(f32, i32)> {
-        let px_per_sec = self.px_per_sec();
-        let fps = fps.max(1.0);
-        let px_per_frame = px_per_sec / fps;
-        let step = Self::tick_interval_frames(px_per_frame);
-
-        let start_frame = (self.scroll_x / px_per_frame / step).floor() * step;
-        let end_frame = (self.scroll_x + canvas_width) / px_per_frame;
-
-        let mut ticks = Vec::new();
-        let mut frame = start_frame;
-        while frame <= end_frame + step {
-            let x = frame / fps * px_per_sec;
-            ticks.push((x, frame.round() as i32));
-            frame += step;
-        }
-        ticks
-    }
-
-    fn handle_mouse_down(
-        &mut self,
-        event: &MouseDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if event.button == MouseButton::Middle {
-            self.panning = true;
-            self.pan_last_x = event.position.x.as_f32();
-            return;
-        }
-        if event.button != MouseButton::Left {
-            return;
-        }
-        let Some(editor) = self.editor.upgrade() else {
-            return;
-        };
-
-        let x = event.position.x.as_f32() - self.last_origin.x - GUTTER_WIDTH;
-        let y = event.position.y.as_f32() - self.last_origin.y;
-        if x < 0.0 {
-            return;
-        }
-
-        // Clicking anywhere in the ruler moves the playhead to that time.
-        if y < RULER_HEIGHT {
-            self.dragging_playhead = true;
-            let time = self.x_to_time(x);
-            editor.update(cx, |editor, cx| editor.seek(time, window, cx));
-            cx.notify();
-            return;
-        }
-
-        // Hit-test keyframe diamonds.
-        let scroll_x = self.scroll_x;
-        let px_per_sec = self.px_per_sec();
-        let scroll_y = self.scroll_y;
-        let hit = editor.update(cx, |editor, _cx| {
-            let mut found = None;
-            for (i, track) in editor.animation.tracks.iter().enumerate() {
-                let row_y = RULER_HEIGHT + i as f32 * ROW_HEIGHT - scroll_y;
-                if y < row_y || y > row_y + ROW_HEIGHT {
-                    continue;
-                }
-                for (k, kf) in track.keyframes.iter().enumerate() {
-                    let kf_x = kf.time * px_per_sec - scroll_x;
-                    let kf_y = row_y + ROW_HEIGHT * 0.5;
-                    let dx = kf_x - x;
-                    let dy = kf_y - y;
-                    if (dx * dx + dy * dy).sqrt() < HIT_RADIUS_PX + KEYFRAME_SIZE * 0.5 {
-                        found = Some((track.bone_id.clone(), k, kf.time));
-                        break;
-                    }
-                }
-                if found.is_some() {
-                    break;
-                }
-            }
-            found
-        });
-
-        if let Some((bone_id, index, time)) = hit {
-            editor.update(cx, |editor, cx| {
-                if event.modifiers.shift {
-                    editor.toggle_keyframe_selection((bone_id, index), window, cx);
-                } else {
-                    // Selecting a keyframe also moves the playhead to it, so
-                    // the properties panel shows it as keyed/editable.
-                    editor.select_bone(Some(bone_id.clone()), window, cx);
-                    editor.seek(time, window, cx);
-                    editor.select_keyframe(Some((bone_id, index)), window, cx);
-                }
-            });
-            return;
-        }
-
-        // Otherwise, start a box-select drag over the track area. A plain
-        // click with no drag (handled on mouse-up) clears the selection.
-        self.box_select_start = Some((x, y));
-        self.box_select_current = Some((x, y));
-        cx.notify();
-    }
-
-    fn handle_mouse_up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.dragging_playhead = false;
-        self.panning = false;
-
-        let Some(start) = self.box_select_start.take() else {
-            return;
-        };
-        let current = self.box_select_current.take().unwrap_or(start);
-
-        let dragged = (current.0 - start.0).abs() > 2.0 || (current.1 - start.1).abs() > 2.0;
-        let additive = event.modifiers.shift;
-
-        let Some(editor) = self.editor.upgrade() else {
-            return;
-        };
-
-        if !dragged {
-            if !additive {
-                editor.update(cx, |editor, cx| {
-                    editor.set_selected_keyframes(HashSet::new(), false, window, cx);
-                });
-            }
-            cx.notify();
-            return;
-        }
-
-        let min_x = start.0.min(current.0);
-        let max_x = start.0.max(current.0);
-        let min_y = start.1.min(current.1);
-        let max_y = start.1.max(current.1);
-        let scroll_x = self.scroll_x;
-        let scroll_y = self.scroll_y;
-        let px_per_sec = self.px_per_sec();
-
-        let hits: HashSet<(String, usize)> = editor
-            .read(cx)
+    /// Track indices shown, honoring the "selected bone only" filter.
+    pub(super) fn visible_rows(&self, editor: &SkeletalAnimEditorPanel) -> Vec<usize> {
+        editor
             .animation
             .tracks
             .iter()
             .enumerate()
-            .flat_map(|(i, track)| {
-                let row_y = RULER_HEIGHT + i as f32 * ROW_HEIGHT - scroll_y;
-                let kf_y = row_y + ROW_HEIGHT * 0.5;
-                let bone_id = track.bone_id.clone();
-                track
-                    .keyframes
-                    .iter()
-                    .enumerate()
-                    .filter(move |(_, kf)| {
-                        let kf_x = kf.time * px_per_sec - scroll_x;
-                        kf_x >= min_x && kf_x <= max_x && kf_y >= min_y && kf_y <= max_y
-                    })
-                    .map(move |(k, _)| (bone_id.clone(), k))
-                    .collect::<Vec<_>>()
+            .filter(|(_, t)| {
+                !self.only_selected || editor.selected_bone.as_deref() == Some(t.bone_id.as_str())
             })
-            .collect();
+            .map(|(i, _)| i)
+            .collect()
+    }
 
-        editor.update(cx, |editor, cx| {
-            editor.set_selected_keyframes(hits, additive, window, cx);
-        });
+    fn scene<'a>(
+        &self,
+        editor: &'a SkeletalAnimEditorPanel,
+        rows: &'a [usize],
+        size: (f32, f32),
+    ) -> Scene<'a> {
+        let marquee = match &self.drag {
+            DragState::Marquee { start, current, .. } => Some(Marquee { a: *start, b: *current }),
+            _ => None,
+        };
+        let drag_guide = match &self.drag {
+            DragState::Keys { drag, anchor_time, delta_frames, .. } if drag.moved => {
+                Some(anchor_time + *delta_frames as f32 / editor.animation.fps_clamped())
+                    .map(|t| t.max(0.0))
+            }
+            _ => None,
+        };
+        Scene {
+            view: self.view,
+            size,
+            clip: &editor.animation,
+            rows,
+            selected_bone: editor.selected_bone.as_deref(),
+            selected_keys: &editor.selected_keyframes,
+            time: editor.playback.time,
+            play_range: editor.play_range,
+            hover: self.hover,
+            marquee,
+            ruler: self.ruler,
+            drag_guide,
+            palette: self.palette,
+        }
+    }
+
+    fn local(&self, position: Point<Pixels>) -> (f32, f32) {
+        (
+            position.x.as_f32() - self.canvas_origin.x,
+            position.y.as_f32() - self.canvas_origin.y,
+        )
+    }
+
+    fn snapped(&self, editor: &SkeletalAnimEditorPanel, time: f32) -> f32 {
+        if self.snap {
+            editor.animation.snap_time(time)
+        } else {
+            time
+        }
+    }
+
+    pub(super) fn clamp_scroll(&mut self, row_count: usize) {
+        let max_y = TimelineView::max_scroll_y(row_count, self.canvas_size.height);
+        self.view.scroll_y = self.view.scroll_y.clamp(0.0, max_y);
+        // Allow a little room left of zero so the first frame isn't glued to
+        // the gutter, but never scroll into emptiness.
+        self.view.scroll_x = self.view.scroll_x.max(-80.0);
+    }
+
+    pub(super) fn fit_to_range(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.upgrade() else { return };
+        let (start, end) = {
+            let e = editor.read(cx);
+            (
+                e.animation.frame_to_time(e.play_range.0),
+                e.animation.frame_to_time(e.play_range.1 + 1),
+            )
+        };
+        self.view.fit(start, end, self.canvas_size.width);
         cx.notify();
     }
 
-    fn handle_mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.panning {
-            let x = event.position.x.as_f32();
-            let delta_x = x - self.pan_last_x;
-            self.pan_last_x = x;
-            self.scroll_x -= delta_x;
-            cx.notify();
-            return;
-        }
-
-        if self.box_select_start.is_some() {
-            let x = event.position.x.as_f32() - self.last_origin.x - GUTTER_WIDTH;
-            let y = event.position.y.as_f32() - self.last_origin.y;
-            self.box_select_current = Some((x, y));
-            cx.notify();
-            return;
-        }
-
-        if !self.dragging_playhead {
-            return;
-        }
-        let Some(editor) = self.editor.upgrade() else {
-            return;
-        };
-        let x = event.position.x.as_f32() - self.last_origin.x - GUTTER_WIDTH;
-        let time = self.x_to_time(x);
-        editor.update(cx, |editor, cx| editor.seek(time, window, cx));
+    fn scrub(&mut self, x: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.upgrade() else { return };
+        let time = self.view.x_to_time(x);
+        let snapped = self.snapped(editor.read(cx), time);
+        editor.update(cx, |editor, cx| editor.seek(snapped, window, cx));
         cx.notify();
     }
 
-    fn handle_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.upgrade() else {
+    // ── Pointer input ──────────────────────────────────────────────────────
+
+    fn on_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_handle.focus(window, cx);
+        let (x, y) = self.local(event.position);
+        match event.button {
+            MouseButton::Middle => {
+                self.drag = DragState::Pan { last_x: event.position.x.as_f32() };
+            }
+            MouseButton::Left => self.left_down(x, y, event.modifiers, window, cx),
+            _ => {}
+        }
+    }
+
+    fn left_down(&mut self, x: f32, y: f32, mods: Modifiers, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.upgrade() else { return };
+        let (hit, thumb, bone_for_track) = {
+            let e = editor.read(cx);
+            let rows = self.visible_rows(e);
+            let scene = self.scene(e, &rows, (self.canvas_size.width, self.canvas_size.height));
+            let hit = scene.hit_test(x, y);
+            let bone = match hit {
+                Hit::Key { track, .. } | Hit::Row { track } => {
+                    e.animation.tracks.get(track).map(|t| t.bone_id.clone())
+                }
+                _ => None,
+            };
+            (hit, scene.scrollbar(), bone)
+        };
+
+        match hit {
+            Hit::Ruler | Hit::SummaryRow => {
+                self.drag = DragState::Playhead;
+                self.scrub(x, window, cx);
+            }
+            Hit::Scrollbar => {
+                let (_, _, thumb_x, thumb_w) = thumb;
+                let grab = if x >= thumb_x && x <= thumb_x + thumb_w {
+                    x - thumb_x
+                } else {
+                    thumb_w * 0.5
+                };
+                self.drag = DragState::Scrollbar { grab };
+                self.drag_scrollbar(x, cx);
+            }
+            Hit::SummaryKey { time } => {
+                editor.update(cx, |e, cx| e.select_keys_at_time(time, mods.shift, window, cx));
+                if mods.shift {
+                    return;
+                }
+                let anchor = editor.read(cx).selected_keyframes.iter().next().cloned();
+                if let Some(anchor) = anchor {
+                    self.begin_key_drag(&editor, anchor, x, cx);
+                }
+            }
+            Hit::Key { index, .. } => {
+                let Some(bone_id) = bone_for_track else { return };
+                let key = (bone_id.clone(), index);
+                if mods.shift {
+                    editor.update(cx, |e, cx| e.toggle_keyframe_selection(key, window, cx));
+                    return;
+                }
+                let already_selected = editor.read(cx).selected_keyframes.contains(&key);
+                if !already_selected {
+                    editor.update(cx, |e, cx| {
+                        e.select_bone(Some(bone_id.clone()), window, cx);
+                        e.select_keyframe(Some(key.clone()), window, cx);
+                    });
+                }
+                self.begin_key_drag(&editor, key, x, cx);
+            }
+            Hit::Row { .. } | Hit::Empty => {
+                self.drag = DragState::Marquee {
+                    start: (x, y),
+                    current: (x, y),
+                    additive: mods.shift,
+                    row_click: bone_for_track,
+                };
+                cx.notify();
+            }
+        }
+    }
+
+    fn begin_key_drag(
+        &mut self,
+        editor: &Entity<SkeletalAnimEditorPanel>,
+        anchor: (String, usize),
+        x: f32,
+        cx: &mut Context<Self>,
+    ) {
+        let e = editor.read(cx);
+        let Some(drag) = e.begin_key_drag(anchor.clone()) else { return };
+        let anchor_time = e.key_drag_anchor_time(&drag);
+        let grab_dt = self.view.x_to_time(x) - anchor_time;
+        self.drag = DragState::Keys { drag, anchor_time, grab_dt, clicked: anchor, delta_frames: 0 };
+        cx.notify();
+    }
+
+    fn drag_scrollbar(&mut self, x: f32, cx: &mut Context<Self>) {
+        let DragState::Scrollbar { grab } = self.drag else { return };
+        let Some(editor) = self.editor.upgrade() else { return };
+        let scroll = {
+            let e = editor.read(cx);
+            let rows = self.visible_rows(e);
+            let scene = self.scene(e, &rows, (self.canvas_size.width, self.canvas_size.height));
+            scene.scroll_for_thumb(x - grab)
+        };
+        self.view.scroll_x = scroll;
+        cx.notify();
+    }
+
+    fn on_mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let (x, y) = self.local(event.position);
+
+        // The button was released outside the canvas: finish the gesture.
+        if !matches!(self.drag, DragState::None) && event.pressed_button.is_none() {
+            self.end_drag(event.modifiers, window, cx);
+            return;
+        }
+
+        match &mut self.drag {
+            DragState::None => {
+                self.pointer = Some((x, y));
+                let Some(editor) = self.editor.upgrade() else { return };
+                let hover = {
+                    let e = editor.read(cx);
+                    let rows = self.visible_rows(e);
+                    let scene = self.scene(e, &rows, (self.canvas_size.width, self.canvas_size.height));
+                    match scene.hit_test(x, y) {
+                        Hit::Key { track, index } => Some(HoverTarget::Key { track, index }),
+                        Hit::SummaryKey { time } => Some(HoverTarget::SummaryKey { time }),
+                        _ => None,
+                    }
+                };
+                // The tooltip follows the pointer, so repaint while it shows.
+                if hover != self.hover || hover.is_some() {
+                    self.hover = hover;
+                    cx.notify();
+                }
+            }
+            DragState::Pan { last_x } => {
+                let px = event.position.x.as_f32();
+                self.view.scroll_x -= px - *last_x;
+                *last_x = px;
+                cx.notify();
+            }
+            DragState::Marquee { current, .. } => {
+                *current = (x, y);
+                cx.notify();
+            }
+            DragState::Playhead => {
+                self.autoscroll(x);
+                self.scrub(x, window, cx);
+            }
+            DragState::Keys { .. } => {
+                self.autoscroll(x);
+                self.drag_keys(x, window, cx);
+            }
+            DragState::Scrollbar { .. } => self.drag_scrollbar(x, cx),
+        }
+    }
+
+    /// Nudge the view while dragging near the left/right edge.
+    fn autoscroll(&mut self, x: f32) {
+        let edge = 28.0;
+        if x < edge {
+            self.view.scroll_x -= (edge - x).min(24.0) * 0.6;
+        } else if x > self.canvas_size.width - edge {
+            self.view.scroll_x += (x - (self.canvas_size.width - edge)).min(24.0) * 0.6;
+        }
+    }
+
+    fn drag_keys(&mut self, x: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.upgrade() else { return };
+        let mouse_time = self.view.x_to_time(x);
+        let snap = self.snap;
+        let DragState::Keys { drag, anchor_time, grab_dt, delta_frames, .. } = &mut self.drag else {
             return;
         };
-        match event.keystroke.key.as_str() {
-            "delete" | "backspace" => {
-                editor.update(cx, |editor, cx| editor.delete_selected_keyframes(window, cx));
+        let mut target = mouse_time - *grab_dt;
+        let fps = editor.read(cx).animation.fps_clamped();
+        if snap {
+            target = (target * fps).round() / fps;
+        }
+        let delta = target - *anchor_time;
+        *delta_frames = (delta * fps).round() as i32;
+        editor.update(cx, |e, cx| e.apply_key_drag(drag, delta, window, cx));
+        cx.notify();
+    }
+
+    fn on_mouse_up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.end_drag(event.modifiers, window, cx);
+    }
+
+    fn end_drag(&mut self, mods: Modifiers, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.upgrade() else {
+            self.drag = DragState::None;
+            return;
+        };
+        match std::mem::replace(&mut self.drag, DragState::None) {
+            DragState::Keys { drag, clicked, .. } => {
+                if drag.moved {
+                    editor.update(cx, |e, cx| e.finish_key_drag(drag, cx));
+                } else {
+                    // A click, not a drag: park the playhead on the key.
+                    let (bone_id, index) = clicked;
+                    editor.update(cx, |e, cx| {
+                        let time = e
+                            .animation
+                            .track(&bone_id)
+                            .and_then(|t| t.keyframes.get(index))
+                            .map(|k| k.time);
+                        e.select_bone(Some(bone_id.clone()), window, cx);
+                        if let Some(time) = time {
+                            e.seek(time, window, cx);
+                        }
+                        e.select_keyframe(Some((bone_id, index)), window, cx);
+                    });
+                }
+            }
+            DragState::Marquee { start, current, additive, row_click } => {
+                let dragged = (current.0 - start.0).abs() > 3.0 || (current.1 - start.1).abs() > 3.0;
+                if dragged {
+                    let keys = {
+                        let e = editor.read(cx);
+                        let rows = self.visible_rows(e);
+                        let scene =
+                            self.scene(e, &rows, (self.canvas_size.width, self.canvas_size.height));
+                        scene.keys_in_rect(
+                            Marquee { a: start, b: current }.rect(),
+                        )
+                    };
+                    editor.update(cx, |e, cx| e.set_selected_keyframes(keys, additive || mods.shift, window, cx));
+                } else {
+                    editor.update(cx, |e, cx| {
+                        if !(additive || mods.shift) {
+                            e.set_selected_keyframes(HashSet::new(), false, window, cx);
+                        }
+                        if let Some(bone) = row_click {
+                            e.select_bone(Some(bone), window, cx);
+                        }
+                    });
+                }
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    fn on_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        let (dx, dy, pixels) = match event.delta {
+            ScrollDelta::Lines(p) => (p.x, p.y, false),
+            ScrollDelta::Pixels(p) => (p.x.as_f32(), p.y.as_f32(), true),
+        };
+        let Some(editor) = self.editor.upgrade() else { return };
+        let row_count = self.visible_rows(editor.read(cx)).len();
+        let step = if pixels { 1.0 } else { 16.0 };
+
+        if event.modifiers.shift {
+            self.view.scroll_y -= (if dy.abs() > dx.abs() { dy } else { dx }) * step;
+            self.clamp_scroll(row_count);
+        } else if event.modifiers.secondary() || dx.abs() > dy.abs() {
+            // Ctrl+wheel and trackpad sideways swipes pan.
+            self.view.scroll_x -= (if dx.abs() > dy.abs() { dx } else { dy }) * step;
+        } else {
+            let (x, _) = self.local(event.position);
+            let factor = if pixels {
+                (dy * 0.0025).exp()
+            } else {
+                1.1_f32.powf(dy)
+            };
+            self.view.zoom_at(factor, x);
+        }
+        self.clamp_scroll(row_count);
+        cx.notify();
+    }
+
+    // ── Keyboard ───────────────────────────────────────────────────────────
+
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.upgrade() else { return };
+        let mods = event.keystroke.modifiers;
+        let secondary = mods.secondary();
+        let step = if mods.shift { 10 } else { 1 };
+
+        match (event.keystroke.key.as_str(), secondary) {
+            ("space", false) | (" ", false) => editor.update(cx, |e, cx| e.toggle_play(cx)),
+            ("left", false) => editor.update(cx, |e, cx| e.step_frame(-step, window, cx)),
+            ("right", false) => editor.update(cx, |e, cx| e.step_frame(step, window, cx)),
+            ("home", false) => editor.update(cx, |e, cx| e.goto_start(window, cx)),
+            ("end", false) => editor.update(cx, |e, cx| e.goto_end(window, cx)),
+            ("[", false) => editor.update(cx, |e, cx| e.goto_prev_keyframe(window, cx)),
+            ("]", false) => editor.update(cx, |e, cx| e.goto_next_keyframe(window, cx)),
+            ("k", false) => editor.update(cx, |e, cx| e.insert_keyframe(window, cx)),
+            ("delete", false) | ("backspace", false) => {
+                editor.update(cx, |e, cx| e.delete_selected_keyframes(window, cx))
+            }
+            ("a", true) => editor.update(cx, |e, cx| e.select_all_keyframes(window, cx)),
+            ("c", true) => editor.update(cx, |e, _| e.copy_selected_keyframes()),
+            ("x", true) => editor.update(cx, |e, cx| e.cut_selected_keyframes(window, cx)),
+            ("v", true) => editor.update(cx, |e, cx| e.paste_keyframes(window, cx)),
+            ("f", false) => self.fit_to_range(cx),
+            ("escape", _) => {
+                if let DragState::Keys { .. } = self.drag {
+                    if let DragState::Keys { drag, .. } = std::mem::replace(&mut self.drag, DragState::None) {
+                        editor.update(cx, |e, cx| e.cancel_key_drag(drag, window, cx));
+                    }
+                }
             }
             _ => return,
         }
+        cx.stop_propagation();
         cx.notify();
     }
 
-    fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
-        let delta = match event.delta {
-            ScrollDelta::Lines(p) => {
-                if p.x.abs() > p.y.abs() {
-                    p.x
-                } else {
-                    p.y
-                }
-            }
-            ScrollDelta::Pixels(p) => {
-                if p.x.abs() > p.y.abs() {
-                    p.x.as_f32()
-                } else {
-                    p.y.as_f32()
-                }
-            }
+    // ── Rendering helpers ──────────────────────────────────────────────────
+
+    /// Ruler labels, the current-frame badge, hover tooltip and drag readout,
+    /// drawn with GPUI text so they stay crisp and use the theme font.
+    fn render_overlays(&self, editor: &SkeletalAnimEditorPanel, rows: &[usize], cx: &App) -> Vec<AnyElement> {
+        let theme = cx.theme();
+        let fps = editor.animation.fps_clamped();
+        let (w, h) = (self.canvas_size.width, self.canvas_size.height);
+        let mut out: Vec<AnyElement> = Vec::new();
+
+        // Current-frame badge.
+        let playhead_x = self.view.time_to_x(editor.playback.time);
+        let label = match self.ruler {
+            RulerMode::Frames => editor.current_frame().to_string(),
+            RulerMode::Seconds => format!("{:.2}s", editor.playback.time),
         };
+        let badge_w = (label.chars().count() as f32 * 7.4 + 14.0).max(30.0);
+        let badge_l = playhead_x - badge_w * 0.5;
 
-        if event.modifiers.shift {
-            // Scroll the track rows vertically, if they overflow the visible
-            // area; otherwise leave zoom/pan untouched entirely.
-            let Some(editor) = self.editor.upgrade() else {
-                return;
-            };
-            let track_count = editor.read(cx).animation.tracks.len();
-            let max_scroll_y = self.max_scroll_y(track_count);
-            if max_scroll_y <= 0.0 {
-                return;
-            }
-            self.scroll_y = (self.scroll_y - delta * 16.0).clamp(0.0, max_scroll_y);
-            cx.notify();
-            return;
-        }
-
-        if event.modifiers.control || event.modifiers.platform {
-            // Ctrl/cmd+scroll pans horizontally.
-            self.scroll_x -= delta * 16.0;
-        } else {
-            // Plain scroll zooms, anchored at the cursor so the time under
-            // it stays put.
-            let cursor_x = event.position.x.as_f32() - self.last_origin.x - GUTTER_WIDTH;
-            let time_at_cursor = self.x_to_time(cursor_x);
-            let factor = if delta > 0.0 { 1.1 } else { 1.0 / 1.1 };
-            self.zoom = (self.zoom * factor).clamp(0.1, 8.0);
-            self.scroll_x = time_at_cursor * self.px_per_sec() - cursor_x;
-        }
-        cx.notify();
-    }
-
-    /// Build the instanced rectangles for ruler, row backgrounds, keyframe
-    /// diamonds, and the playhead.
-    fn build_rects(
-        &self,
-        editor: &SkeletalAnimEditorPanel,
-        canvas_width: f32,
-    ) -> Vec<RectInstance> {
-        let px_per_sec = self.px_per_sec();
-        let fps = editor.animation.fps.max(1.0);
-        let mut rects = Vec::new();
-
-        // Track rows + keyframes are pushed first, scrolled vertically by
-        // `scroll_y`; the ruler (pushed below) is drawn on top of them so it
-        // stays opaque even when rows scroll up underneath it.
-        let selected_bone = editor.selected_bone.as_deref();
-        let selected_keyframes = &editor.selected_keyframes;
-
-        for (i, track) in editor.animation.tracks.iter().enumerate() {
-            let row_y = RULER_HEIGHT + i as f32 * ROW_HEIGHT - self.scroll_y;
-            let is_selected_row = selected_bone == Some(track.bone_id.as_str());
-            let bg = if is_selected_row {
-                ROW_BG_SELECTED
-            } else if i % 2 == 0 {
-                ROW_BG_EVEN
-            } else {
-                ROW_BG_ODD
-            };
-            rects.push(RectInstance {
-                pos: [0.0, row_y],
-                size: [canvas_width, ROW_HEIGHT],
-                color: bg,
-                kind: 2,
-                _pad: [0; 3],
-            });
-
-            for (k, kf) in track.keyframes.iter().enumerate() {
-                let is_selected = selected_keyframes.contains(&(track.bone_id.clone(), k));
-                let cx_ = kf.time * px_per_sec;
-                let cy_ = row_y + ROW_HEIGHT * 0.5;
-                rects.push(RectInstance {
-                    pos: [cx_ - KEYFRAME_SIZE * 0.5, cy_ - KEYFRAME_SIZE * 0.5],
-                    size: [KEYFRAME_SIZE, KEYFRAME_SIZE],
-                    color: if is_selected {
-                        KEYFRAME_SELECTED_COLOR
-                    } else {
-                        KEYFRAME_COLOR
-                    },
-                    kind: 1,
-                    _pad: [0; 3],
-                });
-            }
-        }
-
-        // Grey out + diagonally hatch the visible track area outside the
-        // playback range, drawn over the row backgrounds/keyframes. Computed
-        // in screen space (kind 2 = fixed) so it stays within the canvas
-        // bounds regardless of scroll/zoom.
-        let track_area_height = editor.animation.tracks.len() as f32 * ROW_HEIGHT;
-        if track_area_height > 0.0 {
-            let (range_start, range_end) = editor.play_range;
-            let x_range_start = range_start as f32 / fps * px_per_sec;
-            let x_range_end_excl = (range_end as f32 + 1.0) / fps * px_per_sec;
-            let screen_range_start = x_range_start - self.scroll_x;
-            let screen_range_end_excl = x_range_end_excl - self.scroll_x;
-
-            let left_w = screen_range_start.clamp(0.0, canvas_width);
-            if left_w > 0.0 {
-                rects.push(RectInstance {
-                    pos: [0.0, RULER_HEIGHT - self.scroll_y],
-                    size: [left_w, track_area_height],
-                    color: HATCH_COLOR,
-                    kind: 3,
-                    _pad: [0; 3],
-                });
-            }
-
-            let right_start = screen_range_end_excl.clamp(0.0, canvas_width);
-            let right_w = canvas_width - right_start;
-            if right_w > 0.0 {
-                rects.push(RectInstance {
-                    pos: [right_start, RULER_HEIGHT - self.scroll_y],
-                    size: [right_w, track_area_height],
-                    color: HATCH_COLOR,
-                    kind: 3,
-                    _pad: [0; 3],
-                });
-            }
-        }
-
-        // Ruler background, drawn after the (possibly scrolled) track rows
-        // so it stays opaque; tick marks/labels and the current-frame
-        // highlight are drawn on top of it further below.
-        rects.push(RectInstance {
-            pos: [0.0, 0.0],
-            size: [canvas_width, RULER_HEIGHT],
-            color: RULER_BG,
-            kind: 2,
-            _pad: [0; 3],
-        });
-
-        let total_height = RULER_HEIGHT + editor.animation.tracks.len() as f32 * ROW_HEIGHT;
-        let playhead_x = editor.playback.time * px_per_sec;
-        rects.push(RectInstance {
-            pos: [playhead_x - 1.0, 0.0],
-            size: [2.0, total_height],
-            color: PLAYHEAD_COLOR,
-            kind: 0,
-            _pad: [0; 3],
-        });
-
-        // Frame ruler: tick marks + frame-number labels, drawn directly with
-        // the bitmap digit font so they scroll/zoom with the timeline.
-        let current_frame = (editor.playback.time * fps).round() as i32;
-
-        for (x, frame) in self.build_frame_ticks(fps, canvas_width) {
-            if frame == current_frame {
+        for tick in ruler_ticks(&self.view, fps, w, self.ruler) {
+            let Some(text) = tick.label else { continue };
+            let x = tick.x - self.view.scroll_x;
+            if x < -40.0 || x > w + 4.0 {
                 continue;
             }
-            rects.push(RectInstance {
-                pos: [x, RULER_HEIGHT - 6.0],
-                size: [1.0, 6.0],
-                color: TICK_LINE_COLOR,
-                kind: 0,
-                _pad: [0; 3],
-            });
-            push_number(&mut rects, x + 3.0, 4.0, frame as i64, TICK_LABEL_COLOR, 0);
-        }
-
-        // Highlight the current frame, Blender-Dope-Sheet style.
-        {
-            let label_w = number_width(current_frame as i64).max(DIGIT_WIDTH);
-            let box_w = label_w + 6.0;
-            let cf_x = current_frame as f32 / fps * px_per_sec;
-            rects.push(RectInstance {
-                pos: [cf_x - box_w * 0.5, 2.0],
-                size: [box_w, RULER_HEIGHT - 4.0],
-                color: CURRENT_FRAME_BG,
-                kind: 0,
-                _pad: [0; 3],
-            });
-            push_number(
-                &mut rects,
-                cf_x - label_w * 0.5,
-                (RULER_HEIGHT - DIGIT_HEIGHT) * 0.5,
-                current_frame as i64,
-                CURRENT_FRAME_LABEL_COLOR,
-                0,
+            // Don't draw a label underneath the playhead badge.
+            if x + 4.0 < badge_l + badge_w + 6.0 && x + 4.0 + text.len() as f32 * 7.0 > badge_l - 6.0 {
+                continue;
+            }
+            out.push(
+                div()
+                    .absolute()
+                    .left(px(x + 5.0))
+                    .top(px(5.0))
+                    .text_size(px(10.5))
+                    .font_family(MONO)
+                    .text_color(theme.muted_foreground)
+                    .child(text)
+                    .into_any_element(),
             );
         }
 
-        // In-progress box-select marquee, drawn in screen space so it
-        // tracks the mouse regardless of scroll.
-        if let (Some(start), Some(current)) = (self.box_select_start, self.box_select_current) {
-            let min_x = start.0.min(current.0);
-            let max_x = start.0.max(current.0);
-            let min_y = start.1.min(current.1);
-            let max_y = start.1.max(current.1);
-            let w = (max_x - min_x).max(1.0);
-            let h = (max_y - min_y).max(1.0);
+        if playhead_x > -badge_w && playhead_x < w + badge_w {
+            out.push(
+                div()
+                    .absolute()
+                    .left(px(badge_l))
+                    .top(px(3.0))
+                    .w(px(badge_w))
+                    .h(px(17.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(4.0))
+                    .bg(theme.danger)
+                    .text_color(theme.danger_foreground)
+                    .text_size(px(10.5))
+                    .font_family(MONO)
+                    .font_semibold()
+                    .child(label)
+                    .into_any_element(),
+            );
+        }
 
-            rects.push(RectInstance {
-                pos: [min_x, min_y],
-                size: [w, h],
-                color: BOX_SELECT_COLOR,
-                kind: 2,
-                _pad: [0; 3],
-            });
-            for border in [
-                ([min_x, min_y], [w, BOX_SELECT_BORDER_PX]),
-                ([min_x, max_y - BOX_SELECT_BORDER_PX], [w, BOX_SELECT_BORDER_PX]),
-                ([min_x, min_y], [BOX_SELECT_BORDER_PX, h]),
-                ([max_x - BOX_SELECT_BORDER_PX, min_y], [BOX_SELECT_BORDER_PX, h]),
-            ] {
-                rects.push(RectInstance {
-                    pos: border.0,
-                    size: border.1,
-                    color: BOX_SELECT_BORDER,
-                    kind: 2,
-                    _pad: [0; 3],
-                });
+        // Key drag readout.
+        if let DragState::Keys { drag, anchor_time, delta_frames, .. } = &self.drag {
+            if drag.moved {
+                let t = (anchor_time + *delta_frames as f32 / fps).max(0.0);
+                let x = self.view.time_to_x(t);
+                let sign = if *delta_frames >= 0 { "+" } else { "" };
+                out.push(
+                    div()
+                        .absolute()
+                        .left(px((x + 10.0).clamp(4.0, (w - 110.0).max(4.0))))
+                        .top(px(HEADER_HEIGHT + 6.0))
+                        .px_2()
+                        .py_0p5()
+                        .rounded(px(4.0))
+                        .bg(theme.popover)
+                        .border_1()
+                        .border_color(theme.border)
+                        .shadow_md()
+                        .text_size(px(10.5))
+                        .font_family(MONO)
+                        .text_color(theme.warning)
+                        .child(format!("{sign}{delta_frames}f  →  frame {}", editor.animation.time_to_frame(t)))
+                        .into_any_element(),
+                );
             }
         }
 
-        rects
+        // Hover tooltip.
+        if matches!(self.drag, DragState::None) {
+            if let (Some(hover), Some((px_, py_))) = (self.hover, self.pointer) {
+                let text = match hover {
+                    HoverTarget::Key { track, index } => editor.animation.tracks.get(track).and_then(|t| {
+                        let kf = t.keyframes.get(index)?;
+                        let name = editor
+                            .skeleton
+                            .bone(&t.bone_id)
+                            .map_or(t.bone_id.clone(), |b| b.name.clone());
+                        Some(format!(
+                            "{name}  ·  frame {}  ·  {:.3}s",
+                            editor.animation.time_to_frame(kf.time),
+                            kf.time
+                        ))
+                    }),
+                    HoverTarget::SummaryKey { time } => Some(format!(
+                        "All tracks  ·  frame {}  ·  {:.3}s",
+                        editor.animation.time_to_frame(time),
+                        time
+                    )),
+                };
+                if let Some(text) = text {
+                    let tip_w = text.chars().count() as f32 * 6.4 + 18.0;
+                    out.push(
+                        div()
+                            .absolute()
+                            .left(px((px_ + 14.0).min((w - tip_w - 4.0).max(4.0))))
+                            .top(px((py_ + 18.0).min((h - 30.0).max(4.0))))
+                            .px_2()
+                            .py_0p5()
+                            .rounded(px(4.0))
+                            .bg(theme.popover)
+                            .border_1()
+                            .border_color(theme.border)
+                            .shadow_md()
+                            .text_size(px(10.5))
+                            .font_family(MONO)
+                            .text_color(theme.popover_foreground)
+                            .child(text)
+                            .into_any_element(),
+                    );
+                }
+            }
+        }
+
+        // Empty state.
+        if rows.is_empty() {
+            let (title, hint) = if editor.animation.tracks.is_empty() {
+                ("No animation tracks", "Select a bone and press K to add a keyframe")
+            } else {
+                ("No tracks to show", "The selected-bone filter hides every track")
+            };
+            out.push(
+                div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .top(px(HEADER_HEIGHT))
+                    .bottom(px(SCROLLBAR_HEIGHT))
+                    .child(chrome::empty_message(IconName::Keyframes, title, hint, cx))
+                    .into_any_element(),
+            );
+        }
+
+        out
     }
 }
 
@@ -769,88 +710,28 @@ impl Render for TimelinePanel {
             return div().size_full().child("No editor").into_any_element();
         };
 
-        if self.range_inputs.is_none() {
-            self.init_range_inputs(window, cx);
+        self.palette = Palette::from_theme(cx.theme());
+        if self.inputs.is_none() {
+            self.init_inputs(window, cx);
+        }
+        self.sync_inputs(window, cx);
+        if self.fit_pending && self.canvas_size.width > 100.0 {
+            self.fit_pending = false;
+            self.fit_to_range(cx);
         }
 
-        let canvas_width = (self.last_size.width - GUTTER_WIDTH).max(1.0);
-        let rects = {
-            let editor = editor_entity.read(cx);
-            self.build_rects(editor, canvas_width)
+        let (rows, overlays) = {
+            let e = editor_entity.read(cx);
+            let rows = self.visible_rows(e);
+            let overlays = self.render_overlays(e, &rows, cx);
+            (rows, overlays)
         };
+        self.clamp_scroll(rows.len());
 
-        // Gutter: ruler spacer + one row per animated track, naming the bone.
-        let editor_ref = editor_entity.read(cx);
-        let has_keyframe_selected = !editor_ref.selected_keyframes.is_empty();
         let theme = cx.theme().clone();
-        let mut gutter = div()
-            .flex()
-            .flex_col()
-            .w(px(GUTTER_WIDTH))
-            .h_full()
-            .flex_shrink_0()
-            .bg(theme.sidebar)
-            .border_r_1()
-            .border_color(theme.border);
-        gutter = gutter.child(
-            div()
-                .h(px(RULER_HEIGHT))
-                .w_full()
-                .flex_shrink_0()
-                .border_b_1()
-                .border_color(theme.border),
-        );
-
-        // Track-name rows live in their own scroll-clipped region below the
-        // ruler spacer, offset by `scroll_y` to track the canvas rows drawn
-        // by `build_rects`.
-        let mut track_rows = div().absolute().left_0().right_0().top(px(-self.scroll_y)).flex().flex_col();
-        for track in &editor_ref.animation.tracks {
-            let name = editor_ref
-                .skeleton
-                .bone(&track.bone_id)
-                .map(|b| b.name.clone())
-                .unwrap_or_else(|| track.bone_id.clone());
-            let is_selected = editor_ref.selected_bone.as_deref() == Some(track.bone_id.as_str());
-            let bone_id = track.bone_id.clone();
-            let editor_weak = self.editor.clone();
-            track_rows = track_rows.child(
-                div()
-                    .id(SharedString::from(format!(
-                        "timeline-track-{}",
-                        track.bone_id
-                    )))
-                    .h(px(ROW_HEIGHT))
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .px_2()
-                    .text_sm()
-                    .when(is_selected, |d| {
-                        d.bg(theme.accent).text_color(theme.accent_foreground)
-                    })
-                    .when(!is_selected, |d| d.text_color(theme.foreground))
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
-                        let bone_id = bone_id.clone();
-                        let _ = editor_weak.update(cx, |editor, cx| {
-                            editor.select_bone(Some(bone_id), window, cx)
-                        });
-                    })
-                    .child(name),
-            );
-        }
-        gutter = gutter.child(
-            div()
-                .flex_1()
-                .min_h_0()
-                .relative()
-                .overflow_hidden()
-                .child(track_rows),
-        );
-        let _ = editor_ref;
+        let toolbar = self.render_toolbar(window, cx);
+        let gutter = self.render_gutter(&rows, cx);
+        let status = self.render_status_bar(&rows, cx);
 
         let gpu_display: AnyElement = if let Some(ref s) = self.surface {
             wgpu_surface(s.clone())
@@ -859,32 +740,24 @@ impl Render for TimelinePanel {
                 .inset_0()
                 .into_any_element()
         } else {
-            div()
-                .absolute()
-                .inset_0()
-                .bg(cx.theme().background)
-                .into_any_element()
+            div().absolute().inset_0().bg(theme.background).into_any_element()
         };
 
         let entity = cx.entity().clone();
         let driver = {
             let pre = entity.clone();
             let paint = entity.clone();
-            let scroll_x = self.scroll_x;
-            let px_per_sec = self.px_per_sec();
             gpui::canvas(
                 move |bounds, window, cx| {
                     let sw = bounds.size.width.as_f32().max(1.0) as u32;
                     let sh = bounds.size.height.as_f32().max(1.0) as u32;
                     pre.update(cx, |panel, cx| {
-                        panel.last_origin = Point::new(
-                            bounds.origin.x.as_f32() - GUTTER_WIDTH,
-                            bounds.origin.y.as_f32(),
-                        );
-                        panel.last_size = Size::new(
-                            bounds.size.width.as_f32() + GUTTER_WIDTH,
-                            bounds.size.height.as_f32(),
-                        );
+                        let origin = Point::new(bounds.origin.x.as_f32(), bounds.origin.y.as_f32());
+                        let size = Size::new(bounds.size.width.as_f32(), bounds.size.height.as_f32());
+                        let changed = (panel.canvas_size.width - size.width).abs() > 0.5
+                            || (panel.canvas_size.height - size.height).abs() > 0.5;
+                        panel.canvas_origin = origin;
+                        panel.canvas_size = size;
                         if panel.surface.is_none() {
                             if let Some(s) = window.create_wgpu_surface(
                                 sw.max(64),
@@ -894,39 +767,43 @@ impl Render for TimelinePanel {
                                 panel.surface = Some(s);
                                 cx.notify();
                             }
+                        } else if changed {
+                            // Overlays are laid out from the canvas size.
+                            cx.notify();
                         }
                     });
                 },
                 move |_bounds, _pre, _window, cx| {
                     paint.update(cx, |panel, cx| {
-                        let Some(ref surface) = panel.surface else {
-                            return;
-                        };
+                        let Some(editor) = panel.editor.upgrade() else { return };
+                        let Some(ref surface) = panel.surface else { return };
                         if surface.is_resize_pending() {
                             return;
                         }
-                        let Some((view, (w, h))) = surface.back_view_with_size() else {
-                            return;
-                        };
+                        let Some((view, (w, h))) = surface.back_view_with_size() else { return };
 
+                        let size = (panel.canvas_size.width.max(1.0), panel.canvas_size.height.max(1.0));
+                        let rects = {
+                            let e = editor.read(cx);
+                            let rows = panel.visible_rows(e);
+                            panel.scene(e, &rows, size).build_rects()
+                        };
                         let uniforms = TimelineUniforms {
-                            viewport: [w as f32, h as f32],
-                            scroll_x,
-                            px_per_sec,
+                            viewport: [size.0, size.1],
+                            scroll_x: panel.view.scroll_x,
+                            _pad: 0.0,
                         };
-
+                        let clear = panel.palette.background;
+                        let Some(ref surface) = panel.surface else { return };
+                        let (device, queue, fmt) =
+                            (surface.device().clone(), surface.queue().clone(), surface.format());
                         panel.renderer.render_frame(
-                            surface.device(),
-                            surface.queue(),
-                            &view,
-                            w,
-                            h,
-                            surface.format(),
-                            &uniforms,
-                            &rects,
+                            &device, &queue, &view, w, h, fmt, &uniforms, clear, &rects,
                         );
                         drop(view);
-                        surface.swap_buffers();
+                        if let Some(ref surface) = panel.surface {
+                            surface.swap_buffers();
+                        }
                         let _ = cx;
                     });
                 },
@@ -936,118 +813,29 @@ impl Render for TimelinePanel {
             .size_full()
         };
 
-        let entity_down = entity.clone();
-        let entity_down_mid = entity.clone();
-        let entity_up = entity.clone();
-        let entity_up_mid = entity.clone();
-        let entity_move = entity.clone();
-        let entity_scroll = entity.clone();
-        let entity_key_down = entity.clone();
-
         let canvas_area = div()
             .id("skeletal-timeline-canvas")
             .flex_1()
+            .min_w_0()
             .h_full()
             .relative()
             .overflow_hidden()
             .track_focus(&self.focus_handle)
-            .on_mouse_down(
-                MouseButton::Left,
-                move |event: &MouseDownEvent, window, cx| {
-                    entity_down.update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
-                },
-            )
-            .on_mouse_down(
-                MouseButton::Middle,
-                move |event: &MouseDownEvent, window, cx| {
-                    entity_down_mid
-                        .update(cx, |panel, cx| panel.handle_mouse_down(event, window, cx));
-                },
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                move |event: &MouseUpEvent, window, cx| {
-                    entity_up.update(cx, |panel, cx| panel.handle_mouse_up(event, window, cx));
-                },
-            )
-            .on_mouse_up(
-                MouseButton::Middle,
-                move |event: &MouseUpEvent, window, cx| {
-                    entity_up_mid.update(cx, |panel, cx| panel.handle_mouse_up(event, window, cx));
-                },
-            )
-            .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
-                entity_move.update(cx, |panel, cx| panel.handle_mouse_move(event, window, cx));
-            })
-            .on_scroll_wheel(move |event: &ScrollWheelEvent, _window, cx| {
-                entity_scroll.update(cx, |panel, cx| panel.handle_scroll(event, cx));
-            })
-            .on_key_down(move |event: &KeyDownEvent, window, cx| {
-                entity_key_down.update(cx, |panel, cx| panel.handle_key_down(event, window, cx));
-            })
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, w, cx| this.on_mouse_down(e, w, cx)))
+            .on_mouse_down(MouseButton::Middle, cx.listener(|this, e: &MouseDownEvent, w, cx| this.on_mouse_down(e, w, cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)))
+            .on_mouse_up(MouseButton::Middle, cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)))
+            .on_mouse_up_out(MouseButton::Middle, cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)))
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, w, cx| this.on_mouse_move(e, w, cx)))
+            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _w, cx| this.on_scroll(e, cx)))
+            .on_key_down(cx.listener(|this, e: &KeyDownEvent, w, cx| this.on_key_down(e, w, cx)))
             .child(gpu_display)
-            .child(driver);
+            .child(driver)
+            .child(div().absolute().inset_0().children(overlays));
 
-        // Top bar (outside the custom renderer): keyframe add/remove
-        // controls, plus editing the inclusive playback frame range, e.g.
-        // `-1` to `10` for an 11-frame clip.
-        let range_bar: AnyElement = if let Some(range_inputs) = &self.range_inputs {
-            let editor_for_delete = self.editor.clone();
-            h_flex()
-                .w_full()
-                .flex_shrink_0()
-                .items_center()
-                .gap_2()
-                .px_2()
-                .h(px(32.0))
-                .bg(theme.secondary)
-                .border_b_1()
-                .border_color(theme.border)
-                .child(
-                    Button::new("timeline-delete-keyframe")
-                        .icon(IconName::KeyframeMinus)
-                        .tooltip("Delete selected keyframes (Del)")
-                        .disabled(!has_keyframe_selected)
-                        .on_click(move |_, window, cx| {
-                            if let Some(editor) = editor_for_delete.upgrade() {
-                                editor.update(cx, |editor, cx| {
-                                    editor.delete_selected_keyframes(window, cx)
-                                });
-                            }
-                        }),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child("Playback Range"),
-                )
-                .child(
-                    div()
-                        .w(px(110.0))
-                        .child(NumberInput::new(&range_inputs.start).w_full()),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child("to"),
-                )
-                .child(
-                    div()
-                        .w(px(110.0))
-                        .child(NumberInput::new(&range_inputs.end).w_full()),
-                )
-                .into_any_element()
-        } else {
-            div().w_full().flex_shrink_0().h(px(32.0)).into_any_element()
-        };
-
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(range_bar)
+        v_flex_root(&theme)
+            .child(toolbar)
             .child(
                 div()
                     .flex_1()
@@ -1057,6 +845,120 @@ impl Render for TimelinePanel {
                     .child(gutter)
                     .child(canvas_area),
             )
+            .child(status)
             .into_any_element()
     }
 }
+
+fn v_flex_root(theme: &ui::Theme) -> Div {
+    div().size_full().flex().flex_col().bg(theme.background)
+}
+
+impl TimelinePanel {
+    /// Create the toolbar inputs and wire edits back to the editor.
+    fn init_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.upgrade() else { return };
+        let (start, end, frame) = {
+            let e = editor.read(cx);
+            (e.play_range.0, e.play_range.1, e.current_frame())
+        };
+
+        let start_input = cx.new(|cx| InputState::new(window, cx).default_value(start.to_string()));
+        let end_input = cx.new(|cx| InputState::new(window, cx).default_value(end.to_string()));
+        let frame_input = cx.new(|cx| InputState::new(window, cx).default_value(frame.to_string()));
+
+        let mut subs = Vec::new();
+        let editor_weak = self.editor.clone();
+
+        macro_rules! range_input {
+            ($input:expr, $setter:ident) => {{
+                let ew = editor_weak.clone();
+                subs.push(cx.subscribe_in(&$input, window, move |_this, input, event: &InputEvent, _w, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        if let (Ok(value), Some(editor)) =
+                            (input.read(cx).value().trim().parse::<i32>(), ew.upgrade())
+                        {
+                            editor.update(cx, |e, cx| e.$setter(value, cx));
+                        }
+                    }
+                }));
+                let ew = editor_weak.clone();
+                subs.push(cx.subscribe_in(
+                    &$input,
+                    window,
+                    move |_this, input, event: &ui::input::NumberInputEvent, window, cx| {
+                        let ui::input::NumberInputEvent::Step { action, .. } = event;
+                        let current = input.read(cx).value().trim().parse::<i32>().unwrap_or(0);
+                        let value = match action {
+                            ui::input::StepAction::Increment => current + 1,
+                            ui::input::StepAction::Decrement => current - 1,
+                        };
+                        input.update(cx, |i, cx| i.set_value(value.to_string(), window, cx));
+                        if let Some(editor) = ew.upgrade() {
+                            editor.update(cx, |e, cx| e.$setter(value, cx));
+                        }
+                    },
+                ));
+            }};
+        }
+        range_input!(start_input, set_play_range_start);
+        range_input!(end_input, set_play_range_end);
+
+        // Current-frame field: typing a number jumps the playhead.
+        let ew = editor_weak.clone();
+        subs.push(cx.subscribe_in(&frame_input, window, move |_this, input, event: &InputEvent, window, cx| {
+            if matches!(event, InputEvent::Change) {
+                if let (Ok(value), Some(editor)) =
+                    (input.read(cx).value().trim().parse::<i32>(), ew.upgrade())
+                {
+                    editor.update(cx, |e, cx| {
+                        if e.current_frame() != value {
+                            e.goto_frame(value, window, cx);
+                        }
+                    });
+                }
+            }
+        }));
+        let ew = editor_weak.clone();
+        subs.push(cx.subscribe_in(
+            &frame_input,
+            window,
+            move |_this, _input, event: &ui::input::NumberInputEvent, window, cx| {
+                let ui::input::NumberInputEvent::Step { action, fine } = event;
+                let step = if *fine { 1 } else { 1 };
+                let delta = match action {
+                    ui::input::StepAction::Increment => step,
+                    ui::input::StepAction::Decrement => -step,
+                };
+                if let Some(editor) = ew.upgrade() {
+                    editor.update(cx, |e, cx| e.step_frame(delta, window, cx));
+                }
+            },
+        ));
+
+        self.inputs = Some(TimelineInputs {
+            start: start_input,
+            end: end_input,
+            frame: frame_input,
+            _subscriptions: subs,
+        });
+    }
+
+    /// Keep the toolbar fields in step with the editor unless being typed in.
+    fn sync_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(inputs) = &self.inputs else { return };
+        let Some(editor) = self.editor.upgrade() else { return };
+        let (start, end, frame) = {
+            let e = editor.read(cx);
+            (e.play_range.0, e.play_range.1, e.current_frame())
+        };
+        for (input, value) in [(&inputs.start, start), (&inputs.end, end), (&inputs.frame, frame)] {
+            let text = value.to_string();
+            let focused = input.focus_handle(cx).contains_focused(window, cx);
+            if !focused && input.read(cx).value().as_ref() != text.as_str() {
+                input.update(cx, |i, cx| i.set_value(text, window, cx));
+            }
+        }
+    }
+}
+

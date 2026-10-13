@@ -23,6 +23,7 @@ use ui::dock::PanelView;
 mod core;
 mod editor;
 mod rendering;
+mod style;
 mod ui_components;
 
 pub use editor::SkeletalAnimEditorPanel;

@@ -1,5 +1,5 @@
-//! `TimelineRenderer` — a single instanced-rectangle pipeline used for track
-//! row backgrounds, keyframe diamonds, and the playhead.
+//! `TimelineRenderer` — a single instanced-shape pipeline (see `timeline.wgsl`)
+//! that draws everything on the timeline canvas.
 
 use super::types::{RectInstance, TimelineUniforms};
 
@@ -29,6 +29,7 @@ impl TimelineRenderer {
         _h: u32,
         fmt: wgpu::TextureFormat,
         uniforms: &TimelineUniforms,
+        clear: [f32; 4],
         rects: &[RectInstance],
     ) {
         if self.rects.is_none() {
@@ -50,9 +51,9 @@ impl TimelineRenderer {
                     depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.07,
-                            g: 0.07,
-                            b: 0.08,
+                            r: clear[0] as f64,
+                            g: clear[1] as f64,
+                            b: clear[2] as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -151,8 +152,11 @@ impl TimelineRenderer {
             0 => Float32x2, // pos
             1 => Float32x2, // size
             2 => Float32x4, // color
-            3 => Uint32,    // kind
-            4 => Uint32x3,  // _pad
+            3 => Float32x4, // border color
+            4 => Uint32,    // kind
+            5 => Float32,   // radius
+            6 => Float32,   // border
+            7 => Float32,   // glow
         ];
         let vbl = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<RectInstance>() as wgpu::BufferAddress,
@@ -174,7 +178,7 @@ impl TimelineRenderer {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: fmt,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),

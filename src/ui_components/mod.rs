@@ -1,3 +1,4 @@
+pub mod chrome;
 pub mod hierarchy_panel;
 pub mod properties_panel;
 

@@ -1,9 +1,11 @@
 pub mod timeline;
 pub mod viewport;
 
+#[cfg(test)]
+pub(crate) mod preview;
+
 pub use timeline::TimelinePanel;
 pub use viewport::ViewportPanel;
-
 #[cfg(test)]
 mod shader_tests {
     use naga::valid::{Capabilities, ValidationFlags, Validator};
