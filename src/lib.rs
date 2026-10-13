@@ -27,6 +27,9 @@ mod ui_components;
 
 pub use editor::SkeletalAnimEditorPanel;
 
+/// Id of the editor this plugin provides.
+pub const EDITOR_ID: &str = "skeletal-animation-editor";
+
 /// The Skeletal Animation Editor Plugin.
 #[derive(Default)]
 pub struct SkeletalAnimationPlugin;
@@ -55,37 +58,16 @@ impl EditorPlugin for SkeletalAnimationPlugin {
             },
             default_content: json!({}),
             categories: vec!["Animation".to_string()],
+            creation_directory: None,
         }]
     }
 
     fn editors(&self) -> Vec<EditorMetadata> {
         vec![EditorMetadata {
-            id: EditorId::new("skeletal-animation-editor"),
+            id: EditorId::new(EDITOR_ID),
             display_name: "Skeletal Animation Editor".into(),
             supported_file_types: vec![FileTypeId::new("skeletal_animation")],
         }]
-    }
-
-    fn create_editor(
-        &self,
-        editor_id: EditorId,
-        file_path: PathBuf,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Result<Arc<dyn PanelView>, PluginError> {
-        if editor_id.as_str() != "skeletal-animation-editor" {
-            return Err(PluginError::EditorNotFound { editor_id });
-        }
-
-        let panel = cx.new(|cx| {
-            SkeletalAnimEditorPanel::new_with_path(file_path.clone(), window, cx)
-                .unwrap_or_else(|err| {
-                    log::warn!("Failed to load skeletal animation asset {file_path:?}: {err}");
-                    SkeletalAnimEditorPanel::new(window, cx)
-                })
-        });
-
-        Ok(Arc::new(panel) as Arc<dyn PanelView>)
     }
 
     fn on_load(&mut self) {
@@ -93,4 +75,47 @@ impl EditorPlugin for SkeletalAnimationPlugin {
     }
 }
 
-// export_plugin!(SkeletalAnimationPlugin);
+impl EditorPluginEditor for SkeletalAnimationPlugin {
+    fn register_editors(&'static self, registry: &mut EditorFactoryRegistry) {
+        registry.register_fn(EditorId::new(EDITOR_ID), |file_path, window, cx| {
+            Self::create_editor(file_path, window, cx)
+        });
+    }
+}
+
+impl EditorPluginStatusbar for SkeletalAnimationPlugin {}
+impl EditorPluginAi for SkeletalAnimationPlugin {}
+impl EditorPluginComponents for SkeletalAnimationPlugin {
+    fn component_definitions(&self) -> Vec<ComponentDefinition> {
+        Vec::new()
+    }
+}
+impl EditorPluginSubsystems for SkeletalAnimationPlugin {
+    fn subsystems(&self) -> Vec<Box<dyn Subsystem>> {
+        Vec::new()
+    }
+}
+
+impl SkeletalAnimationPlugin {
+    /// Open `file_path` in a new editor panel (for hosts that link this crate).
+    pub fn create_editor(
+        file_path: PathBuf,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<Arc<dyn PanelView>, PluginError> {
+        let panel = cx.new(|cx| {
+            SkeletalAnimEditorPanel::new_with_path(file_path.clone(), window, cx).unwrap_or_else(
+                |err| {
+                    log::warn!("Failed to load skeletal animation asset {file_path:?}: {err}");
+                    SkeletalAnimEditorPanel::new(window, cx)
+                },
+            )
+        });
+        Ok(Arc::new(panel) as Arc<dyn PanelView>)
+    }
+}
+
+// Static built-ins are instantiated through the Rust API and must not emit the
+// process-global dynamic loader symbols shared by every plugin.
+#[cfg(not(feature = "builtin"))]
+export_plugin!(SkeletalAnimationPlugin);

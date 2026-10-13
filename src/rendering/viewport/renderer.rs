@@ -804,7 +804,7 @@ impl ViewportRenderer {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_line"),
-                buffers: &[vbl],
+                buffers: &[Some(vbl)],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -874,7 +874,7 @@ impl ViewportRenderer {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_joint"),
-                buffers: &[vbl],
+                buffers: &[Some(vbl)],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -954,7 +954,7 @@ impl ViewportRenderer {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_mesh"),
-                buffers: &[vbl],
+                buffers: &[Some(vbl)],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -1024,7 +1024,7 @@ impl ViewportRenderer {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_axis"),
-                buffers: &[axis_vbl],
+                buffers: &[Some(axis_vbl)],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -1065,7 +1065,7 @@ impl ViewportRenderer {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_bubble"),
-                buffers: &[bubble_vbl],
+                buffers: &[Some(bubble_vbl)],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
