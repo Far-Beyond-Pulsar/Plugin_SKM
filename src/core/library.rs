@@ -102,7 +102,7 @@ impl Library {
     /// the UI thread for large projects.
     pub fn scan(root: &Path) -> Self {
         let mut library = Self::empty(root.to_path_buf());
-        for path in collect(root) {
+        for path in collect(root, SKELETON_EXTENSION) {
             library.add_path(&path);
         }
         library.problems.sort_by(|a, b| a.path.cmp(&b.path));
@@ -253,7 +253,7 @@ impl Library {
     }
 }
 
-fn same_file(a: &Path, b: &Path) -> bool {
+pub(super) fn same_file(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
@@ -263,8 +263,8 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Every `.skeleton` file under `root`, in path order.
-fn collect(root: &Path) -> Vec<PathBuf> {
+/// Every file with `extension` under `root`, in path order.
+pub(super) fn collect(root: &Path, extension: &str) -> Vec<PathBuf> {
     let Ok(entries) = engine_fs::virtual_fs::manifest(root) else {
         return Vec::new();
     };
@@ -280,7 +280,7 @@ fn collect(root: &Path) -> Vec<PathBuf> {
             !skipped
                 && path
                     .extension()
-                    .is_some_and(|x| x.eq_ignore_ascii_case(SKELETON_EXTENSION))
+                    .is_some_and(|x| x.eq_ignore_ascii_case(extension))
         })
         .map(|e| root.join(e.path))
         .take(MAX_FILES)

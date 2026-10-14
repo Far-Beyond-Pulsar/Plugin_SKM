@@ -5,6 +5,8 @@ use super::animation::{AnimationClip, BoneTrack, Keyframe};
 use super::assets::{AnimSeqAsset, SkeletonAsset};
 use super::math::{Transform, Vec3};
 use super::skeleton::{Bone, Skeleton};
+#[cfg(test)]
+use super::skmesh::SkeletalMeshAsset;
 
 fn bone(id: &str, name: &str, parent: Option<&str>, translation: Vec3) -> Bone {
     Bone {
@@ -273,6 +275,94 @@ pub fn sample_assets() -> (SkeletonAsset, AnimSeqAsset) {
     let skeleton = SkeletonAsset::new(humanoid_skeleton());
     let sequence = AnimSeqAsset::new(Some(skeleton.id.clone()), run_animation(&skeleton.skeleton()));
     (skeleton, sequence)
+}
+
+/// A blocky skinned body for tests and headless renders: a box around the
+/// segment from each bone's parent to the bone, skinned to the bone, with the
+/// end at the parent shared half-and-half so the joints bend. Joint `n` follows
+/// bone `n` of the skeleton.
+#[cfg(test)]
+pub fn sample_mesh(skeleton: &SkeletonAsset) -> SkeletalMeshAsset {
+    use super::animation::evaluate_world_transforms;
+    use super::skmesh::{Joint, MaterialSlot, MeshLod, MeshSection, SkinnedVertex};
+
+    let skeleton_data = skeleton.skeleton();
+    let world = evaluate_world_transforms(&skeleton_data, &AnimationClip::bind_pose(), 0.0);
+    let index_of = |id: &str| skeleton_data.bones.iter().position(|b| b.id == id);
+
+    let mut mesh = SkeletalMeshAsset::new(Some(skeleton.id.clone()));
+    mesh.joints = skeleton_data
+        .bones
+        .iter()
+        .map(|bone| Joint {
+            bone: bone.id.clone(),
+            inverse_bind: world[&bone.id].inverse().0,
+        })
+        .collect();
+    mesh.material_slots = vec![MaterialSlot {
+        name: "Body".to_string(),
+        material: None,
+    }];
+
+    let (mut vertices, mut indices) = (Vec::new(), Vec::new());
+    for (child, bone) in skeleton_data.bones.iter().enumerate() {
+        let Some(parent) = bone.parent.as_deref().and_then(index_of) else {
+            continue;
+        };
+        let head = world[&skeleton_data.bones[parent].id].transform_point(Vec3::ZERO);
+        let tail = world[&bone.id].transform_point(Vec3::ZERO);
+        let axis = tail.sub(head);
+        if axis.length() < 1e-4 {
+            continue;
+        }
+        let axis_unit = axis.normalize();
+        let reference = if axis_unit.z.abs() < 0.9 {
+            Vec3::new(0.0, 0.0, 1.0)
+        } else {
+            Vec3::new(1.0, 0.0, 0.0)
+        };
+        let u = axis_unit.cross(reference).normalize();
+        let v = axis_unit.cross(u).normalize();
+        let radius = axis.length() * 0.18;
+
+        let base = vertices.len() as u32;
+        for (end, at_tail) in [(head, false), (tail, true)] {
+            for (su, sv) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                let out = u.scale(su).add(v.scale(sv));
+                let position = end.add(out.scale(radius));
+                let normal = out.normalize();
+                let (joints, weights) = if at_tail {
+                    ([child as u16, 0, 0, 0], [1.0, 0.0, 0.0, 0.0])
+                } else {
+                    ([parent as u16, child as u16, 0, 0], [0.5, 0.5, 0.0, 0.0])
+                };
+                vertices.push(SkinnedVertex {
+                    position: position.to_array(),
+                    normal: normal.to_array(),
+                    uv: [0.0, 0.0],
+                    joints,
+                    weights,
+                });
+            }
+        }
+        for i in 0..4u32 {
+            let next = (i + 1) % 4;
+            indices.extend([base + i, base + next, base + 4 + next]);
+            indices.extend([base + i, base + 4 + next, base + 4 + i]);
+        }
+        indices.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
+        indices.extend([base + 4, base + 5, base + 6, base + 4, base + 6, base + 7]);
+    }
+    mesh.lods = vec![MeshLod {
+        sections: vec![MeshSection {
+            first_index: 0,
+            index_count: indices.len() as u32,
+            material_slot: 0,
+        }],
+        vertices,
+        indices,
+    }];
+    mesh
 }
 
 #[cfg(test)]
