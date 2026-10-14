@@ -9,3 +9,6 @@ pub use panel::ViewportPanel;
 
 #[cfg(test)]
 mod render_tests;
+
+#[cfg(test)]
+mod real_sample_tests;
