@@ -17,6 +17,7 @@ use ui_common::MeshAssetPicker;
 
 use crate::core::skinning::{bone_influence, joint_vertex_counts};
 use crate::core::skmesh::{MeshStats, SkeletalMeshAsset};
+use crate::core::validate::{Issue, Severity};
 use crate::core::Skeleton;
 use crate::editor::SkeletalAnimEditorPanel;
 use crate::ui_components::chrome::{empty_message, panel_header, MONO};
@@ -65,6 +66,17 @@ pub fn joint_rows(
             }
         })
         .collect()
+}
+
+/// "none", or how many errors and warnings `issues` holds.
+pub fn issue_summary(issues: &[Issue]) -> String {
+    let count = |severity| issues.iter().filter(|i| i.severity == severity).count();
+    match (count(Severity::Error), count(Severity::Warning)) {
+        (0, 0) => "none".to_string(),
+        (errors, 0) => format!("{errors} error(s)"),
+        (0, warnings) => format!("{warnings} warning(s)"),
+        (errors, warnings) => format!("{errors} error(s), {warnings} warning(s)"),
+    }
 }
 
 /// How many vertices `bone` influences and the strongest weight it has, over
@@ -129,7 +141,12 @@ impl MeshInspectorPanel {
             )
     }
 
-    fn render_stats(&self, stats: MeshStats, cx: &App) -> impl IntoElement {
+    fn render_stats(
+        &self,
+        stats: MeshStats,
+        issues: &[Issue],
+        cx: &App,
+    ) -> impl IntoElement {
         self.section("Statistics", IconName::Info, cx)
             .child(self.stat("Vertices", stats.vertices.to_string(), cx))
             .child(self.stat("Triangles", stats.triangles.to_string(), cx))
@@ -138,6 +155,7 @@ impl MeshInspectorPanel {
             .child(self.stat("Sections", stats.sections.to_string(), cx))
             .child(self.stat("Material slots", stats.material_slots.to_string(), cx))
             .child(self.stat("LODs", stats.lods.to_string(), cx))
+            .child(self.stat("Issues", issue_summary(issues), cx))
     }
 
     fn render_slots(
@@ -385,7 +403,7 @@ impl Render for MeshInspectorPanel {
                         .flex_1()
                         .min_h_0()
                         .scrollable(ScrollbarAxis::Vertical)
-                        .child(self.render_stats(mesh.stats(), cx))
+                        .child(self.render_stats(mesh.stats(), &e.issues, cx))
                         .child(self.render_slots(mesh, &e.slot_pickers, &editor, cx))
                         .child(self.render_joints(
                             mesh,
@@ -411,7 +429,8 @@ impl Render for MeshInspectorPanel {
 #[cfg(test)]
 mod tests {
     // Not `use super::*`: it would bring in gpui's `test` attribute macro.
-    use super::{bone_weight_summary, joint_rows};
+    use super::{bone_weight_summary, issue_summary, joint_rows};
+    use crate::core::validate::{Issue, Severity};
     use crate::core::sample;
     use crate::core::skmesh::SkeletalMeshAsset;
     use crate::core::Skeleton;
@@ -442,6 +461,18 @@ mod tests {
         assert!(joint_rows(&mesh, &Skeleton::default(), false)
             .iter()
             .all(|r| !r.missing));
+    }
+
+    #[test]
+    fn the_issue_summary_counts_errors_and_warnings() {
+        let issue = |severity| Issue::new(severity, "x");
+        assert_eq!(issue_summary(&[]), "none");
+        assert_eq!(issue_summary(&[issue(Severity::Info)]), "none");
+        assert_eq!(issue_summary(&[issue(Severity::Error), issue(Severity::Error)]), "2 error(s)");
+        assert_eq!(
+            issue_summary(&[issue(Severity::Error), issue(Severity::Warning)]),
+            "1 error(s), 1 warning(s)"
+        );
     }
 
     #[test]
