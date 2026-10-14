@@ -18,6 +18,7 @@ gpui-ce = { workspace = true }
 ui      = { workspace = true }
 
 plugin_editor_api = { workspace = true }
+skeletal_assets   = { workspace = true }
 ui_common         = { workspace = true }
 engine_fs         = { workspace = true }
 

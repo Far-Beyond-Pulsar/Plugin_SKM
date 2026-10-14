@@ -150,7 +150,41 @@ pub fn save_animseq_asset(path: &Path, asset: &AnimSeqAsset) -> anyhow::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::sample;
+    use crate::animation::{BoneTrack, Keyframe};
+    use crate::math::Transform;
+
+    /// A two-bone skeleton and a clip that moves the second bone.
+    mod sample {
+        use super::*;
+
+        pub fn humanoid_skeleton() -> Skeleton {
+            let bone = |id: &str, parent: Option<&str>| Bone {
+                id: id.into(),
+                name: id.into(),
+                parent: parent.map(str::to_string),
+                bind_transform: Transform::IDENTITY,
+            };
+            Skeleton {
+                bones: vec![bone("root", None), bone("arm", Some("root"))],
+            }
+        }
+
+        pub fn run_animation(_skeleton: &Skeleton) -> AnimationClip {
+            let key = |time: f32| Keyframe {
+                time,
+                transform: Transform::IDENTITY,
+            };
+            AnimationClip {
+                name: "Run".into(),
+                duration: 1.0,
+                fps: 30.0,
+                tracks: vec![BoneTrack {
+                    bone_id: "arm".into(),
+                    keyframes: vec![key(0.0), key(1.0)],
+                }],
+            }
+        }
+    }
 
     #[test]
     fn a_sequence_round_trips_and_keeps_its_skeleton_id() {
