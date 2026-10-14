@@ -93,6 +93,7 @@ impl Model {
         e.selected_bone.hash(&mut h);
         e.hovered_bone.hash(&mut h);
         e.skeleton.bones.len().hash(&mut h);
+        e.skeleton_revision.hash(&mut h);
         // Sets hash order-independently.
         let mut expanded = 0u64;
         for id in &e.expanded_bones {

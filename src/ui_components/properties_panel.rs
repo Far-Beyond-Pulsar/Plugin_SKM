@@ -13,7 +13,7 @@ use ui::scroll::ScrollbarAxis;
 use ui::tag::Tag;
 use ui::{h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt};
 
-use crate::editor::panel::SkeletalAnimEditorPanel;
+use crate::editor::panel::{EditorMode, SkeletalAnimEditorPanel};
 use crate::editor::transform_inputs::TransformGroup;
 use crate::style::{AXIS_X, AXIS_Y, AXIS_Z};
 use crate::ui_components::chrome::{empty_message, panel_header, MONO};
@@ -89,6 +89,8 @@ impl BonePropertiesPanel {
         e.selected_bone.hash(&mut h);
         e.selected_keyframe.hash(&mut h);
         e.playback.playing.hash(&mut h);
+        e.skeleton_revision.hash(&mut h);
+        e.transform_editable().hash(&mut h);
         if !e.playback.playing {
             ((e.playback.time * 1000.0).round() as i64).hash(&mut h);
         }
@@ -114,7 +116,8 @@ impl BonePropertiesPanel {
 
         let timing = match track {
             _ if playing => "Playing".to_string(),
-            None => "Not animated — edits change the bind pose".to_string(),
+            None if e.mode == EditorMode::Skeleton => "Edits change the bind pose".to_string(),
+            None => "Not animated — showing the skeleton's bind pose".to_string(),
             Some(t) if t.keyframes.is_empty() => "No keys".to_string(),
             Some(t) => {
                 let time = e.playback.time;
@@ -147,7 +150,7 @@ impl BonePropertiesPanel {
             key_count: track.map(|t| t.keyframes.len()),
             selected_key,
             keyed,
-            locked: track.is_some() && !keyed,
+            locked: !e.transform_editable(),
             timing,
             world: if playing {
                 None

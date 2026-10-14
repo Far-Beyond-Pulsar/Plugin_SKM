@@ -77,6 +77,7 @@ impl TimelineGutter {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         e.selected_bone.hash(&mut h);
         self.only_selected.hash(&mut h);
+        e.skeleton_revision.hash(&mut h);
         for t in &e.animation.tracks {
             t.bone_id.hash(&mut h);
             t.keyframes.len().hash(&mut h);
