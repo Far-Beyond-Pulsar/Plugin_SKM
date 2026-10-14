@@ -22,6 +22,7 @@ use crate::core::assets::{
 };
 use crate::core::library::{self, Entry};
 use crate::core::migrate;
+use crate::core::skmesh::SkeletalMeshAsset;
 use crate::core::validate::Issue;
 use crate::core::{
     self, evaluate_world_transforms, AnimationClip, BoneTrack, Keyframe, Library, Skeleton,
@@ -92,6 +93,10 @@ pub struct ViewOptions {
     pub onion_skin: bool,
     /// The selected bone's path through the play range.
     pub motion_path: bool,
+    /// The skeletal mesh, skinned by the pose (when there is one).
+    pub mesh: bool,
+    /// Color the mesh by the selected bone's weights.
+    pub weights: bool,
 }
 
 impl Default for ViewOptions {
@@ -103,6 +108,8 @@ impl Default for ViewOptions {
             xray: true,
             onion_skin: false,
             motion_path: true,
+            mesh: true,
+            weights: true,
         }
     }
 }
@@ -201,6 +208,8 @@ pub struct SkeletalAnimEditorPanel {
     /// Skeletons in the project, as of the last scan.
     pub library: Library,
     pub project_root: PathBuf,
+    /// The skeletal mesh drawn skinned by the pose, if any.
+    pub mesh: Option<Arc<SkeletalMeshAsset>>,
     /// Problems with the sequence's skeleton link; recomputed on link changes.
     pub issues: Vec<Issue>,
     /// One-off message under the toolbar (e.g. that an old asset was converted).
@@ -413,6 +422,7 @@ impl SkeletalAnimEditorPanel {
             link: SkeletonLink::Unset,
             library: Library::default(),
             project_root: PathBuf::new(),
+            mesh: None,
             issues: Vec::new(),
             notice: None,
             skeleton_picker: None,

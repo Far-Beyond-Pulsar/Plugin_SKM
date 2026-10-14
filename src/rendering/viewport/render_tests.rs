@@ -1,6 +1,7 @@
 //! Headless renders of the viewport. Set `SKM_PREVIEW_DIR` to also write the
 //! frames out as PNGs for inspection.
 
+use crate::core::assets::SkeletonAsset;
 use crate::core::sample;
 use crate::editor::panel::ViewOptions;
 use crate::rendering::preview::{self, Gpu};
@@ -8,7 +9,7 @@ use crate::style::Palette;
 
 use super::camera::{OrbitCamera, ViewAxis};
 use super::renderer::{SceneFrame, ViewportRenderer};
-use super::scene::{build_gizmo, build_scene, SceneInput};
+use super::scene::{build_gizmo, build_scene, SceneInput, SkinInput};
 use super::types::ViewportUniforms;
 
 struct Shot {
@@ -20,11 +21,15 @@ struct Shot {
     view: ViewOptions,
     time: f32,
     size: (u32, u32),
+    /// Draw the sample skinned mesh, colored by the selected bone's weights.
+    skin: bool,
 }
 
 fn render_shot(gpu: &Gpu, shot: Shot) -> Vec<u8> {
-    let skeleton = sample::humanoid_skeleton();
+    let skeleton_asset = SkeletonAsset::new(sample::humanoid_skeleton());
+    let skeleton = skeleton_asset.skeleton();
     let clip = sample::run_animation(&skeleton);
+    let mesh = sample::sample_mesh(&skeleton_asset);
     let geo = build_scene(&SceneInput {
         skeleton: &skeleton,
         clip: &clip,
@@ -35,6 +40,10 @@ fn render_shot(gpu: &Gpu, shot: Shot) -> Vec<u8> {
         view: shot.view,
         palette: &shot.palette,
         tracers: None,
+        skin: shot.skin.then_some(SkinInput {
+            mesh: &mesh,
+            weights_of: shot.selected,
+        }),
     });
 
     let (w, h) = shot.size;
@@ -69,6 +78,7 @@ fn render_shot(gpu: &Gpu, shot: Shot) -> Vec<u8> {
                 &SceneFrame {
                     uniforms: &uniforms,
                     mesh: &geo.mesh,
+                    skin: &geo.skin,
                     ghost: &geo.ghost,
                     ribbons: &geo.ribbons,
                     joints: &geo.joints,
@@ -105,6 +115,7 @@ fn render_viewport_previews() {
             },
             time: 0.2,
             size: (1000, 640),
+            skin: false,
         },
     );
     assert!(preview::coverage(&dark) > 0.5, "viewport rendered blank");
@@ -137,6 +148,7 @@ fn render_viewport_previews() {
             },
             time: 0.35,
             size: (760, 560),
+            skin: false,
         },
     );
 
@@ -155,7 +167,53 @@ fn render_viewport_previews() {
             view: ViewOptions::default(),
             time: 0.1,
             size: (760, 560),
+            skin: false,
         },
+    );
+}
+
+/// The skinned mesh is drawn, and the selected bone's weights show as a heat
+/// map: red where the bone is in full control, blue where it has no say.
+#[test]
+fn render_skinned_mesh_with_weights() {
+    let Some(gpu) = Gpu::new() else { return };
+    let shot = |selected, skin| Shot {
+        name: if skin {
+            "viewport_skin"
+        } else {
+            "viewport_plain"
+        },
+        palette: Palette::test_dark(),
+        camera: OrbitCamera::default(),
+        selected,
+        hovered: None,
+        view: ViewOptions::default(),
+        time: 0.2,
+        size: (900, 640),
+        skin,
+    };
+    let count = |rgba: &[u8], pick: fn(u8, u8, u8) -> bool| {
+        rgba.chunks_exact(4)
+            .filter(|px| pick(px[0], px[1], px[2]))
+            .count()
+    };
+    let red = |r: u8, g: u8, b: u8| r > g.saturating_add(70) && r > b.saturating_add(70);
+    let blue = |r: u8, g: u8, b: u8| b > r.saturating_add(70) && b > g.saturating_add(40);
+
+    let weights = render_shot(&gpu, shot(Some("thigh_r"), true));
+    let plain = render_shot(&gpu, shot(None, false));
+    assert!(preview::coverage(&weights) > 0.5, "viewport rendered blank");
+    assert!(
+        count(&weights, red) > 200,
+        "no pixel shows the bone's full weight"
+    );
+    assert!(
+        count(&weights, blue) > count(&plain, blue) + 200,
+        "no pixel shows an unweighted part"
+    );
+    assert!(
+        count(&weights, red) > count(&plain, red),
+        "the heat map adds red"
     );
 }
 
@@ -183,6 +241,7 @@ fn render_viewport_in_motion() {
                 view: ViewOptions::default(),
                 palette: &palette,
                 tracers: None,
+                skin: None,
             });
             if i == 0 {
                 camera.frame_sphere(geo.center, geo.radius);
@@ -206,6 +265,7 @@ fn render_viewport_in_motion() {
                 &SceneFrame {
                     uniforms: &uniforms,
                     mesh: &geo.mesh,
+                    skin: &geo.skin,
                     ghost: &geo.ghost,
                     ribbons: &geo.ribbons,
                     joints: &geo.joints,

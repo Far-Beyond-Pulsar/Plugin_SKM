@@ -22,7 +22,10 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use ui::button::{Button, ButtonVariants};
 use ui::tag::Tag;
-use ui::{dock::PanelEvent, h_flex, ActiveTheme, Icon, IconName, PixelsExt, Selectable, Sizable, StyledExt};
+use ui::{
+    dock::PanelEvent, h_flex, ActiveTheme, Icon, IconName, PixelsExt, Selectable, Sizable,
+    StyledExt,
+};
 
 use crate::core::{Mat4, Vec3};
 use crate::editor::panel::{SkeletalAnimEditorPanel, ViewOptions};
@@ -31,7 +34,7 @@ use crate::ui_components::chrome::{toolbar_divider, MONO};
 
 use super::camera::{FlyInput, OrbitCamera, MAX_DISTANCE, MIN_DISTANCE};
 use super::renderer::{SceneFrame, ViewportRenderer};
-use super::scene::{build_gizmo, build_scene, GizmoLayout, SceneInput};
+use super::scene::{build_gizmo, build_scene, GizmoLayout, SceneInput, SkinInput};
 use super::types::ViewportUniforms;
 
 /// Hit-test radius, in pixels, used to pick the nearest joint.
@@ -127,7 +130,12 @@ impl ViewportPanel {
         )
     }
 
-    fn handle_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.focus_handle.focus(window, cx);
         self.camera_goal = None;
         let pos = Point::new(event.position.x.as_f32(), event.position.y.as_f32());
@@ -184,7 +192,12 @@ impl ViewportPanel {
         true
     }
 
-    fn handle_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let key = event.keystroke.key.as_str();
         // While flying, WASD/Space move the camera.
         if self.drag_mode == DragMode::Look {
@@ -242,7 +255,8 @@ impl ViewportPanel {
 
         if let Some(goal) = self.camera_goal {
             const EASE: f32 = 0.22;
-            let delta_yaw = ((goal.yaw_deg - self.camera.yaw_deg + 540.0).rem_euclid(360.0)) - 180.0;
+            let delta_yaw =
+                ((goal.yaw_deg - self.camera.yaw_deg + 540.0).rem_euclid(360.0)) - 180.0;
             self.camera.yaw_deg += delta_yaw * EASE;
             self.camera.pitch_deg += (goal.pitch_deg - self.camera.pitch_deg) * EASE;
             self.camera.distance += (goal.distance - self.camera.distance) * EASE;
@@ -299,7 +313,8 @@ impl ViewportPanel {
             ScrollDelta::Pixels(p) => p.y.as_f32() / 40.0,
         };
         self.camera_goal = None;
-        self.camera.distance = (self.camera.distance * (1.0 - delta * 0.1)).clamp(MIN_DISTANCE, MAX_DISTANCE);
+        self.camera.distance =
+            (self.camera.distance * (1.0 - delta * 0.1)).clamp(MIN_DISTANCE, MAX_DISTANCE);
         cx.notify();
     }
 
@@ -331,7 +346,13 @@ impl ViewportPanel {
             .map(|(id, _)| id)
     }
 
-    fn pick_bone(&mut self, pos: (f32, f32), clicks: usize, window: &mut Window, cx: &mut Context<Self>) {
+    fn pick_bone(
+        &mut self,
+        pos: (f32, f32),
+        clicks: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(editor) = self.editor.upgrade() else {
             return;
         };
@@ -418,6 +439,7 @@ impl ViewportPanel {
         &self,
         options: ViewOptions,
         tracers: bool,
+        has_mesh: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = cx.theme().clone();
@@ -487,6 +509,23 @@ impl ViewportPanel {
                 options.xray,
                 |o| &mut o.xray,
             ))
+            .when(has_mesh, |bar| {
+                bar.child(toolbar_divider(cx))
+                    .child(self.view_toggle(
+                        "vp-mesh",
+                        IconName::Cube,
+                        "Skeletal mesh: draw the skinned mesh",
+                        options.mesh,
+                        |o| &mut o.mesh,
+                    ))
+                    .child(self.view_toggle(
+                        "vp-weights",
+                        IconName::ColorFilter,
+                        "Weights: color the mesh by the selected bone's influence",
+                        options.weights,
+                        |o| &mut o.weights,
+                    ))
+            })
             .child(toolbar_divider(cx))
             .child(self.view_toggle(
                 "vp-onion",
@@ -522,7 +561,11 @@ impl ViewportPanel {
         let theme = cx.theme();
         let (_, pos) = self.joints.iter().find(|(b, _)| b == id)?;
         let (x, y) = self.project(*pos)?;
-        if x < -40.0 || y < -20.0 || x > self.last_size.width + 40.0 || y > self.last_size.height + 20.0 {
+        if x < -40.0
+            || y < -20.0
+            || x > self.last_size.width + 40.0
+            || y > self.last_size.height + 20.0
+        {
             return None;
         }
         let accent = if selected { theme.warning } else { theme.info };
@@ -540,7 +583,11 @@ impl ViewportPanel {
                 .border_1()
                 .border_color(accent.opacity(0.7))
                 .shadow_sm()
-                .child(Icon::new(IconName::Component).size(px(11.0)).text_color(accent))
+                .child(
+                    Icon::new(IconName::Component)
+                        .size(px(11.0))
+                        .text_color(accent),
+                )
                 .child(
                     div()
                         .text_xs()
@@ -573,13 +620,14 @@ impl ViewportPanel {
                     .iter()
                     .find(|(b, _)| b.id == bone.id)
                     .map_or(0, |(_, d)| *d);
-                row.child(Tag::primary().small().child(bone.name.clone())).child(
-                    div()
-                        .text_size(px(10.5))
-                        .font_family(MONO)
-                        .text_color(theme.muted_foreground)
-                        .child(format!("depth {depth}")),
-                )
+                row.child(Tag::primary().small().child(bone.name.clone()))
+                    .child(
+                        div()
+                            .text_size(px(10.5))
+                            .font_family(MONO)
+                            .text_color(theme.muted_foreground)
+                            .child(format!("depth {depth}")),
+                    )
             })
             .child(
                 div()
@@ -623,7 +671,7 @@ impl Render for ViewportPanel {
         let palette = self.palette;
 
         // Build the frame's geometry from the editor's current pose.
-        let (geo, options, tracers_on, hud, labels) = {
+        let (geo, options, tracers_on, has_mesh, hud, labels) = {
             let e = editor.read(cx);
             let (start, end) = e.play_range_seconds();
             let geo = build_scene(&SceneInput {
@@ -639,6 +687,18 @@ impl Render for ViewportPanel {
                     .debug
                     .show_tracers
                     .then_some((&e.tracer_state.trails, &e.tracer_state.colors)),
+                skin: e
+                    .mesh
+                    .as_deref()
+                    .filter(|_| e.view_options.mesh)
+                    .map(|mesh| SkinInput {
+                        mesh,
+                        weights_of: e
+                            .view_options
+                            .weights
+                            .then(|| e.selected_bone.as_deref())
+                            .flatten(),
+                    }),
             });
             let name = |id: &str| {
                 e.skeleton
@@ -661,6 +721,7 @@ impl Render for ViewportPanel {
                 geo,
                 e.view_options,
                 e.debug.show_tracers,
+                e.mesh.is_some(),
                 self.render_hud(e, cx).into_any_element(),
                 labels,
             )
@@ -685,7 +746,7 @@ impl Render for ViewportPanel {
             .iter()
             .filter_map(|(id, selected, name)| self.bone_label(id, *selected, name, cx))
             .collect();
-        let toolbar = self.render_toolbar(options, tracers_on, cx);
+        let toolbar = self.render_toolbar(options, tracers_on, has_mesh, cx);
 
         let gpu_display: AnyElement = if let Some(ref s) = self.surface {
             wgpu_surface(s.clone())
@@ -710,8 +771,10 @@ impl Render for ViewportPanel {
                     let sw = bounds.size.width.as_f32().max(1.0) as u32;
                     let sh = bounds.size.height.as_f32().max(1.0) as u32;
                     pre.update(cx, |panel, cx| {
-                        panel.last_origin = Point::new(bounds.origin.x.as_f32(), bounds.origin.y.as_f32());
-                        panel.last_size = Size::new(bounds.size.width.as_f32(), bounds.size.height.as_f32());
+                        panel.last_origin =
+                            Point::new(bounds.origin.x.as_f32(), bounds.origin.y.as_f32());
+                        panel.last_size =
+                            Size::new(bounds.size.width.as_f32(), bounds.size.height.as_f32());
                         if panel.surface.is_none() {
                             if let Some(s) = window.create_wgpu_surface(
                                 sw.max(64),
@@ -726,7 +789,9 @@ impl Render for ViewportPanel {
                 },
                 move |_bounds, _pre, _window, cx| {
                     paint.update(cx, |panel, _cx| {
-                        let Some(ref surface) = panel.surface else { return };
+                        let Some(ref surface) = panel.surface else {
+                            return;
+                        };
                         if surface.is_resize_pending() {
                             return;
                         }
@@ -763,6 +828,7 @@ impl Render for ViewportPanel {
                             &SceneFrame {
                                 uniforms: &uniforms,
                                 mesh: &geo.mesh,
+                                skin: &geo.skin,
                                 ghost: &geo.ghost,
                                 ribbons: &geo.ribbons,
                                 joints: &geo.joints,
@@ -826,13 +892,19 @@ impl Render for ViewportPanel {
                 MouseButton::Middle,
                 cx.listener(|this, _: &MouseUpEvent, _, _| this.handle_mouse_up()),
             )
-            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| this.handle_mouse_move(e, cx)))
-            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| this.handle_scroll(e, cx)))
-            .on_key_down(cx.listener(|this, e: &KeyDownEvent, w, cx| this.handle_key_down(e, w, cx)))
-            .on_key_up(cx.listener(|this, e: &KeyUpEvent, _, cx| this.handle_key_up(e, cx)))
-            .on_modifiers_changed(
-                cx.listener(|this, e: &ModifiersChangedEvent, _, cx| this.handle_modifiers_changed(e, cx)),
+            .on_mouse_move(
+                cx.listener(|this, e: &MouseMoveEvent, _, cx| this.handle_mouse_move(e, cx)),
             )
+            .on_scroll_wheel(
+                cx.listener(|this, e: &ScrollWheelEvent, _, cx| this.handle_scroll(e, cx)),
+            )
+            .on_key_down(
+                cx.listener(|this, e: &KeyDownEvent, w, cx| this.handle_key_down(e, w, cx)),
+            )
+            .on_key_up(cx.listener(|this, e: &KeyUpEvent, _, cx| this.handle_key_up(e, cx)))
+            .on_modifiers_changed(cx.listener(|this, e: &ModifiersChangedEvent, _, cx| {
+                this.handle_modifiers_changed(e, cx)
+            }))
             .child(gpu_display)
             .child(driver)
             .children(label_elements)
