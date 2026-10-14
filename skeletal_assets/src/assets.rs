@@ -18,7 +18,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::animation::AnimationClip;
-use super::ids::SkeletonId;
+use super::ids::{SkeletalMeshId, SkeletonId};
 use super::skeleton::{Bone, Skeleton};
 
 /// File extension of skeleton assets.
@@ -45,6 +45,10 @@ pub struct SkeletonAsset {
     pub id: SkeletonId,
     #[serde(default)]
     pub bones: Vec<Bone>,
+    /// A skeletal mesh to draw in the skeleton editor, for orientation only.
+    /// Optional, and absent from files written before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_mesh: Option<SkeletalMeshId>,
 }
 
 impl SkeletonAsset {
@@ -54,6 +58,7 @@ impl SkeletonAsset {
             version: FORMAT_VERSION,
             id: SkeletonId::new(),
             bones: skeleton.bones,
+            preview_mesh: None,
         }
     }
 
@@ -88,6 +93,10 @@ pub struct AnimSeqAsset {
     /// as is even when no skeleton with this id exists in the project.
     #[serde(default)]
     pub skeleton: Option<SkeletonId>,
+    /// A skeletal mesh to draw posed by this clip. Optional, and absent from
+    /// files written before it existed; it only changes the preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_mesh: Option<SkeletalMeshId>,
     #[serde(flatten)]
     pub clip: AnimationClip,
 }
@@ -97,8 +106,14 @@ impl AnimSeqAsset {
         Self {
             version: FORMAT_VERSION,
             skeleton,
+            preview_mesh: None,
             clip,
         }
+    }
+
+    pub fn with_preview_mesh(mut self, preview_mesh: Option<SkeletalMeshId>) -> Self {
+        self.preview_mesh = preview_mesh;
+        self
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -209,7 +224,10 @@ mod tests {
     fn an_unset_skeleton_round_trips_as_none() {
         let clip = sample::run_animation(&sample::humanoid_skeleton());
         let seq = AnimSeqAsset::new(None, clip);
-        assert!(AnimSeqAsset::parse(&seq.to_text()).unwrap().skeleton.is_none());
+        assert!(AnimSeqAsset::parse(&seq.to_text())
+            .unwrap()
+            .skeleton
+            .is_none());
     }
 
     #[test]
@@ -230,6 +248,45 @@ mod tests {
     }
 
     #[test]
+    fn the_preview_mesh_is_optional_and_files_without_it_still_load() {
+        // A version 1 sequence written before preview meshes existed.
+        let old = r#"{ "version": 1, "skeleton": null, "name": "Idle", "duration": 1.0, "fps": 30.0, "tracks": [] }"#;
+        let seq = AnimSeqAsset::parse(old).unwrap();
+        assert_eq!(seq.preview_mesh, None);
+        assert!(
+            !seq.to_text().contains("preview_mesh"),
+            "an unset link adds nothing to the file"
+        );
+
+        let mesh = SkeletalMeshId::new();
+        let with = AnimSeqAsset::new(None, seq.clip.clone()).with_preview_mesh(Some(mesh.clone()));
+        assert_eq!(
+            AnimSeqAsset::parse(&with.to_text()).unwrap().preview_mesh,
+            Some(mesh.clone())
+        );
+        // The clip fields still flatten next to it.
+        assert_eq!(
+            AnimSeqAsset::parse(&with.to_text()).unwrap().clip.name,
+            "Idle"
+        );
+
+        let old_skeleton =
+            r#"{ "version": 1, "id": "5b7a4a3e-0000-4000-8000-000000000001", "bones": [] }"#;
+        assert_eq!(
+            SkeletonAsset::parse(old_skeleton).unwrap().preview_mesh,
+            None
+        );
+        let mut skeleton = SkeletonAsset::new(sample::humanoid_skeleton());
+        skeleton.preview_mesh = Some(mesh.clone());
+        assert_eq!(
+            SkeletonAsset::parse(&skeleton.to_text())
+                .unwrap()
+                .preview_mesh,
+            Some(mesh)
+        );
+    }
+
+    #[test]
     fn a_newer_format_is_refused() {
         let text = format!(r#"{{ "version": {}, "bones": [] }}"#, FORMAT_VERSION + 1);
         assert!(SkeletonAsset::parse(&text).unwrap_err().contains("newer"));
@@ -244,8 +301,14 @@ mod tests {
         assert_eq!(load_skeleton_asset(&path).unwrap().id, asset.id);
 
         let seq_path = dir.path().join("Run.animseq");
-        let seq = AnimSeqAsset::new(Some(asset.id.clone()), sample::run_animation(&asset.skeleton()));
+        let seq = AnimSeqAsset::new(
+            Some(asset.id.clone()),
+            sample::run_animation(&asset.skeleton()),
+        );
         save_animseq_asset(&seq_path, &seq).unwrap();
-        assert_eq!(load_animseq_asset(&seq_path).unwrap().skeleton, Some(asset.id));
+        assert_eq!(
+            load_animseq_asset(&seq_path).unwrap().skeleton,
+            Some(asset.id)
+        );
     }
 }

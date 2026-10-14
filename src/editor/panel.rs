@@ -1288,6 +1288,7 @@ impl SkeletalAnimEditorPanel {
                     version: assets::FORMAT_VERSION,
                     id,
                     bones: self.skeleton.bones.clone(),
+                    preview_mesh: None,
                 };
                 assets::save_skeleton_asset(&path, &asset)?;
             }

@@ -58,6 +58,17 @@ pub struct AnimationClip {
 }
 
 impl AnimationClip {
+    /// A clip with no tracks: every bone holds its bind pose. What a skeleton
+    /// or a skeletal mesh is shown with when nothing animates it.
+    pub fn bind_pose() -> Self {
+        Self {
+            name: "Bind pose".to_string(),
+            duration: 1.0,
+            fps: 30.0,
+            tracks: Vec::new(),
+        }
+    }
+
     /// Frames per second, never below 1.
     pub fn fps_clamped(&self) -> f32 {
         self.fps.max(1.0)
