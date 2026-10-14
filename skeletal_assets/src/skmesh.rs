@@ -31,10 +31,9 @@
 //!
 //! # Limitations
 //!
-//! There are no material ids in the engine yet, so a material slot refers to
-//! its material by project-relative path, and moving the material breaks the
-//! slot. There is one LOD today, but the layout is a list so more can be added
-//! without a format change.
+//! Material slots carry a typed stable material id and retain a project-relative
+//! path cache for older readers. There is one LOD today, but the layout is a
+//! list so more can be added without a format change.
 
 use std::path::Path;
 
@@ -52,6 +51,7 @@ const MAGIC: &[u8; 4] = b"PSKM";
 /// Newest format version this build reads and writes. Newer files are refused.
 pub const SKMESH_VERSION: u32 = 1;
 const PREFIX: usize = 4 + 4 + 8;
+const MAX_HEADER_BYTES: usize = 16 * 1024 * 1024;
 /// Bytes per vertex in the payload.
 const VERTEX_BYTES: usize = (3 + 3 + 2) * 4 + 4 * 2 + 4 * 4;
 
@@ -111,7 +111,13 @@ impl Joint {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MaterialSlot {
     pub name: String,
-    /// Project-relative path of the material, if one is assigned.
+    /// Stable material identity. The path below is retained as a cache and as
+    /// a migration source for files written before material ids were added.
+    #[serde(default)]
+    pub material_id: Option<pulsar_reflection::MaterialRef>,
+    /// Legacy project-relative path of the material, if one is assigned.
+    /// New references use `material_id`; this is kept so older readers and
+    /// render paths can continue to resolve the material.
     #[serde(default)]
     pub material: Option<String>,
 }
@@ -260,6 +266,27 @@ impl SkeletalMeshAsset {
     /// geometry is damaged, so the project index can still list them.
     pub fn peek_id(bytes: &[u8]) -> Option<SkeletalMeshId> {
         read_header(bytes).ok().map(|(h, _)| h.id)
+    }
+
+    /// Read only the fixed prefix and JSON header from a `.skmesh` on disk.
+    /// The geometry payload is never loaded, even for large meshes.
+    pub fn peek_id_at(path: &Path) -> anyhow::Result<SkeletalMeshId> {
+        Self::peek_header_at(path).map(|(id, _)| id)
+    }
+
+    /// Read the identity and skeleton reference from a `.skmesh` header only.
+    pub fn peek_header_at(path: &Path) -> anyhow::Result<(SkeletalMeshId, Option<SkeletonId>)> {
+        let prefix = engine_fs::virtual_fs::read_file_prefix(path, PREFIX)?;
+        if prefix.len() < PREFIX || &prefix[..4] != MAGIC {
+            anyhow::bail!("not a skeletal mesh file");
+        }
+        let header_len = usize::try_from(u64::from_le_bytes(prefix[8..16].try_into()?))?;
+        if header_len > MAX_HEADER_BYTES {
+            anyhow::bail!("skeletal mesh header is too large");
+        }
+        let bytes = engine_fs::virtual_fs::read_file_prefix(path, PREFIX + header_len)?;
+        let (header, _) = read_header(&bytes).map_err(anyhow::Error::msg)?;
+        Ok((header.id, header.skeleton))
     }
 
     /// The skeleton a file's bytes refer to, reading only the header.
@@ -557,6 +584,7 @@ mod tests {
             ],
             material_slots: vec![MaterialSlot {
                 name: "Body".into(),
+                material_id: None,
                 material: Some("mats/Body.mat".into()),
             }],
             lods: vec![MeshLod {

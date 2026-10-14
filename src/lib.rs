@@ -37,6 +37,7 @@ use plugin_editor_api::*;
 use serde_json::json;
 use ui::dock::PanelView;
 
+mod animation_assets_editor;
 mod core;
 mod editor;
 mod rendering;
@@ -51,11 +52,17 @@ pub const SKELETON_EDITOR_ID: &str = "skeleton-editor";
 pub const ANIM_SEQUENCE_EDITOR_ID: &str = "animation-sequence-editor";
 /// Id of the Skeletal Mesh editor.
 pub const SKELETAL_MESH_EDITOR_ID: &str = "skeletal-mesh-editor";
+pub const BLEND_SPACE_EDITOR_ID: &str = "blend-space-editor";
+pub const ANIMATION_MONTAGE_EDITOR_ID: &str = "animation-montage-editor";
+pub const ANIMATION_GRAPH_EDITOR_ID: &str = "animation-graph-editor";
 /// Every editor id this plugin provides.
-pub const EDITOR_IDS: [&str; 3] = [
+pub const EDITOR_IDS: [&str; 6] = [
     SKELETON_EDITOR_ID,
     ANIM_SEQUENCE_EDITOR_ID,
     SKELETAL_MESH_EDITOR_ID,
+    BLEND_SPACE_EDITOR_ID,
+    ANIMATION_MONTAGE_EDITOR_ID,
+    ANIMATION_GRAPH_EDITOR_ID,
 ];
 
 /// File type of `.skeleton` assets.
@@ -67,6 +74,9 @@ pub const SKELETAL_MESH_FILE_TYPE: &str = "skeletal_mesh";
 /// File type of the old `.skelanim` folders. Kept so they still open (and
 /// convert); it is never offered in the create menu.
 pub const LEGACY_FILE_TYPE: &str = "skeletal_animation";
+pub const BLEND_SPACE_FILE_TYPE: &str = "blend_space";
+pub const ANIMATION_MONTAGE_FILE_TYPE: &str = "animation_montage";
+pub const ANIMATION_GRAPH_FILE_TYPE: &str = "animation_graph";
 
 /// Whether `editor_id` is one of this plugin's editors.
 pub fn provides_editor(editor_id: &str) -> bool {
@@ -144,6 +154,48 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 creation_directory: None,
             },
             FileTypeDefinition {
+                id: FileTypeId::new(BLEND_SPACE_FILE_TYPE),
+                extension: skeletal_assets::animation_sets::BLEND_SPACE_EXTENSION.to_string(),
+                display_name: "Blend Space".to_string(),
+                icon: ui::IconName::Keyframes,
+                color: gpui::rgb(0x7E57C2).into(),
+                structure: FileStructure::Standalone,
+                default_content: serde_json::to_value(
+                    skeletal_assets::animation_sets::BlendSpaceAsset::default(),
+                )
+                .unwrap_or_default(),
+                categories: vec!["Animation".to_string()],
+                creation_directory: None,
+            },
+            FileTypeDefinition {
+                id: FileTypeId::new(ANIMATION_MONTAGE_FILE_TYPE),
+                extension: skeletal_assets::animation_sets::MONTAGE_EXTENSION.to_string(),
+                display_name: "Animation Montage".to_string(),
+                icon: ui::IconName::Keyframes,
+                color: gpui::rgb(0x26A69A).into(),
+                structure: FileStructure::Standalone,
+                default_content: serde_json::to_value(
+                    skeletal_assets::animation_sets::AnimationMontageAsset::default(),
+                )
+                .unwrap_or_default(),
+                categories: vec!["Animation".to_string()],
+                creation_directory: None,
+            },
+            FileTypeDefinition {
+                id: FileTypeId::new(ANIMATION_GRAPH_FILE_TYPE),
+                extension: skeletal_assets::animation_sets::ANIMATION_GRAPH_EXTENSION.to_string(),
+                display_name: "Animation Graph".to_string(),
+                icon: ui::IconName::Keyframes,
+                color: gpui::rgb(0xEF5350).into(),
+                structure: FileStructure::Standalone,
+                default_content: serde_json::to_value(
+                    skeletal_assets::animation_sets::AnimationGraphAsset::default(),
+                )
+                .unwrap_or_default(),
+                categories: vec!["Animation".to_string()],
+                creation_directory: None,
+            },
+            FileTypeDefinition {
                 id: FileTypeId::new(LEGACY_FILE_TYPE),
                 extension: "skelanim".to_string(),
                 display_name: "Skeletal Animation (old)".to_string(),
@@ -181,6 +233,21 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 display_name: "Skeletal Mesh Editor".into(),
                 supported_file_types: vec![FileTypeId::new(SKELETAL_MESH_FILE_TYPE)],
             },
+            EditorMetadata {
+                id: EditorId::new(BLEND_SPACE_EDITOR_ID),
+                display_name: "Blend Space Editor".into(),
+                supported_file_types: vec![FileTypeId::new(BLEND_SPACE_FILE_TYPE)],
+            },
+            EditorMetadata {
+                id: EditorId::new(ANIMATION_MONTAGE_EDITOR_ID),
+                display_name: "Animation Montage Editor".into(),
+                supported_file_types: vec![FileTypeId::new(ANIMATION_MONTAGE_FILE_TYPE)],
+            },
+            EditorMetadata {
+                id: EditorId::new(ANIMATION_GRAPH_EDITOR_ID),
+                display_name: "Animation Graph Editor".into(),
+                supported_file_types: vec![FileTypeId::new(ANIMATION_GRAPH_FILE_TYPE)],
+            },
         ]
     }
 
@@ -192,9 +259,34 @@ impl EditorPlugin for SkeletalAnimationPlugin {
 impl EditorPluginEditor for SkeletalAnimationPlugin {
     fn register_editors(&'static self, registry: &mut EditorFactoryRegistry) {
         // Both editors are the same panel; the file decides which mode it opens in.
-        for id in EDITOR_IDS {
+        for id in [
+            SKELETON_EDITOR_ID,
+            ANIM_SEQUENCE_EDITOR_ID,
+            SKELETAL_MESH_EDITOR_ID,
+        ] {
             registry.register_fn(EditorId::new(id), |file_path, window, cx| {
                 Self::create_editor(file_path, window, cx)
+            });
+        }
+        for (id, kind) in [
+            (
+                BLEND_SPACE_EDITOR_ID,
+                animation_assets_editor::AnimationAssetEditorKind::BlendSpace,
+            ),
+            (
+                ANIMATION_MONTAGE_EDITOR_ID,
+                animation_assets_editor::AnimationAssetEditorKind::Montage,
+            ),
+            (
+                ANIMATION_GRAPH_EDITOR_ID,
+                animation_assets_editor::AnimationAssetEditorKind::Graph,
+            ),
+        ] {
+            registry.register_fn(EditorId::new(id), move |file_path, window, cx| {
+                let panel = animation_assets_editor::AnimationAssetEditor::open(
+                    file_path, kind, window, cx,
+                )?;
+                Ok(Arc::new(panel) as Arc<dyn PanelView>)
             });
         }
     }

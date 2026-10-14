@@ -12,6 +12,7 @@ engine_fs  = { workspace = true }
 uuid       = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
+pulsar_reflection = { workspace = true }
 anyhow     = { workspace = true }
 
 [dev-dependencies]

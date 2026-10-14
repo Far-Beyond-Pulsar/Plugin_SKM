@@ -141,12 +141,7 @@ impl MeshInspectorPanel {
             )
     }
 
-    fn render_stats(
-        &self,
-        stats: MeshStats,
-        issues: &[Issue],
-        cx: &App,
-    ) -> impl IntoElement {
+    fn render_stats(&self, stats: MeshStats, issues: &[Issue], cx: &App) -> impl IntoElement {
         self.section("Statistics", IconName::Info, cx)
             .child(self.stat("Vertices", stats.vertices.to_string(), cx))
             .child(self.stat("Triangles", stats.triangles.to_string(), cx))
@@ -227,23 +222,28 @@ impl MeshInspectorPanel {
                             .child(slot.name.clone()),
                     )
                     .child(field)
-                    .when(slot.material.is_some(), |row| {
-                        row.child(
-                            Button::new(("slot-clear", index))
-                                .icon(IconName::Close)
-                                .ghost()
-                                .xsmall()
-                                .tooltip("Clear the material")
-                                .on_click(move |_, _window, cx| {
-                                    editor.update(cx, |e, cx| e.set_slot_material(index, None, cx));
-                                }),
-                        )
-                    }),
+                    .when(
+                        slot.material.is_some() || slot.material_id.is_some(),
+                        |row| {
+                            row.child(
+                                Button::new(("slot-clear", index))
+                                    .icon(IconName::Close)
+                                    .ghost()
+                                    .xsmall()
+                                    .tooltip("Clear the material")
+                                    .on_click(move |_, _window, cx| {
+                                        editor.update(cx, |e, cx| {
+                                            e.set_slot_material(index, None, None, cx)
+                                        });
+                                    }),
+                            )
+                        },
+                    ),
             );
         }
         section.child(
             div().text_xs().text_color(theme.muted_foreground).child(
-                "Materials are referenced by project path until the engine has material ids.",
+                "Material assignments use stable IDs and follow materials when they move or are renamed.",
             ),
         )
     }
@@ -430,9 +430,9 @@ impl Render for MeshInspectorPanel {
 mod tests {
     // Not `use super::*`: it would bring in gpui's `test` attribute macro.
     use super::{bone_weight_summary, issue_summary, joint_rows};
-    use crate::core::validate::{Issue, Severity};
     use crate::core::sample;
     use crate::core::skmesh::SkeletalMeshAsset;
+    use crate::core::validate::{Issue, Severity};
     use crate::core::Skeleton;
 
     #[test]
@@ -468,7 +468,10 @@ mod tests {
         let issue = |severity| Issue::new(severity, "x");
         assert_eq!(issue_summary(&[]), "none");
         assert_eq!(issue_summary(&[issue(Severity::Info)]), "none");
-        assert_eq!(issue_summary(&[issue(Severity::Error), issue(Severity::Error)]), "2 error(s)");
+        assert_eq!(
+            issue_summary(&[issue(Severity::Error), issue(Severity::Error)]),
+            "2 error(s)"
+        );
         assert_eq!(
             issue_summary(&[issue(Severity::Error), issue(Severity::Warning)]),
             "1 error(s), 1 warning(s)"

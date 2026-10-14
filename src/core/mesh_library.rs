@@ -92,8 +92,8 @@ impl MeshLibrary {
         self.by_id.retain(|_, v| !v.is_empty());
         self.problems.retain(|p| !same_file(&p.path, path));
 
-        let bytes = match engine_fs::virtual_fs::read_file(path) {
-            Ok(bytes) => bytes,
+        let (id, skeleton) = match SkeletalMeshAsset::peek_header_at(path) {
+            Ok(header) => header,
             Err(error) => {
                 clear_asset_id(&self.root, path);
                 self.problems.push(MeshProblem {
@@ -103,28 +103,17 @@ impl MeshLibrary {
                 return;
             }
         };
-        match SkeletalMeshAsset::peek_id(&bytes) {
-            Some(id) => {
-                let name = path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                remember_asset_id(&self.root, &id, path);
-                self.by_id.entry(id.clone()).or_default().push(MeshEntry {
-                    id,
-                    path: path.to_path_buf(),
-                    name,
-                    skeleton: SkeletalMeshAsset::peek_skeleton(&bytes),
-                });
-            }
-            None => {
-                clear_asset_id(&self.root, path);
-                self.problems.push(MeshProblem {
-                    path: path.to_path_buf(),
-                    error: "not a skeletal mesh file".to_string(),
-                });
-            }
-        }
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        remember_asset_id(&self.root, &id, path);
+        self.by_id.entry(id.clone()).or_default().push(MeshEntry {
+            id,
+            path: path.to_path_buf(),
+            name,
+            skeleton,
+        });
     }
 
     pub fn root(&self) -> &Path {
@@ -206,16 +195,12 @@ impl MeshLibrary {
 
 /// The id of the mesh file at `path`.
 pub fn read_id(path: &Path) -> Result<SkeletalMeshId, String> {
-    let bytes = match engine_fs::virtual_fs::read_file(path) {
-        Ok(bytes) => bytes,
+    let id = match SkeletalMeshAsset::peek_id_at(path) {
+        Ok(id) => id,
         Err(error) => {
             clear_asset_id(&project_root(path), path);
             return Err(error.to_string());
         }
-    };
-    let Some(id) = SkeletalMeshAsset::peek_id(&bytes) else {
-        clear_asset_id(&project_root(path), path);
-        return Err("not a skeletal mesh file".to_string());
     };
     remember_asset_id(&project_root(path), &id, path);
     Ok(id)
@@ -252,7 +237,7 @@ fn remember_asset_id(root: &Path, id: &SkeletalMeshId, path: &Path) {
             index.refresh_path(path)?;
             let paths = index.paths_for_asset_id(id.as_str())?;
             if !paths.iter().any(|indexed| same_file(indexed, path)) {
-                index.record_asset_id(id.as_str(), path)?;
+                index.record_typed_asset_id("skmesh", id.as_str(), path)?;
             }
             Ok::<(), anyhow::Error>(())
         })();

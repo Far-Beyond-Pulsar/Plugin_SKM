@@ -332,7 +332,7 @@ fn remember_asset_id(root: &Path, id: &SkeletonId, path: &Path) {
             index.refresh_path(path)?;
             let paths = index.paths_for_asset_id(id.as_str())?;
             if !paths.iter().any(|indexed| same_file(indexed, path)) {
-                index.record_asset_id(id.as_str(), path)?;
+                index.record_typed_asset_id("skeleton", id.as_str(), path)?;
             }
             Ok::<(), anyhow::Error>(())
         })();

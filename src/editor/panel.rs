@@ -31,8 +31,8 @@ use crate::core::migrate;
 use crate::core::skmesh::{self, SkeletalMeshAsset, SKMESH_EXTENSION};
 use crate::core::validate::Issue;
 use crate::core::{
-    self, evaluate_world_transforms, AnimationClip, BoneTrack, Keyframe, Library, MeshLibrary,
-    MeshLink, SkeletalMeshId, Skeleton, SkeletonId, SkeletonLink, Transform, Vec3,
+    self, evaluate_world_transforms, AnimSequenceId, AnimationClip, BoneTrack, Keyframe, Library,
+    MeshLibrary, MeshLink, SkeletalMeshId, Skeleton, SkeletonId, SkeletonLink, Transform, Vec3,
 };
 use crate::rendering::{TimelinePanel, ViewportPanel};
 
@@ -214,6 +214,8 @@ pub struct SkeletalAnimEditorPanel {
 
     /// `Skeleton` mode: the edited skeleton's own id.
     pub asset_id: Option<SkeletonId>,
+    /// `Sequence` mode: the sequence's own stable id.
+    pub animation_id: Option<AnimSequenceId>,
     /// `Sequence` and `Mesh` modes: the skeleton the asset refers to. Kept as is
     /// even when nothing in the project has this id.
     pub skeleton_ref: Option<SkeletonId>,
@@ -377,6 +379,7 @@ impl SkeletalAnimEditorPanel {
                 panel.is_dirty = true;
             }
         }
+        remember_asset_id(&panel.project_root, &asset.id.to_string(), &path);
         panel.refresh_issues();
         if panel.preview_mesh_ref.is_some() {
             panel.rescan_library(cx);
@@ -390,26 +393,37 @@ impl SkeletalAnimEditorPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<Self> {
-        let asset = assets::load_animseq_asset(&path)?;
+        let text = assets::read_text(&path)?;
+        let had_id = AnimSeqAsset::peek_id(&text).is_some();
+        let asset = AnimSeqAsset::parse(&text)
+            .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?;
         // The skeleton arrives when the project scan finishes.
         let mut panel = Self::new_internal(
             EditorMode::Sequence,
             Skeleton::default(),
-            asset.clip,
+            asset.clip.clone(),
             Some(path.clone()),
             window,
             cx,
         );
+        panel.animation_id = Some(asset.id.clone());
         panel.project_root = library::project_root(&path);
         panel.library = Library::empty(panel.project_root.clone());
         panel.link = match &asset.skeleton {
             Some(id) => SkeletonLink::Resolving(id.clone()),
             None => SkeletonLink::Unset,
         };
-        panel.skeleton_ref = asset.skeleton;
+        panel.skeleton_ref = asset.skeleton.clone();
         panel.mesh_library = MeshLibrary::empty(panel.project_root.clone());
         panel.set_preview_ref_unscanned(asset.preview_mesh.clone());
         panel.notice = notice;
+        if !had_id {
+            if let Err(error) = assets::save_animseq_asset(&path, &asset) {
+                log::warn!("Failed to write the id into {path:?}: {error}");
+                panel.is_dirty = true;
+            }
+        }
+        remember_asset_id(&panel.project_root, &asset.id.to_string(), &path);
         panel.refresh_issues();
         if panel.skeleton_ref.is_some() || panel.preview_mesh_ref.is_some() {
             panel.rescan_library(cx);
@@ -506,6 +520,7 @@ impl SkeletalAnimEditorPanel {
             skeleton_revision: 0,
             animation,
             asset_id: None,
+            animation_id: (mode == EditorMode::Sequence).then(AnimSequenceId::new),
             skeleton_ref: None,
             link: SkeletonLink::Unset,
             library: Library::default(),
@@ -1429,9 +1444,15 @@ impl SkeletalAnimEditorPanel {
                 assets::save_skeleton_asset(&path, &asset)?;
             }
             EditorMode::Sequence => {
-                let asset = AnimSeqAsset::new(self.skeleton_ref.clone(), self.animation.clone())
-                    .with_preview_mesh(self.preview_mesh_ref.clone());
+                let mut asset =
+                    AnimSeqAsset::new(self.skeleton_ref.clone(), self.animation.clone())
+                        .with_preview_mesh(self.preview_mesh_ref.clone());
+                asset.id = self
+                    .animation_id
+                    .get_or_insert_with(AnimSequenceId::new)
+                    .clone();
                 assets::save_animseq_asset(&path, &asset)?;
+                remember_asset_id(&library::project_root(&path), &asset.id.to_string(), &path);
             }
             EditorMode::Mesh => {
                 if let Some(mesh) = self.mesh.as_deref() {
@@ -1475,6 +1496,23 @@ impl SkeletalAnimEditorPanel {
         while let Some(id) = current {
             self.expanded_bones.insert(id.clone());
             current = self.skeleton.bone(&id).and_then(|b| b.parent.clone());
+        }
+    }
+}
+
+fn remember_asset_id(root: &Path, id: &str, path: &Path) {
+    let kind = match path.extension().and_then(|extension| extension.to_str()) {
+        Some("skeleton") => "skeleton",
+        Some("animseq") => "animseq",
+        Some("skmesh") => "skmesh",
+        _ => return,
+    };
+    if let Ok(Some(index)) = engine_fs::open_project_file_index(root) {
+        if let Err(error) = index
+            .refresh_path(path)
+            .and_then(|_| index.record_typed_asset_id(kind, id, path))
+        {
+            log::debug!("could not cache asset id for {}: {error:#}", path.display());
         }
     }
 }

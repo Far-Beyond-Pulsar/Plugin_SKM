@@ -67,6 +67,11 @@ asset_id! {
     SkeletalMeshId
 }
 
+asset_id! {
+    /// An animation sequence's stable id.
+    AnimSequenceId
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

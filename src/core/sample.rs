@@ -481,6 +481,7 @@ pub fn sample_mesh(skeleton: &SkeletonAsset) -> SkeletalMeshAsset {
         .collect();
     mesh.material_slots = vec![MaterialSlot {
         name: "Body".to_string(),
+        material_id: None,
         material: None,
     }];
 

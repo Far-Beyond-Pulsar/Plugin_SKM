@@ -9,6 +9,7 @@
 //! - [`issue`]: what asset checks report
 
 pub mod animation;
+pub mod animation_sets;
 pub mod assets;
 pub mod ids;
 pub mod issue;

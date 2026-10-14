@@ -18,7 +18,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::animation::AnimationClip;
-use super::ids::{SkeletalMeshId, SkeletonId};
+use super::ids::{AnimSequenceId, SkeletalMeshId, SkeletonId};
 use super::skeleton::{Bone, Skeleton};
 
 /// File extension of skeleton assets.
@@ -89,6 +89,9 @@ impl SkeletonAsset {
 pub struct AnimSeqAsset {
     #[serde(default = "current_version")]
     pub version: u32,
+    /// Stable identity retained when the file is moved or reimported.
+    #[serde(default = "AnimSequenceId::new")]
+    pub id: AnimSequenceId,
     /// The skeleton this sequence animates. `None` until one is picked. Kept
     /// as is even when no skeleton with this id exists in the project.
     #[serde(default)]
@@ -105,6 +108,7 @@ impl AnimSeqAsset {
     pub fn new(skeleton: Option<SkeletonId>, clip: AnimationClip) -> Self {
         Self {
             version: FORMAT_VERSION,
+            id: AnimSequenceId::new(),
             skeleton,
             preview_mesh: None,
             clip,
@@ -118,6 +122,12 @@ impl AnimSeqAsset {
 
     pub fn parse(text: &str) -> Result<Self, String> {
         parse_versioned(text)
+    }
+
+    /// The id stored in `text`, if it has a valid one.
+    pub fn peek_id(text: &str) -> Option<AnimSequenceId> {
+        let value: serde_json::Value = serde_json::from_str(text).ok()?;
+        AnimSequenceId::parse(value.get("id")?.as_str()?)
     }
 
     pub fn to_text(&self) -> String {

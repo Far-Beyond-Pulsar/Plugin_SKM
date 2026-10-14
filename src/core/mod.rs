@@ -3,6 +3,7 @@
 //! (shared with the importer) and are re-exported here under their old paths.
 
 pub mod library;
+pub mod material_ids;
 pub mod mesh_library;
 pub mod migrate;
 pub mod sample;
@@ -14,7 +15,7 @@ pub use skeletal_assets::{animation, assets, ids, issue, math, skeleton, skinnin
 pub use animation::{
     bone_world_transform, evaluate_world_transforms, AnimationClip, BoneTrack, Keyframe,
 };
-pub use ids::{SkeletalMeshId, SkeletonId};
+pub use ids::{AnimSequenceId, SkeletalMeshId, SkeletonId};
 pub use library::{Library, SkeletonLink};
 pub use math::{Mat4, Transform, Vec3};
 pub use mesh_library::{MeshLibrary, MeshLink};
