@@ -13,7 +13,7 @@ use ui::scroll::ScrollbarAxis;
 use ui::tag::Tag;
 use ui::{h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt};
 
-use crate::editor::panel::SkeletalAnimEditorPanel;
+use crate::editor::panel::{EditorMode, SkeletalAnimEditorPanel};
 use crate::editor::transform_inputs::TransformGroup;
 use crate::style::{AXIS_X, AXIS_Y, AXIS_Z};
 use crate::ui_components::chrome::{empty_message, panel_header, MONO};
@@ -89,10 +89,16 @@ impl BonePropertiesPanel {
         e.selected_bone.hash(&mut h);
         e.selected_keyframe.hash(&mut h);
         e.playback.playing.hash(&mut h);
+        e.skeleton_revision.hash(&mut h);
+        e.transform_editable().hash(&mut h);
         if !e.playback.playing {
             ((e.playback.time * 1000.0).round() as i64).hash(&mut h);
         }
-        if let Some(track) = e.selected_bone.as_ref().and_then(|id| e.animation.track(id)) {
+        if let Some(track) = e
+            .selected_bone
+            .as_ref()
+            .and_then(|id| e.animation.track(id))
+        {
             for k in &track.keyframes {
                 k.time.to_bits().hash(&mut h);
             }
@@ -114,7 +120,8 @@ impl BonePropertiesPanel {
 
         let timing = match track {
             _ if playing => "Playing".to_string(),
-            None => "Not animated — edits change the bind pose".to_string(),
+            None if e.mode == EditorMode::Skeleton => "Edits change the bind pose".to_string(),
+            None => "Not animated — showing the skeleton's bind pose".to_string(),
             Some(t) if t.keyframes.is_empty() => "No keys".to_string(),
             Some(t) => {
                 let time = e.playback.time;
@@ -126,10 +133,18 @@ impl BonePropertiesPanel {
                         let next = t.keyframes.iter().find(|k| k.time > time);
                         match (prev, next) {
                             (Some(a), Some(b)) => {
-                                format!("Interpolating frames {} → {}", frame(a.time), frame(b.time))
+                                format!(
+                                    "Interpolating frames {} → {}",
+                                    frame(a.time),
+                                    frame(b.time)
+                                )
                             }
-                            (Some(a), None) => format!("Holding last key (frame {})", frame(a.time)),
-                            (None, Some(b)) => format!("Holding first key (frame {})", frame(b.time)),
+                            (Some(a), None) => {
+                                format!("Holding last key (frame {})", frame(a.time))
+                            }
+                            (None, Some(b)) => {
+                                format!("Holding first key (frame {})", frame(b.time))
+                            }
                             (None, None) => "No keys".to_string(),
                         }
                     }
@@ -147,7 +162,7 @@ impl BonePropertiesPanel {
             key_count: track.map(|t| t.keyframes.len()),
             selected_key,
             keyed,
-            locked: track.is_some() && !keyed,
+            locked: !e.transform_editable(),
             timing,
             world: if playing {
                 None
@@ -186,7 +201,12 @@ impl BonePropertiesPanel {
         let theme = cx.theme();
         let location = match &d.parent {
             Some(parent) => self
-                .chip(IconName::ArrowUp, format!("Parent: {parent}"), theme.info, cx)
+                .chip(
+                    IconName::ArrowUp,
+                    format!("Parent: {parent}"),
+                    theme.info,
+                    cx,
+                )
                 .into_any_element(),
             None => self
                 .chip(IconName::Home, "Root".to_string(), theme.warning, cx)
@@ -197,7 +217,12 @@ impl BonePropertiesPanel {
                 .chip(IconName::Keyframes, format!("{n} keys"), theme.success, cx)
                 .into_any_element(),
             None => self
-                .chip(IconName::Minus, "Static".to_string(), theme.muted_foreground, cx)
+                .chip(
+                    IconName::Minus,
+                    "Static".to_string(),
+                    theme.muted_foreground,
+                    cx,
+                )
                 .into_any_element(),
         };
 
@@ -236,7 +261,11 @@ impl BonePropertiesPanel {
                             format!(
                                 "{} {}",
                                 d.child_count,
-                                if d.child_count == 1 { "child" } else { "children" }
+                                if d.child_count == 1 {
+                                    "child"
+                                } else {
+                                    "children"
+                                }
                             ),
                             theme.muted_foreground,
                             cx,
@@ -250,7 +279,11 @@ impl BonePropertiesPanel {
     fn render_key_card(&self, d: &Details, cx: &App) -> impl IntoElement {
         let theme = cx.theme();
         let keyed_here = d.keyed;
-        let (e_prev, e_next, e_toggle) = (self.editor.clone(), self.editor.clone(), self.editor.clone());
+        let (e_prev, e_next, e_toggle) = (
+            self.editor.clone(),
+            self.editor.clone(),
+            self.editor.clone(),
+        );
 
         v_flex()
             .w_full()
@@ -329,14 +362,18 @@ impl BonePropertiesPanel {
                             theme.muted_foreground
                         }),
                     )
-                    .child(div().flex_1().text_xs().text_color(theme.muted_foreground).child(
-                        match d.selected_key {
-                            Some((n, frame, time)) => {
-                                format!("Key #{n} · frame {frame} · {time:.3}s")
-                            }
-                            None => d.timing.clone(),
-                        },
-                    )),
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(match d.selected_key {
+                                Some((n, frame, time)) => {
+                                    format!("Key #{n} · frame {frame} · {time:.3}s")
+                                }
+                                None => d.timing.clone(),
+                            }),
+                    ),
             )
     }
 
@@ -447,7 +484,8 @@ impl BonePropertiesPanel {
                             .stop_propagation(true)
                             .tooltip(format!("Reset {}", title.to_lowercase()))
                             .on_click(move |_, window, cx| {
-                                let _ = editor.update(cx, |e, cx| e.reset_transform_group(group, window, cx));
+                                let _ = editor
+                                    .update(cx, |e, cx| e.reset_transform_group(group, window, cx));
                             }),
                     ),
             )
@@ -588,7 +626,11 @@ impl Render for BonePropertiesPanel {
                             .bg(theme.warning.opacity(0.10))
                             .border_1()
                             .border_color(theme.warning.opacity(0.35))
-                            .child(Icon::new(IconName::Info).size(px(13.0)).text_color(theme.warning))
+                            .child(
+                                Icon::new(IconName::Info)
+                                    .size(px(13.0))
+                                    .text_color(theme.warning),
+                            )
                             .child(
                                 div()
                                     .flex_1()
@@ -625,7 +667,9 @@ impl Render for BonePropertiesPanel {
                     d.locked,
                     cx,
                 ))
-                .when_some(d.world, |col, world| col.child(self.render_world(world, cx)))
+                .when_some(d.world, |col, world| {
+                    col.child(self.render_world(world, cx))
+                })
                 .into_any_element(),
         };
 

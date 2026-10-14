@@ -1,4 +1,5 @@
-//! Disk format for a skeletal animation asset.
+//! Legacy disk format: the monolithic `.skelanim` asset folder. New assets use
+//! [`super::assets`]; this remains to read old folders for [`super::migrate`].
 //!
 //! An asset is a folder containing `skeleton.json` (the bone hierarchy and
 //! bind pose) and `animation.json` (the active clip). Both are plain JSON so
@@ -24,6 +25,7 @@ pub fn load_animation(asset_dir: &Path) -> anyhow::Result<AnimationClip> {
     Ok(serde_json::from_str(&text)?)
 }
 
+#[cfg(test)]
 pub fn save_skeleton(asset_dir: &Path, skeleton: &Skeleton) -> anyhow::Result<()> {
     std::fs::create_dir_all(asset_dir)?;
     let text = serde_json::to_string_pretty(skeleton)?;
@@ -31,6 +33,7 @@ pub fn save_skeleton(asset_dir: &Path, skeleton: &Skeleton) -> anyhow::Result<()
     Ok(())
 }
 
+#[cfg(test)]
 pub fn save_animation(asset_dir: &Path, clip: &AnimationClip) -> anyhow::Result<()> {
     std::fs::create_dir_all(asset_dir)?;
     let text = serde_json::to_string_pretty(clip)?;

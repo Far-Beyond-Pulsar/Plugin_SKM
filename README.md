@@ -36,3 +36,15 @@ SKM_PREVIEW_DIR=./previews cargo test -p skeletal_animation_plugin --lib
 
 With `SKM_PREVIEW_DIR` set, each render is also written out as a PNG (`timeline.png`, `viewport_dark.png`,
 `viewport_light.png`, …).
+
+### Checking a real rigged model
+
+Two tests check the importer and the skinned viewport against a real rigged, animated glTF. They skip unless
+pointed at one, and nothing made from the model is committed (check its license before sharing the outputs):
+
+```
+# 1. import it (asset_import) into a scratch folder
+SKM_SAMPLE_DIR=<folder with BrainStem.glb> SKM_OUT_DIR=<scratch> cargo test -p asset_import --test real_sample
+# 2. render it, optionally comparing skinned vertices with an independent reference (SKM_REF_JSON)
+SKM_SAMPLE_OUT=<scratch> SKM_PREVIEW_DIR=<pngs> cargo test -p skeletal_animation_plugin --lib render_real_sample
+```

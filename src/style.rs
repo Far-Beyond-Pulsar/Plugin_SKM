@@ -108,7 +108,8 @@ impl Palette {
     /// A fixed light palette, used by headless renders and tests.
     #[cfg(test)]
     pub fn test_light() -> Self {
-        let c = |r: f32, g: f32, b: f32| [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0];
+        let c =
+            |r: f32, g: f32, b: f32| [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0];
         Self {
             dark: false,
             background: c(0.94, 0.945, 0.955),
@@ -131,7 +132,8 @@ impl Palette {
     /// A fixed dark palette, used by headless renders and tests.
     #[cfg(test)]
     pub fn test_dark() -> Self {
-        let c = |r: f32, g: f32, b: f32| [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0];
+        let c =
+            |r: f32, g: f32, b: f32| [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0];
         Self {
             dark: true,
             background: c(0.105, 0.110, 0.125),

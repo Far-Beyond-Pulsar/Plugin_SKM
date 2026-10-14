@@ -109,7 +109,9 @@ pub struct Tick {
     pub second: bool,
 }
 
-const FRAME_STEPS: [i32; 14] = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+const FRAME_STEPS: [i32; 14] = [
+    1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000,
+];
 const SECOND_STEPS: [f32; 15] = [
     0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0,
 ];
@@ -335,7 +337,8 @@ impl<'a> Scene<'a> {
         let view_l = self.view.scroll_x / pps;
         let view_w = self.size.0 / pps;
         let thumb_w = (view_w / total * track_w).clamp(24.0, track_w);
-        let thumb_x = track_x + ((view_l - content_l) / total * track_w).clamp(0.0, track_w - thumb_w);
+        let thumb_x =
+            track_x + ((view_l - content_l) / total * track_w).clamp(0.0, track_w - thumb_w);
         (track_x, track_w, thumb_x, thumb_w)
     }
 
@@ -484,7 +487,10 @@ impl<'a> Scene<'a> {
                 } else {
                     mix(p.background, p.text, 0.022)
                 };
-                r.push(RectInstance::new([0.0, top], [w, ROW_HEIGHT], mix(base, p.background, 0.4)).fixed());
+                r.push(
+                    RectInstance::new([0.0, top], [w, ROW_HEIGHT], mix(base, p.background, 0.4))
+                        .fixed(),
+                );
             }
             filler_row += 1;
         }
@@ -559,7 +565,10 @@ impl<'a> Scene<'a> {
                 let (fill, edge) = if selected {
                     (sel_color, sel_edge)
                 } else if hovered {
-                    (mix(key_color, [1.0, 1.0, 1.0, 1.0], 0.35), [1.0, 1.0, 1.0, 0.9])
+                    (
+                        mix(key_color, [1.0, 1.0, 1.0, 1.0], 0.35),
+                        [1.0, 1.0, 1.0, 0.9],
+                    )
                 } else {
                     (key_color, key_edge)
                 };
@@ -633,9 +642,21 @@ impl<'a> Scene<'a> {
         if range_r > 0.0 && range_l < w {
             let l = range_l.max(0.0);
             let rr = range_r.min(w);
-            r.push(RectInstance::new([l, 0.0], [rr - l, RULER_HEIGHT], with_alpha(p.primary, 0.10)).fixed());
             r.push(
-                RectInstance::new([l, RULER_HEIGHT - 3.0], [rr - l, 3.0], with_alpha(p.primary, 0.9)).fixed(),
+                RectInstance::new(
+                    [l, 0.0],
+                    [rr - l, RULER_HEIGHT],
+                    with_alpha(p.primary, 0.10),
+                )
+                .fixed(),
+            );
+            r.push(
+                RectInstance::new(
+                    [l, RULER_HEIGHT - 3.0],
+                    [rr - l, 3.0],
+                    with_alpha(p.primary, 0.9),
+                )
+                .fixed(),
             );
         }
         // Range handles.
@@ -668,8 +689,22 @@ impl<'a> Scene<'a> {
         }
 
         // Separators.
-        r.push(RectInstance::new([0.0, RULER_HEIGHT - 1.0], [w, 1.0], with_alpha(p.border, 0.8)).fixed());
-        r.push(RectInstance::new([0.0, HEADER_HEIGHT - 1.0], [w, 1.0], with_alpha(p.border, 0.9)).fixed());
+        r.push(
+            RectInstance::new(
+                [0.0, RULER_HEIGHT - 1.0],
+                [w, 1.0],
+                with_alpha(p.border, 0.8),
+            )
+            .fixed(),
+        );
+        r.push(
+            RectInstance::new(
+                [0.0, HEADER_HEIGHT - 1.0],
+                [w, 1.0],
+                with_alpha(p.border, 0.9),
+            )
+            .fixed(),
+        );
 
         // Summary diamonds.
         let sum_cy = RULER_HEIGHT + SUMMARY_HEIGHT * 0.5;
@@ -687,7 +722,12 @@ impl<'a> Scene<'a> {
                 continue;
             }
             r.push(
-                RectInstance::new([xa, sum_cy - 0.5], [xb - xa, 1.0], with_alpha(p.text_muted, 0.22)).fixed(),
+                RectInstance::new(
+                    [xa, sum_cy - 0.5],
+                    [xb - xa, 1.0],
+                    with_alpha(p.text_muted, 0.22),
+                )
+                .fixed(),
             );
         }
         for key in &summary {
@@ -726,7 +766,10 @@ impl<'a> Scene<'a> {
             let gx = self.view.time_to_x(t);
             let mut y = HEADER_HEIGHT;
             while y < area_bottom {
-                r.push(RectInstance::new([gx - 0.5, y], [1.0, 4.0], with_alpha(p.warning, 0.75)).fixed());
+                r.push(
+                    RectInstance::new([gx - 0.5, y], [1.0, 4.0], with_alpha(p.warning, 0.75))
+                        .fixed(),
+                );
                 y += 8.0;
             }
         }
@@ -764,7 +807,10 @@ impl<'a> Scene<'a> {
             r.push(
                 RectInstance::new([x0, y0], [bw, bh], with_alpha(p.primary, 0.14))
                     .radius(2.0)
-                    .outline(with_alpha(mix(p.primary, [1.0, 1.0, 1.0, 1.0], 0.3), 0.95), 1.0)
+                    .outline(
+                        with_alpha(mix(p.primary, [1.0, 1.0, 1.0, 1.0], 0.3), 0.95),
+                        1.0,
+                    )
                     .fixed(),
             );
         }
@@ -780,16 +826,27 @@ impl<'a> Scene<'a> {
             )
             .fixed(),
         );
-        r.push(RectInstance::new([0.0, h - SCROLLBAR_HEIGHT], [w, 1.0], with_alpha(p.border, 0.8)).fixed());
+        r.push(
+            RectInstance::new(
+                [0.0, h - SCROLLBAR_HEIGHT],
+                [w, 1.0],
+                with_alpha(p.border, 0.8),
+            )
+            .fixed(),
+        );
         r.push(
             RectInstance::new([track_x, sb_y], [track_w, 6.0], with_alpha(p.text, 0.05))
                 .radius(3.0)
                 .fixed(),
         );
         r.push(
-            RectInstance::new([thumb_x, sb_y], [thumb_w, 6.0], with_alpha(p.text_muted, 0.45))
-                .radius(3.0)
-                .fixed(),
+            RectInstance::new(
+                [thumb_x, sb_y],
+                [thumb_w, 6.0],
+                with_alpha(p.text_muted, 0.45),
+            )
+            .radius(3.0)
+            .fixed(),
         );
 
         r
@@ -889,9 +946,16 @@ mod tests {
         let scene = scene_fixture(&clip, &rows, &keys);
         let x0 = scene.view.time_to_x(clip.tracks[0].keyframes[0].time) - 4.0;
         let x1 = scene.view.time_to_x(clip.tracks[0].keyframes[2].time) + 4.0;
-        let picked = scene.keys_in_rect((x0, HEADER_HEIGHT + 2.0, x1, HEADER_HEIGHT + ROW_HEIGHT - 2.0));
+        let picked = scene.keys_in_rect((
+            x0,
+            HEADER_HEIGHT + 2.0,
+            x1,
+            HEADER_HEIGHT + ROW_HEIGHT - 2.0,
+        ));
         assert_eq!(picked.len(), 3);
-        assert!(picked.iter().all(|(bone, _)| *bone == clip.tracks[0].bone_id));
+        assert!(picked
+            .iter()
+            .all(|(bone, _)| *bone == clip.tracks[0].bone_id));
     }
 
     #[test]
@@ -1004,6 +1068,9 @@ mod render_tests {
             );
         });
         preview::save("timeline", w as u32, h as u32, &rgba);
-        assert!(preview::coverage(&rgba) > 0.5, "timeline rendered mostly blank");
+        assert!(
+            preview::coverage(&rgba) > 0.5,
+            "timeline rendered mostly blank"
+        );
     }
 }

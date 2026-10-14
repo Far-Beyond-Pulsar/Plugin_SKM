@@ -2,8 +2,11 @@
 //! the standalone example.
 
 use super::animation::{AnimationClip, BoneTrack, Keyframe};
+use super::assets::{AnimSeqAsset, SkeletonAsset};
 use super::math::{Transform, Vec3};
 use super::skeleton::{Bone, Skeleton};
+#[cfg(test)]
+use super::skmesh::SkeletalMeshAsset;
 
 fn bone(id: &str, name: &str, parent: Option<&str>, translation: Vec3) -> Bone {
     Bone {
@@ -24,38 +27,153 @@ pub fn humanoid_skeleton() -> Skeleton {
     let bones = vec![
         bone("root", "Root", None, Vec3::new(0.0, 1.0, 0.0)),
         bone("pelvis", "Pelvis", Some("root"), Vec3::ZERO),
-        bone("spine_01", "Spine_01", Some("pelvis"), Vec3::new(0.0, 0.10, 0.0)),
-        bone("spine_02", "Spine_02", Some("spine_01"), Vec3::new(0.0, 0.12, 0.0)),
-        bone("chest", "Chest", Some("spine_02"), Vec3::new(0.0, 0.14, 0.0)),
+        bone(
+            "spine_01",
+            "Spine_01",
+            Some("pelvis"),
+            Vec3::new(0.0, 0.10, 0.0),
+        ),
+        bone(
+            "spine_02",
+            "Spine_02",
+            Some("spine_01"),
+            Vec3::new(0.0, 0.12, 0.0),
+        ),
+        bone(
+            "chest",
+            "Chest",
+            Some("spine_02"),
+            Vec3::new(0.0, 0.14, 0.0),
+        ),
         bone("neck", "Neck", Some("chest"), Vec3::new(0.0, 0.20, 0.0)),
         bone("head", "Head", Some("neck"), Vec3::new(0.0, 0.14, 0.0)),
         // Left arm: hangs down at the side (bind pose), so a sagittal
         // (X-axis) swing pumps it forward/back like the legs.
-        bone("clavicle_l", "Clavicle.L", Some("chest"), Vec3::new(-0.06, 0.18, 0.0)),
-        bone("shoulder_l", "Shoulder.L", Some("clavicle_l"), Vec3::new(-0.12, 0.02, 0.0)),
-        bone("upper_arm_l", "UpperArm.L", Some("shoulder_l"), Vec3::new(0.0, -0.26, 0.0)),
-        bone("lower_arm_l", "LowerArm.L", Some("upper_arm_l"), Vec3::new(0.0, -0.24, 0.0)),
-        bone("hand_l", "Hand.L", Some("lower_arm_l"), Vec3::new(0.0, -0.18, 0.0)),
-        bone("fingers_l", "Fingers.L", Some("hand_l"), Vec3::new(0.0, -0.10, 0.0)),
+        bone(
+            "clavicle_l",
+            "Clavicle.L",
+            Some("chest"),
+            Vec3::new(-0.06, 0.18, 0.0),
+        ),
+        bone(
+            "shoulder_l",
+            "Shoulder.L",
+            Some("clavicle_l"),
+            Vec3::new(-0.12, 0.02, 0.0),
+        ),
+        bone(
+            "upper_arm_l",
+            "UpperArm.L",
+            Some("shoulder_l"),
+            Vec3::new(0.0, -0.26, 0.0),
+        ),
+        bone(
+            "lower_arm_l",
+            "LowerArm.L",
+            Some("upper_arm_l"),
+            Vec3::new(0.0, -0.24, 0.0),
+        ),
+        bone(
+            "hand_l",
+            "Hand.L",
+            Some("lower_arm_l"),
+            Vec3::new(0.0, -0.18, 0.0),
+        ),
+        bone(
+            "fingers_l",
+            "Fingers.L",
+            Some("hand_l"),
+            Vec3::new(0.0, -0.10, 0.0),
+        ),
         // Right arm: mirrored, also hanging down at the side.
-        bone("clavicle_r", "Clavicle.R", Some("chest"), Vec3::new(0.06, 0.18, 0.0)),
-        bone("shoulder_r", "Shoulder.R", Some("clavicle_r"), Vec3::new(0.12, 0.02, 0.0)),
-        bone("upper_arm_r", "UpperArm.R", Some("shoulder_r"), Vec3::new(0.0, -0.26, 0.0)),
-        bone("lower_arm_r", "LowerArm.R", Some("upper_arm_r"), Vec3::new(0.0, -0.24, 0.0)),
-        bone("hand_r", "Hand.R", Some("lower_arm_r"), Vec3::new(0.0, -0.18, 0.0)),
-        bone("fingers_r", "Fingers.R", Some("hand_r"), Vec3::new(0.0, -0.10, 0.0)),
+        bone(
+            "clavicle_r",
+            "Clavicle.R",
+            Some("chest"),
+            Vec3::new(0.06, 0.18, 0.0),
+        ),
+        bone(
+            "shoulder_r",
+            "Shoulder.R",
+            Some("clavicle_r"),
+            Vec3::new(0.12, 0.02, 0.0),
+        ),
+        bone(
+            "upper_arm_r",
+            "UpperArm.R",
+            Some("shoulder_r"),
+            Vec3::new(0.0, -0.26, 0.0),
+        ),
+        bone(
+            "lower_arm_r",
+            "LowerArm.R",
+            Some("upper_arm_r"),
+            Vec3::new(0.0, -0.24, 0.0),
+        ),
+        bone(
+            "hand_r",
+            "Hand.R",
+            Some("lower_arm_r"),
+            Vec3::new(0.0, -0.18, 0.0),
+        ),
+        bone(
+            "fingers_r",
+            "Fingers.R",
+            Some("hand_r"),
+            Vec3::new(0.0, -0.10, 0.0),
+        ),
         // Left leg. Feet/toes point toward -Z, the direction the torso
         // leans into (forward), so the run cycle's leg swing carries them
         // the right way.
-        bone("thigh_l", "Thigh.L", Some("pelvis"), Vec3::new(-0.10, -0.05, 0.0)),
-        bone("shin_l", "Shin.L", Some("thigh_l"), Vec3::new(0.0, -0.42, 0.0)),
-        bone("foot_l", "Foot.L", Some("shin_l"), Vec3::new(0.0, -0.40, -0.05)),
-        bone("toes_l", "Toes.L", Some("foot_l"), Vec3::new(0.0, -0.04, -0.12)),
+        bone(
+            "thigh_l",
+            "Thigh.L",
+            Some("pelvis"),
+            Vec3::new(-0.10, -0.05, 0.0),
+        ),
+        bone(
+            "shin_l",
+            "Shin.L",
+            Some("thigh_l"),
+            Vec3::new(0.0, -0.42, 0.0),
+        ),
+        bone(
+            "foot_l",
+            "Foot.L",
+            Some("shin_l"),
+            Vec3::new(0.0, -0.40, -0.05),
+        ),
+        bone(
+            "toes_l",
+            "Toes.L",
+            Some("foot_l"),
+            Vec3::new(0.0, -0.04, -0.12),
+        ),
         // Right leg
-        bone("thigh_r", "Thigh.R", Some("pelvis"), Vec3::new(0.10, -0.05, 0.0)),
-        bone("shin_r", "Shin.R", Some("thigh_r"), Vec3::new(0.0, -0.42, 0.0)),
-        bone("foot_r", "Foot.R", Some("shin_r"), Vec3::new(0.0, -0.40, -0.05)),
-        bone("toes_r", "Toes.R", Some("foot_r"), Vec3::new(0.0, -0.04, -0.12)),
+        bone(
+            "thigh_r",
+            "Thigh.R",
+            Some("pelvis"),
+            Vec3::new(0.10, -0.05, 0.0),
+        ),
+        bone(
+            "shin_r",
+            "Shin.R",
+            Some("thigh_r"),
+            Vec3::new(0.0, -0.42, 0.0),
+        ),
+        bone(
+            "foot_r",
+            "Foot.R",
+            Some("shin_r"),
+            Vec3::new(0.0, -0.40, -0.05),
+        ),
+        bone(
+            "toes_r",
+            "Toes.R",
+            Some("foot_r"),
+            Vec3::new(0.0, -0.04, -0.12),
+        ),
     ];
 
     Skeleton { bones }
@@ -189,7 +307,11 @@ pub fn run_animation(skeleton: &Skeleton) -> AnimationClip {
         // a half-cycle behind.
         run_track(skeleton, "pelvis", |p| {
             (
-                Vec3::new(PELVIS_SHIFT * p.sin(), PELVIS_BOUNCE * (1.0 - (2.0 * p).cos()), 0.0),
+                Vec3::new(
+                    PELVIS_SHIFT * p.sin(),
+                    PELVIS_BOUNCE * (1.0 - (2.0 * p).cos()),
+                    0.0,
+                ),
                 Vec3::new(
                     PELVIS_LEAN + PELVIS_LEAN_OSC * (2.0 * p).sin(),
                     PELVIS_TWIST * p.sin(),
@@ -201,60 +323,118 @@ pub fn run_animation(skeleton: &Skeleton) -> AnimationClip {
         // stay roughly square to the direction of travel, with a forward
         // lean carried mainly by the chest.
         run_track(skeleton, "spine_01", |p| {
-            (Vec3::ZERO, Vec3::new(1.5 * (2.0 * p).sin(), -4.0 * p.sin(), 0.0))
+            (
+                Vec3::ZERO,
+                Vec3::new(1.5 * (2.0 * p).sin(), -4.0 * p.sin(), 0.0),
+            )
         }),
         run_track(skeleton, "spine_02", |p| {
-            (Vec3::ZERO, Vec3::new(1.5 * (2.0 * p).sin(), -6.0 * p.sin(), 0.0))
+            (
+                Vec3::ZERO,
+                Vec3::new(1.5 * (2.0 * p).sin(), -6.0 * p.sin(), 0.0),
+            )
         }),
         run_track(skeleton, "chest", |p| {
-            (Vec3::ZERO, Vec3::new(-12.0 + 2.0 * (2.0 * p).sin(), -10.0 * p.sin(), 0.0))
+            (
+                Vec3::ZERO,
+                Vec3::new(-12.0 + 2.0 * (2.0 * p).sin(), -10.0 * p.sin(), 0.0),
+            )
         }),
         // Head stays roughly level: a small counter-twist plus a subtle bob.
         run_track(skeleton, "head", |p| {
-            (Vec3::ZERO, Vec3::new(3.0 * (2.0 * p).sin(), 6.0 * p.sin(), 0.0))
+            (
+                Vec3::ZERO,
+                Vec3::new(3.0 * (2.0 * p).sin(), 6.0 * p.sin(), 0.0),
+            )
         }),
         // Clavicles lift slightly with their shoulder's swing.
-        run_track(skeleton, "clavicle_l", |p| (Vec3::ZERO, Vec3::new(0.0, 0.0, 6.0 * p.sin()))),
-        run_track(skeleton, "clavicle_r", |p| (Vec3::ZERO, Vec3::new(0.0, 0.0, -6.0 * (p + PI).sin()))),
+        run_track(skeleton, "clavicle_l", |p| {
+            (Vec3::ZERO, Vec3::new(0.0, 0.0, 6.0 * p.sin()))
+        }),
+        run_track(skeleton, "clavicle_r", |p| {
+            (Vec3::ZERO, Vec3::new(0.0, 0.0, -6.0 * (p + PI).sin()))
+        }),
         // Arms: forward/back pendulum swing (X axis, same as the legs),
         // contralateral to the legs (left arm matches the right leg's
         // phase, and vice versa) since the arms now hang at the sides.
         // SHOULDER_COUNTER cancels the torso's forward lean so the arms
         // swing around a vertical "hanging" rest pose.
         run_track(skeleton, "shoulder_l", |p| {
-            (Vec3::ZERO, Vec3::new(SHOULDER_COUNTER + SHOULDER_SWING * p.sin(), 0.0, 0.0))
+            (
+                Vec3::ZERO,
+                Vec3::new(SHOULDER_COUNTER + SHOULDER_SWING * p.sin(), 0.0, 0.0),
+            )
         }),
         run_track(skeleton, "shoulder_r", |p| {
-            (Vec3::ZERO, Vec3::new(SHOULDER_COUNTER + SHOULDER_SWING * (p + PI).sin(), 0.0, 0.0))
+            (
+                Vec3::ZERO,
+                Vec3::new(SHOULDER_COUNTER + SHOULDER_SWING * (p + PI).sin(), 0.0, 0.0),
+            )
         }),
         // Elbows stay bent throughout the pump (ELBOW_BASE, mostly
         // extended) and flex deeper toward ELBOW_BASE + ELBOW_PUMP on the
         // backswing (when the shoulder angle goes negative).
         run_track(skeleton, "lower_arm_l", |p| {
-            (Vec3::ZERO, Vec3::new(ELBOW_BASE + ELBOW_PUMP * (-p.sin()).max(0.0), 0.0, 0.0))
+            (
+                Vec3::ZERO,
+                Vec3::new(ELBOW_BASE + ELBOW_PUMP * (-p.sin()).max(0.0), 0.0, 0.0),
+            )
         }),
         run_track(skeleton, "lower_arm_r", |p| {
             let pr = p + PI;
-            (Vec3::ZERO, Vec3::new(ELBOW_BASE + ELBOW_PUMP * (-pr.sin()).max(0.0), 0.0, 0.0))
+            (
+                Vec3::ZERO,
+                Vec3::new(ELBOW_BASE + ELBOW_PUMP * (-pr.sin()).max(0.0), 0.0, 0.0),
+            )
         }),
         // Wrists follow the forearm's pump with a small lag.
-        run_track(skeleton, "hand_l", |p| (Vec3::ZERO, Vec3::new(HAND_FOLLOW * p.sin(), 0.0, 0.0))),
-        run_track(skeleton, "hand_r", |p| (Vec3::ZERO, Vec3::new(HAND_FOLLOW * (p + PI).sin(), 0.0, 0.0))),
+        run_track(skeleton, "hand_l", |p| {
+            (Vec3::ZERO, Vec3::new(HAND_FOLLOW * p.sin(), 0.0, 0.0))
+        }),
+        run_track(skeleton, "hand_r", |p| {
+            (
+                Vec3::ZERO,
+                Vec3::new(HAND_FOLLOW * (p + PI).sin(), 0.0, 0.0),
+            )
+        }),
         // Legs: hip drive (X axis), right leg leads at phase 0, left leg
         // trails by half a cycle.
-        run_track(skeleton, "thigh_r", |p| (Vec3::ZERO, Vec3::new(THIGH_SWING * p.sin(), 0.0, 0.0))),
-        run_track(skeleton, "thigh_l", |p| (Vec3::ZERO, Vec3::new(THIGH_SWING * (p + PI).sin(), 0.0, 0.0))),
+        run_track(skeleton, "thigh_r", |p| {
+            (Vec3::ZERO, Vec3::new(THIGH_SWING * p.sin(), 0.0, 0.0))
+        }),
+        run_track(skeleton, "thigh_l", |p| {
+            (
+                Vec3::ZERO,
+                Vec3::new(THIGH_SWING * (p + PI).sin(), 0.0, 0.0),
+            )
+        }),
         // Knees: deep high-knee recovery lift, shallow stance cushioning.
-        run_track(skeleton, "shin_r", |p| (Vec3::ZERO, Vec3::new(knee_bend(p), 0.0, 0.0))),
-        run_track(skeleton, "shin_l", |p| (Vec3::ZERO, Vec3::new(knee_bend(p + PI), 0.0, 0.0))),
+        run_track(skeleton, "shin_r", |p| {
+            (Vec3::ZERO, Vec3::new(knee_bend(p), 0.0, 0.0))
+        }),
+        run_track(skeleton, "shin_l", |p| {
+            (Vec3::ZERO, Vec3::new(knee_bend(p + PI), 0.0, 0.0))
+        }),
         // Ankles: dorsiflex for clearance during recovery, plantarflex for
         // the toe-off push.
-        run_track(skeleton, "foot_r", |p| (Vec3::ZERO, Vec3::new(ankle_flex(p), 0.0, 0.0))),
-        run_track(skeleton, "foot_l", |p| (Vec3::ZERO, Vec3::new(ankle_flex(p + PI), 0.0, 0.0))),
+        run_track(skeleton, "foot_r", |p| {
+            (Vec3::ZERO, Vec3::new(ankle_flex(p), 0.0, 0.0))
+        }),
+        run_track(skeleton, "foot_l", |p| {
+            (Vec3::ZERO, Vec3::new(ankle_flex(p + PI), 0.0, 0.0))
+        }),
         // Toes curl through push-off, in time with the plantarflex.
-        run_track(skeleton, "toes_r", |p| (Vec3::ZERO, Vec3::new(-bump(p, -PI * 0.5, PI * 0.8, TOE_CURL), 0.0, 0.0))),
+        run_track(skeleton, "toes_r", |p| {
+            (
+                Vec3::ZERO,
+                Vec3::new(-bump(p, -PI * 0.5, PI * 0.8, TOE_CURL), 0.0, 0.0),
+            )
+        }),
         run_track(skeleton, "toes_l", |p| {
-            (Vec3::ZERO, Vec3::new(-bump(p + PI, -PI * 0.5, PI * 0.8, TOE_CURL), 0.0, 0.0))
+            (
+                Vec3::ZERO,
+                Vec3::new(-bump(p + PI, -PI * 0.5, PI * 0.8, TOE_CURL), 0.0, 0.0),
+            )
         }),
     ];
 
@@ -263,5 +443,121 @@ pub fn run_animation(skeleton: &Skeleton) -> AnimationClip {
         duration: RUN_DURATION,
         fps: 30.0,
         tracks,
+    }
+}
+
+/// A new humanoid skeleton asset (with a fresh id) and a running sequence
+/// that refers to it by that id.
+pub fn sample_assets() -> (SkeletonAsset, AnimSeqAsset) {
+    let skeleton = SkeletonAsset::new(humanoid_skeleton());
+    let sequence = AnimSeqAsset::new(
+        Some(skeleton.id.clone()),
+        run_animation(&skeleton.skeleton()),
+    );
+    (skeleton, sequence)
+}
+
+/// A blocky skinned body for tests and headless renders: a box around the
+/// segment from each bone's parent to the bone, skinned to the bone, with the
+/// end at the parent shared half-and-half so the joints bend. Joint `n` follows
+/// bone `n` of the skeleton.
+#[cfg(test)]
+pub fn sample_mesh(skeleton: &SkeletonAsset) -> SkeletalMeshAsset {
+    use super::animation::evaluate_world_transforms;
+    use super::skmesh::{Joint, MaterialSlot, MeshLod, MeshSection, SkinnedVertex};
+
+    let skeleton_data = skeleton.skeleton();
+    let world = evaluate_world_transforms(&skeleton_data, &AnimationClip::bind_pose(), 0.0);
+    let index_of = |id: &str| skeleton_data.bones.iter().position(|b| b.id == id);
+
+    let mut mesh = SkeletalMeshAsset::new(Some(skeleton.id.clone()));
+    mesh.joints = skeleton_data
+        .bones
+        .iter()
+        .map(|bone| Joint {
+            bone: bone.id.clone(),
+            inverse_bind: world[&bone.id].inverse().0,
+        })
+        .collect();
+    mesh.material_slots = vec![MaterialSlot {
+        name: "Body".to_string(),
+        material: None,
+    }];
+
+    let (mut vertices, mut indices) = (Vec::new(), Vec::new());
+    for (child, bone) in skeleton_data.bones.iter().enumerate() {
+        let Some(parent) = bone.parent.as_deref().and_then(index_of) else {
+            continue;
+        };
+        let head = world[&skeleton_data.bones[parent].id].transform_point(Vec3::ZERO);
+        let tail = world[&bone.id].transform_point(Vec3::ZERO);
+        let axis = tail.sub(head);
+        if axis.length() < 1e-4 {
+            continue;
+        }
+        let axis_unit = axis.normalize();
+        let reference = if axis_unit.z.abs() < 0.9 {
+            Vec3::new(0.0, 0.0, 1.0)
+        } else {
+            Vec3::new(1.0, 0.0, 0.0)
+        };
+        let u = axis_unit.cross(reference).normalize();
+        let v = axis_unit.cross(u).normalize();
+        let radius = axis.length() * 0.18;
+
+        let base = vertices.len() as u32;
+        for (end, at_tail) in [(head, false), (tail, true)] {
+            for (su, sv) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                let out = u.scale(su).add(v.scale(sv));
+                let position = end.add(out.scale(radius));
+                let normal = out.normalize();
+                let (joints, weights) = if at_tail {
+                    ([child as u16, 0, 0, 0], [1.0, 0.0, 0.0, 0.0])
+                } else {
+                    ([parent as u16, child as u16, 0, 0], [0.5, 0.5, 0.0, 0.0])
+                };
+                vertices.push(SkinnedVertex {
+                    position: position.to_array(),
+                    normal: normal.to_array(),
+                    uv: [0.0, 0.0],
+                    joints,
+                    weights,
+                });
+            }
+        }
+        for i in 0..4u32 {
+            let next = (i + 1) % 4;
+            indices.extend([base + i, base + next, base + 4 + next]);
+            indices.extend([base + i, base + 4 + next, base + 4 + i]);
+        }
+        indices.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
+        indices.extend([base + 4, base + 5, base + 6, base + 4, base + 6, base + 7]);
+    }
+    mesh.lods = vec![MeshLod {
+        sections: vec![MeshSection {
+            first_index: 0,
+            index_count: indices.len() as u32,
+            material_slot: 0,
+        }],
+        vertices,
+        indices,
+    }];
+    mesh
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_sample_sequence_references_the_sample_skeleton_by_id() {
+        let (skeleton, sequence) = sample_assets();
+        assert_eq!(sequence.skeleton.as_ref(), Some(&skeleton.id));
+        assert!(sequence.clip.orphan_tracks(&skeleton.skeleton()).is_empty());
+        assert_ne!(
+            sample_assets().0.id,
+            skeleton.id,
+            "every call makes a new skeleton"
+        );
     }
 }

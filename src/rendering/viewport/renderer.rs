@@ -3,7 +3,7 @@
 //! A frame is built from these passes:
 //!
 //! 1. **Scene** (jittered, offscreen HDR color + depth): gradient backdrop,
-//!    lit bone meshes, an x-ray ghost of occluded bone parts, onion-skin
+//!    the skinned mesh, lit bone meshes, an x-ray ghost of occluded bone parts, onion-skin
 //!    poses, anti-aliased ribbon lines, the analytic ground grid, and joint
 //!    markers.
 //! 2. **Resolve**: temporal anti-aliasing against last frame's output, written
@@ -16,7 +16,8 @@ use crate::core::Mat4;
 
 use super::shaders;
 use super::types::{
-    GizmoBubbleInstance, JointInstance, MeshVertex, ResolveUniforms, RibbonSegment, ViewportUniforms,
+    GizmoBubbleInstance, JointInstance, MeshVertex, ResolveUniforms, RibbonSegment,
+    ViewportUniforms,
 };
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -47,6 +48,8 @@ const JITTER_SAMPLES: [[f32; 2]; 8] = [
 pub struct SceneFrame<'a> {
     pub uniforms: &'a ViewportUniforms,
     pub mesh: &'a [MeshVertex],
+    /// The skinned mesh, drawn first so bones behind it show only as x-ray.
+    pub skin: &'a [MeshVertex],
     /// Translucent onion-skin geometry.
     pub ghost: &'a [MeshVertex],
     pub ribbons: &'a [RibbonSegment],
@@ -67,7 +70,12 @@ struct GrowBuf {
 }
 
 impl GrowBuf {
-    fn new(device: &wgpu::Device, label: &'static str, usage: wgpu::BufferUsages, init: u64) -> Self {
+    fn new(
+        device: &wgpu::Device,
+        label: &'static str,
+        usage: wgpu::BufferUsages,
+        init: u64,
+    ) -> Self {
         let usage = usage | wgpu::BufferUsages::COPY_DST;
         Self {
             buf: Self::alloc(device, label, usage, init),
@@ -125,6 +133,7 @@ struct Pipelines {
     scene_uniforms: UniformSet,
     gizmo_uniforms: UniformSet,
     mesh_buf: GrowBuf,
+    skin_buf: GrowBuf,
     ghost_buf: GrowBuf,
     ribbon_buf: GrowBuf,
     joint_buf: GrowBuf,
@@ -220,14 +229,27 @@ impl ViewportRenderer {
         gizmo_uniforms.viewport = [w as f32, h as f32];
 
         let p = self.pipelines.as_mut().unwrap();
-        queue.write_buffer(&p.scene_uniforms.buf, 0, bytemuck::bytes_of(&scene_uniforms));
-        queue.write_buffer(&p.gizmo_uniforms.buf, 0, bytemuck::bytes_of(&gizmo_uniforms));
+        queue.write_buffer(
+            &p.scene_uniforms.buf,
+            0,
+            bytemuck::bytes_of(&scene_uniforms),
+        );
+        queue.write_buffer(
+            &p.gizmo_uniforms.buf,
+            0,
+            bytemuck::bytes_of(&gizmo_uniforms),
+        );
         let mesh_n = p.mesh_buf.upload(device, queue, frame.mesh);
+        let skin_n = p.skin_buf.upload(device, queue, frame.skin);
         let ghost_n = p.ghost_buf.upload(device, queue, frame.ghost);
         let ribbon_n = p.ribbon_buf.upload(device, queue, frame.ribbons);
         let joint_n = p.joint_buf.upload(device, queue, frame.joints);
-        let gizmo_ribbon_n = p.gizmo_ribbon_buf.upload(device, queue, frame.gizmo_ribbons);
-        let gizmo_bubble_n = p.gizmo_bubble_buf.upload(device, queue, frame.gizmo_bubbles);
+        let gizmo_ribbon_n = p
+            .gizmo_ribbon_buf
+            .upload(device, queue, frame.gizmo_ribbons);
+        let gizmo_bubble_n = p
+            .gizmo_bubble_buf
+            .upload(device, queue, frame.gizmo_bubbles);
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("viewport_encoder"),
@@ -264,6 +286,11 @@ impl ViewportRenderer {
             pass.set_pipeline(&p.sky);
             pass.draw(0..3, 0..1);
 
+            if skin_n > 0 {
+                pass.set_pipeline(&p.mesh);
+                pass.set_vertex_buffer(0, p.skin_buf.buf.slice(..));
+                pass.draw(0..skin_n, 0..1);
+            }
             if mesh_n > 0 {
                 pass.set_pipeline(&p.mesh);
                 pass.set_vertex_buffer(0, p.mesh_buf.buf.slice(..));
@@ -535,7 +562,10 @@ fn depth_state(write: bool, compare: wgpu::CompareFunction) -> wgpu::DepthStenci
     }
 }
 
-fn target(format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>) -> Option<wgpu::ColorTargetState> {
+fn target(
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+) -> Option<wgpu::ColorTargetState> {
     Some(wgpu::ColorTargetState {
         format,
         blend,
@@ -726,14 +756,24 @@ impl Pipelines {
                 depth: Some(depth_state(false, Cmp::Less)),
             },
         );
-        let mesh = mesh_pipeline("viewport_mesh", "fs_mesh", alpha, depth_state(true, Cmp::Less));
+        let mesh = mesh_pipeline(
+            "viewport_mesh",
+            "fs_mesh",
+            alpha,
+            depth_state(true, Cmp::Less),
+        );
         let xray = mesh_pipeline(
             "viewport_xray",
             "fs_xray",
             alpha,
             depth_state(false, Cmp::Greater),
         );
-        let ghost = mesh_pipeline("viewport_ghost", "fs_ghost", alpha, depth_state(false, Cmp::Less));
+        let ghost = mesh_pipeline(
+            "viewport_ghost",
+            "fs_ghost",
+            alpha,
+            depth_state(false, Cmp::Less),
+        );
         let ribbon_pipeline = pipeline(
             device,
             PipelineSpec {
@@ -813,6 +853,7 @@ impl Pipelines {
             scene_uniforms: uniform_set("viewport_scene_uniforms"),
             gizmo_uniforms: uniform_set("viewport_gizmo_uniforms"),
             mesh_buf: GrowBuf::new(device, "viewport_mesh", Usage::VERTEX, 4096),
+            skin_buf: GrowBuf::new(device, "viewport_skin", Usage::VERTEX, 4096),
             ghost_buf: GrowBuf::new(device, "viewport_ghost", Usage::VERTEX, 4096),
             ribbon_buf: GrowBuf::new(device, "viewport_ribbons", Usage::VERTEX, 4096),
             joint_buf: GrowBuf::new(device, "viewport_joints", Usage::VERTEX, 1024),

@@ -140,7 +140,9 @@ impl TimelinePanel {
 
     /// Scroll the track rows by `dy` px (from the gutter's wheel handler).
     pub fn scroll_tracks(&mut self, dy: f32, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.upgrade() else { return };
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
         let rows = self.visible_rows(editor.read(cx)).len();
         self.view.scroll_y += dy;
         self.clamp_scroll(rows);
@@ -181,7 +183,8 @@ impl TimelinePanel {
                 delta_frames,
                 ..
             } if drag.moved => {
-                Some(anchor_time + *delta_frames as f32 / editor.animation.fps_clamped()).map(|t| t.max(0.0))
+                Some(anchor_time + *delta_frames as f32 / editor.animation.fps_clamped())
+                    .map(|t| t.max(0.0))
             }
             _ => None,
         };
@@ -252,7 +255,12 @@ impl TimelinePanel {
 
     // ── Pointer input ──────────────────────────────────────────────────────
 
-    fn on_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.focus_handle.focus(window, cx);
         let (x, y) = self.local(event.position);
         match event.button {
@@ -266,7 +274,14 @@ impl TimelinePanel {
         }
     }
 
-    fn left_down(&mut self, x: f32, y: f32, mods: Modifiers, window: &mut Window, cx: &mut Context<Self>) {
+    fn left_down(
+        &mut self,
+        x: f32,
+        y: f32,
+        mods: Modifiers,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(editor) = self.editor.upgrade() else {
             return;
         };
@@ -300,7 +315,9 @@ impl TimelinePanel {
                 self.drag_scrollbar(x, cx);
             }
             Hit::SummaryKey { time } => {
-                editor.update(cx, |e, cx| e.select_keys_at_time(time, mods.shift, window, cx));
+                editor.update(cx, |e, cx| {
+                    e.select_keys_at_time(time, mods.shift, window, cx)
+                });
                 if mods.shift {
                     return;
                 }
@@ -310,7 +327,9 @@ impl TimelinePanel {
                 }
             }
             Hit::Key { index, .. } => {
-                let Some(bone_id) = bone_for_track else { return };
+                let Some(bone_id) = bone_for_track else {
+                    return;
+                };
                 let key = (bone_id.clone(), index);
                 if mods.shift {
                     editor.update(cx, |e, cx| e.toggle_keyframe_selection(key, window, cx));
@@ -377,7 +396,12 @@ impl TimelinePanel {
         cx.notify();
     }
 
-    fn on_mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let (x, y) = self.local(event.position);
 
         // The button was released outside the canvas: finish the gesture.
@@ -395,7 +419,8 @@ impl TimelinePanel {
                 let hover = {
                     let e = editor.read(cx);
                     let rows = self.visible_rows(e);
-                    let scene = self.scene(e, &rows, (self.canvas_size.width, self.canvas_size.height));
+                    let scene =
+                        self.scene(e, &rows, (self.canvas_size.width, self.canvas_size.height));
                     match scene.hit_test(x, y) {
                         Hit::Key { track, index } => Some(HoverTarget::Key { track, index }),
                         Hit::SummaryKey { time } => Some(HoverTarget::SummaryKey { time }),
@@ -503,13 +528,21 @@ impl TimelinePanel {
                 additive,
                 row_click,
             } => {
-                let dragged = (current.0 - start.0).abs() > 3.0 || (current.1 - start.1).abs() > 3.0;
+                let dragged =
+                    (current.0 - start.0).abs() > 3.0 || (current.1 - start.1).abs() > 3.0;
                 if dragged {
                     let keys = {
                         let e = editor.read(cx);
                         let rows = self.visible_rows(e);
-                        let scene = self.scene(e, &rows, (self.canvas_size.width, self.canvas_size.height));
-                        scene.keys_in_rect(Marquee { a: start, b: current }.rect())
+                        let scene =
+                            self.scene(e, &rows, (self.canvas_size.width, self.canvas_size.height));
+                        scene.keys_in_rect(
+                            Marquee {
+                                a: start,
+                                b: current,
+                            }
+                            .rect(),
+                        )
                     };
                     editor.update(cx, |e, cx| {
                         e.set_selected_keyframes(keys, additive || mods.shift, window, cx)
@@ -589,7 +622,9 @@ impl TimelinePanel {
             ("f", false) => self.fit_to_range(cx),
             ("escape", _) => {
                 if let DragState::Keys { .. } = self.drag {
-                    if let DragState::Keys { drag, .. } = std::mem::replace(&mut self.drag, DragState::None) {
+                    if let DragState::Keys { drag, .. } =
+                        std::mem::replace(&mut self.drag, DragState::None)
+                    {
                         editor.update(cx, |e, cx| e.cancel_key_drag(drag, window, cx));
                     }
                 }
@@ -604,7 +639,12 @@ impl TimelinePanel {
 
     /// Ruler labels, the current-frame badge, hover tooltip and drag readout,
     /// drawn with GPUI text so they stay crisp and use the theme font.
-    fn render_overlays(&self, editor: &SkeletalAnimEditorPanel, rows: &[usize], cx: &App) -> Vec<AnyElement> {
+    fn render_overlays(
+        &self,
+        editor: &SkeletalAnimEditorPanel,
+        rows: &[usize],
+        cx: &App,
+    ) -> Vec<AnyElement> {
         let theme = cx.theme();
         let fps = editor.animation.fps_clamped();
         let (w, h) = (self.canvas_size.width, self.canvas_size.height);
@@ -626,7 +666,9 @@ impl TimelinePanel {
                 continue;
             }
             // Don't draw a label underneath the playhead badge.
-            if x + 4.0 < badge_l + badge_w + 6.0 && x + 4.0 + text.len() as f32 * 7.0 > badge_l - 6.0 {
+            if x + 4.0 < badge_l + badge_w + 6.0
+                && x + 4.0 + text.len() as f32 * 7.0 > badge_l - 6.0
+            {
                 continue;
             }
             out.push(
@@ -704,18 +746,20 @@ impl TimelinePanel {
         if matches!(self.drag, DragState::None) {
             if let (Some(hover), Some((px_, py_))) = (self.hover, self.pointer) {
                 let text = match hover {
-                    HoverTarget::Key { track, index } => editor.animation.tracks.get(track).and_then(|t| {
-                        let kf = t.keyframes.get(index)?;
-                        let name = editor
-                            .skeleton
-                            .bone(&t.bone_id)
-                            .map_or(t.bone_id.clone(), |b| b.name.clone());
-                        Some(format!(
-                            "{name}  ·  frame {}  ·  {:.3}s",
-                            editor.animation.time_to_frame(kf.time),
-                            kf.time
-                        ))
-                    }),
+                    HoverTarget::Key { track, index } => {
+                        editor.animation.tracks.get(track).and_then(|t| {
+                            let kf = t.keyframes.get(index)?;
+                            let name = editor
+                                .skeleton
+                                .bone(&t.bone_id)
+                                .map_or(t.bone_id.clone(), |b| b.name.clone());
+                            Some(format!(
+                                "{name}  ·  frame {}  ·  {:.3}s",
+                                editor.animation.time_to_frame(kf.time),
+                                kf.time
+                            ))
+                        })
+                    }
                     HoverTarget::SummaryKey { time } => Some(format!(
                         "All tracks  ·  frame {}  ·  {:.3}s",
                         editor.animation.time_to_frame(time),
@@ -754,7 +798,10 @@ impl TimelinePanel {
                     "Select a bone and press K to add a keyframe",
                 )
             } else {
-                ("No tracks to show", "The selected-bone filter hides every track")
+                (
+                    "No tracks to show",
+                    "The selected-bone filter hides every track",
+                )
             };
             out.push(
                 div()
@@ -836,7 +883,11 @@ impl Render for TimelinePanel {
                 .inset_0()
                 .into_any_element()
         } else {
-            div().absolute().inset_0().bg(theme.background).into_any_element()
+            div()
+                .absolute()
+                .inset_0()
+                .bg(theme.background)
+                .into_any_element()
         };
 
         let entity = cx.entity().clone();
@@ -849,7 +900,8 @@ impl Render for TimelinePanel {
                     let sh = bounds.size.height.as_f32().max(1.0) as u32;
                     pre.update(cx, |panel, cx| {
                         let origin = Point::new(bounds.origin.x.as_f32(), bounds.origin.y.as_f32());
-                        let size = Size::new(bounds.size.width.as_f32(), bounds.size.height.as_f32());
+                        let size =
+                            Size::new(bounds.size.width.as_f32(), bounds.size.height.as_f32());
                         let changed = (panel.canvas_size.width - size.width).abs() > 0.5
                             || (panel.canvas_size.height - size.height).abs() > 0.5;
                         panel.canvas_origin = origin;
@@ -874,7 +926,9 @@ impl Render for TimelinePanel {
                         let Some(editor) = panel.editor.upgrade() else {
                             return;
                         };
-                        let Some(ref surface) = panel.surface else { return };
+                        let Some(ref surface) = panel.surface else {
+                            return;
+                        };
                         if surface.is_resize_pending() {
                             return;
                         }
@@ -897,15 +951,17 @@ impl Render for TimelinePanel {
                             _pad: 0.0,
                         };
                         let clear = panel.palette.background;
-                        let Some(ref surface) = panel.surface else { return };
+                        let Some(ref surface) = panel.surface else {
+                            return;
+                        };
                         let (device, queue, fmt) = (
                             surface.device().clone(),
                             surface.queue().clone(),
                             surface.format(),
                         );
-                        panel
-                            .renderer
-                            .render_frame(&device, &queue, &view, w, h, fmt, &uniforms, clear, &rects);
+                        panel.renderer.render_frame(
+                            &device, &queue, &view, w, h, fmt, &uniforms, clear, &rects,
+                        );
                         drop(view);
                         if let Some(ref surface) = panel.surface {
                             surface.swap_buffers();
@@ -951,8 +1007,12 @@ impl Render for TimelinePanel {
                 MouseButton::Middle,
                 cx.listener(|this, e: &MouseUpEvent, w, cx| this.on_mouse_up(e, w, cx)),
             )
-            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, w, cx| this.on_mouse_move(e, w, cx)))
-            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _w, cx| this.on_scroll(e, cx)))
+            .on_mouse_move(
+                cx.listener(|this, e: &MouseMoveEvent, w, cx| this.on_mouse_move(e, w, cx)),
+            )
+            .on_scroll_wheel(
+                cx.listener(|this, e: &ScrollWheelEvent, _w, cx| this.on_scroll(e, cx)),
+            )
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, w, cx| this.on_key_down(e, w, cx)))
             .child(gpu_display)
             .child(driver)
@@ -1087,7 +1147,11 @@ impl TimelinePanel {
             let e = editor.read(cx);
             (e.play_range.0, e.play_range.1, e.current_frame())
         };
-        for (input, value) in [(&inputs.start, start), (&inputs.end, end), (&inputs.frame, frame)] {
+        for (input, value) in [
+            (&inputs.start, start),
+            (&inputs.end, end),
+            (&inputs.frame, frame),
+        ] {
             let text = value.to_string();
             let focused = input.focus_handle(cx).contains_focused(window, cx);
             if !focused && input.read(cx).value().as_ref() != text.as_str() {

@@ -1,0 +1,18 @@
+[package]
+name = "skeletal_assets"
+version = "0.1.0"
+edition = "2021"
+description = "Formats and math of the skeleton, skeletal mesh and animation sequence assets"
+
+# No UI dependencies: the editor plugin and the asset importer both link this,
+# so the formats are defined (and tested) once.
+
+[dependencies]
+engine_fs  = { workspace = true }
+uuid       = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+anyhow     = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

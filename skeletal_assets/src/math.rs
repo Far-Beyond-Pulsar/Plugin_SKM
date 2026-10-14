@@ -13,8 +13,16 @@ pub struct Vec3 {
 }
 
 impl Vec3 {
-    pub const ZERO: Vec3 = Vec3 { x: 0.0, y: 0.0, z: 0.0 };
-    pub const ONE: Vec3 = Vec3 { x: 1.0, y: 1.0, z: 1.0 };
+    pub const ZERO: Vec3 = Vec3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    pub const ONE: Vec3 = Vec3 {
+        x: 1.0,
+        y: 1.0,
+        z: 1.0,
+    };
 
     pub const fn new(x: f32, y: f32, z: f32) -> Self {
         Self { x, y, z }
@@ -76,10 +84,7 @@ pub struct Mat4(pub [f32; 16]);
 
 impl Mat4 {
     pub const IDENTITY: Mat4 = Mat4([
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0,
-        0.0, 0.0, 0.0, 1.0,
+        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
     ]);
 
     pub fn from_translation(t: Vec3) -> Mat4 {
@@ -107,10 +112,22 @@ impl Mat4 {
 
         // Rx * Ry * Rz
         Mat4([
-            cy * cz, cy * sz, -sy, 0.0,
-            sx * sy * cz - cx * sz, sx * sy * sz + cx * cz, sx * cy, 0.0,
-            cx * sy * cz + sx * sz, cx * sy * sz - sx * cz, cx * cy, 0.0,
-            0.0, 0.0, 0.0, 1.0,
+            cy * cz,
+            cy * sz,
+            -sy,
+            0.0,
+            sx * sy * cz - cx * sz,
+            sx * sy * sz + cx * cz,
+            sx * cy,
+            0.0,
+            cx * sy * cz + sx * sz,
+            cx * sy * sz - sx * cz,
+            cx * cy,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
         ])
     }
 
@@ -140,6 +157,16 @@ impl Mat4 {
         )
     }
 
+    /// Transform a direction: the upper 3x3 only, no translation.
+    pub fn transform_vector(&self, v: Vec3) -> Vec3 {
+        let m = &self.0;
+        Vec3::new(
+            m[0] * v.x + m[4] * v.y + m[8] * v.z,
+            m[1] * v.x + m[5] * v.y + m[9] * v.z,
+            m[2] * v.x + m[6] * v.y + m[10] * v.z,
+        )
+    }
+
     /// Transform a point to clip space, returning `(x, y, z, w)` before the
     /// perspective divide.
     pub fn transform_clip(&self, p: Vec3) -> (f32, f32, f32, f32) {
@@ -161,10 +188,22 @@ impl Mat4 {
         let f = 1.0 / (fov_y_deg.to_radians() * 0.5).tan();
         let range = near - far;
         Mat4([
-            f / aspect, 0.0, 0.0, 0.0,
-            0.0, f, 0.0, 0.0,
-            0.0, 0.0, far / range, -1.0,
-            0.0, 0.0, (far * near) / range, 0.0,
+            f / aspect,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            f,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            far / range,
+            -1.0,
+            0.0,
+            0.0,
+            (far * near) / range,
+            0.0,
         ])
     }
 
@@ -225,9 +264,18 @@ impl Mat4 {
         let u = s.cross(f); // up
 
         Mat4([
-            s.x, u.x, -f.x, 0.0,
-            s.y, u.y, -f.y, 0.0,
-            s.z, u.z, -f.z, 0.0,
+            s.x,
+            u.x,
+            -f.x,
+            0.0,
+            s.y,
+            u.y,
+            -f.y,
+            0.0,
+            s.z,
+            u.z,
+            -f.z,
+            0.0,
             -s.x * eye.x - s.y * eye.y - s.z * eye.z,
             -u.x * eye.x - u.y * eye.y - u.z * eye.z,
             f.x * eye.x + f.y * eye.y + f.z * eye.z,
@@ -264,6 +312,44 @@ impl Transform {
             .mul(&Mat4::from_scale(self.scale))
     }
 
+    /// From the translation / unit quaternion `[x, y, z, w]` / scale form that
+    /// glTF and FBX store, converting the rotation to this type's Euler angles
+    /// (the inverse of [`Mat4::from_euler_xyz_deg`]). At gimbal lock (Y at
+    /// +-90 degrees) Z is taken as zero and X carries the whole rotation.
+    pub fn from_trs(translation: [f32; 3], rotation: [f32; 4], scale: [f32; 3]) -> Transform {
+        let [x, y, z, w] = rotation;
+        let len = (x * x + y * y + z * z + w * w).sqrt();
+        let (x, y, z, w) = if len > 1e-8 {
+            (x / len, y / len, z / len, w / len)
+        } else {
+            (0.0, 0.0, 0.0, 1.0)
+        };
+        // Rotation matrix elements, named row then column.
+        let r00 = 1.0 - 2.0 * (y * y + z * z);
+        let r10 = 2.0 * (x * y + z * w);
+        let r20 = 2.0 * (x * z - y * w);
+        let r21 = 2.0 * (y * z + x * w);
+        let r22 = 1.0 - 2.0 * (x * x + y * y);
+
+        let euler_y = (-r20).clamp(-1.0, 1.0).asin();
+        let (euler_x, euler_z) = if r20.abs() < 0.999_999 {
+            (r21.atan2(r22), r10.atan2(r00))
+        } else {
+            let r11 = 1.0 - 2.0 * (x * x + z * z);
+            let r12 = 2.0 * (y * z - x * w);
+            ((-r12).atan2(r11), 0.0)
+        };
+        Transform {
+            translation: Vec3::new(translation[0], translation[1], translation[2]),
+            rotation: Vec3::new(
+                euler_x.to_degrees(),
+                euler_y.to_degrees(),
+                euler_z.to_degrees(),
+            ),
+            scale: Vec3::new(scale[0], scale[1], scale[2]),
+        }
+    }
+
     /// Component-wise linear interpolation. Sufficient for small Euler deltas
     /// between adjacent keyframes; not a substitute for quaternion slerp on
     /// large rotations.
@@ -290,7 +376,10 @@ mod tests {
 
         let dist = target.sub(eye).length();
         let (x, y, z, w) = vp.transform_clip(target);
-        assert!((w - dist).abs() < 1e-3, "w should be the distance in front, got {w}");
+        assert!(
+            (w - dist).abs() < 1e-3,
+            "w should be the distance in front, got {w}"
+        );
         assert!(x.abs() < 1e-4 && y.abs() < 1e-4, "the target is centered");
         assert!(z / w > 0.0 && z / w < 1.0, "depth {} out of range", z / w);
 
@@ -306,9 +395,89 @@ mod tests {
         assert!(wb < 0.0);
     }
 
+    /// The rotation matrix of a unit quaternion, column-major.
+    fn quat_matrix([x, y, z, w]: [f32; 4]) -> Mat4 {
+        Mat4([
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y + z * w),
+            2.0 * (x * z - y * w),
+            0.0,
+            2.0 * (x * y - z * w),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z + x * w),
+            0.0,
+            2.0 * (x * z + y * w),
+            2.0 * (y * z - x * w),
+            1.0 - 2.0 * (x * x + y * y),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ])
+    }
+
+    #[test]
+    fn a_quaternion_becomes_the_euler_angles_that_rebuild_its_rotation() {
+        let axis_angle = |axis: [f32; 3], deg: f32| {
+            let (s, c) = (deg.to_radians() * 0.5).sin_cos();
+            [axis[0] * s, axis[1] * s, axis[2] * s, c]
+        };
+        let z90 = Transform::from_trs([0.0; 3], axis_angle([0.0, 0.0, 1.0], 90.0), [1.0; 3]);
+        assert!((z90.rotation.z - 90.0).abs() < 1e-3 && z90.rotation.x.abs() < 1e-3);
+
+        // Arbitrary rotations, including both poles of the Y angle.
+        let quats = [
+            [0.1, 0.7, -0.3, 0.64],
+            [-0.5, 0.5, 0.5, 0.5],
+            axis_angle([0.0, 1.0, 0.0], 90.0),
+            axis_angle([0.0, 1.0, 0.0], -90.0),
+            axis_angle([0.0, 1.0, 0.0], 90.0).map(|v| v * 3.0),
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        for q in quats {
+            let t = Transform::from_trs([1.0, 2.0, 3.0], q, [1.0; 3]);
+            let want = quat_matrix({
+                let n = q.iter().map(|v| v * v).sum::<f32>().sqrt();
+                q.map(|v| v / n)
+            });
+            let got = t.to_matrix();
+            for i in 0..16 {
+                let expect = if (12..15).contains(&i) {
+                    [1.0, 2.0, 3.0][i - 12]
+                } else {
+                    want.0[i]
+                };
+                assert!(
+                    (got.0[i] - expect).abs() < 1e-4,
+                    "{q:?} element {i}: {} vs {expect}",
+                    got.0[i]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn transform_vector_ignores_translation() {
+        let m = Mat4::from_translation(Vec3::new(5.0, 0.0, 0.0))
+            .mul(&Mat4::from_scale(Vec3::new(2.0, 1.0, 1.0)));
+        assert_eq!(
+            m.transform_vector(Vec3::new(1.0, 1.0, 0.0)),
+            Vec3::new(2.0, 1.0, 0.0)
+        );
+        assert_eq!(
+            m.transform_point(Vec3::new(1.0, 1.0, 0.0)),
+            Vec3::new(7.0, 1.0, 0.0)
+        );
+    }
+
     #[test]
     fn inverse_round_trips() {
-        let view = Mat4::look_at(Vec3::new(2.0, 1.5, 3.0), Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0));
+        let view = Mat4::look_at(
+            Vec3::new(2.0, 1.5, 3.0),
+            Vec3::ZERO,
+            Vec3::new(0.0, 1.0, 0.0),
+        );
         let vp = Mat4::perspective(45.0, 1.3, 0.05, 200.0).mul(&view);
         let id = vp.mul(&vp.inverse());
         for (i, v) in id.0.iter().enumerate() {
