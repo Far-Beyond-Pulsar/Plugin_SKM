@@ -9,14 +9,41 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
 
     runs-on: ubuntu-latest
 
     steps:
+    # This crate is a member of the Pulsar-Native workspace (its dependencies
+    # are `workspace = true`), so it builds inside a Pulsar-Native checkout,
+    # at the path Pulsar-Native vendors it under.
     - uses: actions/checkout@v4
+      with:
+        repository: Far-Beyond-Pulsar/Pulsar-Native
+        submodules: recursive
+        path: pulsar
+    - uses: actions/checkout@v4
+      with:
+        path: pulsar/plugins/vendor/skm_editor
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          pkg-config libssl-dev libfontconfig1-dev libfreetype6-dev \
+          libx11-dev libx11-xcb-dev libwayland-dev libxkbcommon-x11-dev \
+          libasound2-dev libudev-dev
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: pulsar
     - name: Build
-      run: cargo build --verbose
+      working-directory: pulsar
+      run: cargo build -p skeletal_animation_plugin --verbose
     - name: Run tests
-      run: cargo test --verbose
+      working-directory: pulsar
+      run: cargo test -p skeletal_animation_plugin --verbose
