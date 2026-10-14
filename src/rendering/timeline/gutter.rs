@@ -93,7 +93,9 @@ impl TimelineGutter {
             .animation
             .tracks
             .iter()
-            .filter(|t| !self.only_selected || e.selected_bone.as_deref() == Some(t.bone_id.as_str()))
+            .filter(|t| {
+                !self.only_selected || e.selected_bone.as_deref() == Some(t.bone_id.as_str())
+            })
             .map(|t| GutterRow {
                 bone_id: t.bone_id.clone(),
                 name: e
@@ -144,7 +146,11 @@ impl Render for TimelineGutter {
             .bg(theme.secondary)
             .border_b_1()
             .border_color(theme.border)
-            .child(Icon::new(IconName::List).size(px(13.0)).text_color(theme.muted_foreground))
+            .child(
+                Icon::new(IconName::List)
+                    .size(px(13.0))
+                    .text_color(theme.muted_foreground),
+            )
             .child(
                 div()
                     .text_xs()
@@ -153,7 +159,12 @@ impl Render for TimelineGutter {
                     .child("TRACKS"),
             )
             .child(div().flex_1())
-            .child(Tag::secondary().small().rounded_full().child(self.rows.len().to_string()));
+            .child(
+                Tag::secondary()
+                    .small()
+                    .rounded_full()
+                    .child(self.rows.len().to_string()),
+            );
 
         let summary = h_flex()
             .h(px(SUMMARY_HEIGHT))
@@ -165,7 +176,11 @@ impl Render for TimelineGutter {
             .bg(theme.sidebar)
             .border_b_1()
             .border_color(theme.border)
-            .child(Icon::new(IconName::Keyframes).size(px(13.0)).text_color(theme.info))
+            .child(
+                Icon::new(IconName::Keyframes)
+                    .size(px(13.0))
+                    .text_color(theme.info),
+            )
             .child(
                 div()
                     .flex_1()
@@ -199,7 +214,10 @@ impl Render for TimelineGutter {
 
             list = list.child(
                 h_flex()
-                    .id(SharedString::from(format!("timeline-track-{}", row.bone_id)))
+                    .id(SharedString::from(format!(
+                        "timeline-track-{}",
+                        row.bone_id
+                    )))
                     .relative()
                     .h(px(ROW_HEIGHT))
                     .w_full()
@@ -232,14 +250,17 @@ impl Render for TimelineGutter {
                     })
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                         let bone_id = bone_id.clone();
-                        let _ = editor_row.update(cx, |e, cx| e.select_bone(Some(bone_id), window, cx));
+                        let _ =
+                            editor_row.update(cx, |e, cx| e.select_bone(Some(bone_id), window, cx));
                     })
                     .child(
-                        Icon::new(IconName::Component).size(px(12.0)).text_color(if selected {
-                            theme.primary
-                        } else {
-                            theme.info.opacity(0.8)
-                        }),
+                        Icon::new(IconName::Component)
+                            .size(px(12.0))
+                            .text_color(if selected {
+                                theme.primary
+                            } else {
+                                theme.info.opacity(0.8)
+                            }),
                     )
                     .child(
                         div()
@@ -247,7 +268,11 @@ impl Render for TimelineGutter {
                             .min_w_0()
                             .truncate()
                             .text_xs()
-                            .font_weight(if selected { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                            .font_weight(if selected {
+                                FontWeight::SEMIBOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
                             .text_color(theme.foreground)
                             .child(row.name.clone()),
                     )
@@ -260,7 +285,11 @@ impl Render for TimelineGutter {
                     )
                     .child(
                         Button::new(SharedString::from(format!("tl-key-{key_bone}")))
-                            .icon(if keyed_here { IconName::Keyframe } else { IconName::KeyframePlus })
+                            .icon(if keyed_here {
+                                IconName::Keyframe
+                            } else {
+                                IconName::KeyframePlus
+                            })
                             .ghost()
                             .xsmall()
                             .selected(keyed_here)
@@ -272,7 +301,8 @@ impl Render for TimelineGutter {
                             })
                             .on_click(move |_, window, cx| {
                                 let bone = key_bone.clone();
-                                let _ = editor_key.update(cx, |e, cx| e.toggle_key_for_bone(&bone, window, cx));
+                                let _ = editor_key
+                                    .update(cx, |e, cx| e.toggle_key_for_bone(&bone, window, cx));
                             }),
                     ),
             );

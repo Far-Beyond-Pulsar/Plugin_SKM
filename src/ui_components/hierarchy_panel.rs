@@ -151,14 +151,15 @@ impl BoneHierarchyPanel {
 
     fn init_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("Filter bones…"));
-        self._subscription =
-            Some(
-                cx.subscribe_in(&input, window, |_this, _input, event: &InputEvent, _w, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        cx.notify();
-                    }
-                }),
-            );
+        self._subscription = Some(cx.subscribe_in(
+            &input,
+            window,
+            |_this, _input, event: &InputEvent, _w, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            },
+        ));
         self.filter = Some(input);
     }
 
@@ -180,7 +181,9 @@ impl BoneHierarchyPanel {
         let mut direct: HashSet<&str> = HashSet::new();
         if filtering {
             for bone in &skeleton.bones {
-                if bone.name.to_lowercase().contains(filter) || bone.id.to_lowercase().contains(filter) {
+                if bone.name.to_lowercase().contains(filter)
+                    || bone.id.to_lowercase().contains(filter)
+                {
                     direct.insert(bone.id.as_str());
                     let mut current = Some(bone.id.as_str());
                     while let Some(id) = current {
@@ -334,7 +337,8 @@ impl BoneHierarchyPanel {
                             .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                                 cx.stop_propagation();
                                 let id = toggle_id.clone();
-                                let _ = editor_toggle.update(cx, |e, cx| e.toggle_bone_expanded(&id, cx));
+                                let _ = editor_toggle
+                                    .update(cx, |e, cx| e.toggle_bone_expanded(&id, cx));
                             })
                             .child(
                                 Icon::new(if expanded {
@@ -347,7 +351,11 @@ impl BoneHierarchyPanel {
                             )
                     }),
             )
-            .child(Icon::new(IconName::Component).size_3p5().text_color(icon_color))
+            .child(
+                Icon::new(IconName::Component)
+                    .size_3p5()
+                    .text_color(icon_color),
+            )
             .child(
                 div()
                     .flex_1()
@@ -580,7 +588,11 @@ impl Render for BoneHierarchyPanel {
             } else {
                 format!("{shown} of {total} shown")
             })
-            .right(div().font_family(MONO).child(format!("{animated} animated")));
+            .right(
+                div()
+                    .font_family(MONO)
+                    .child(format!("{animated} animated")),
+            );
 
         v_flex()
             .id("skeletal-hierarchy")

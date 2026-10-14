@@ -94,7 +94,11 @@ impl OrbitCamera {
     pub fn eye_dir(&self) -> Vec3 {
         let yaw = self.yaw_deg.to_radians();
         let pitch = self.pitch_deg.to_radians();
-        Vec3::new(yaw.sin() * pitch.cos(), pitch.sin(), yaw.cos() * pitch.cos())
+        Vec3::new(
+            yaw.sin() * pitch.cos(),
+            pitch.sin(),
+            yaw.cos() * pitch.cos(),
+        )
     }
 
     pub fn eye(&self) -> Vec3 {
@@ -218,7 +222,10 @@ pub fn bounding_sphere(points: &[Vec3]) -> Option<(Vec3, f32)> {
         (min.y + max.y) * 0.5,
         (min.z + max.z) * 0.5,
     );
-    let radius = points.iter().map(|p| p.sub(center).length()).fold(0.0, f32::max);
+    let radius = points
+        .iter()
+        .map(|p| p.sub(center).length())
+        .fold(0.0, f32::max);
     Some((center, radius))
 }
 
@@ -342,7 +349,10 @@ mod tests {
         let centre = c0.target;
         let mut pan = c0;
         pan.pan(40.0, 0.0);
-        assert!(ndc(&pan, centre).0 > 0.0, "panning right moves the scene right");
+        assert!(
+            ndc(&pan, centre).0 > 0.0,
+            "panning right moves the scene right"
+        );
         let mut pan_down = c0;
         pan_down.pan(0.0, 40.0);
         assert!(

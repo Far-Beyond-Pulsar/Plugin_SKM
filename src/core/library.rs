@@ -78,7 +78,10 @@ pub enum SkeletonLink {
     /// No file in the project has this id.
     Missing(SkeletonId),
     /// More than one file has this id.
-    Ambiguous { id: SkeletonId, paths: Vec<PathBuf> },
+    Ambiguous {
+        id: SkeletonId,
+        paths: Vec<PathBuf>,
+    },
 }
 
 /// An index of the skeletons in a project at one moment.
@@ -121,6 +124,7 @@ impl Library {
         let text = match read(path) {
             Ok(text) => text,
             Err(error) => {
+                clear_asset_id(&self.root, path);
                 self.problems.push(Problem {
                     path: path.to_path_buf(),
                     kind: ProblemKind::Unreadable(error),
@@ -135,6 +139,7 @@ impl Library {
                 _ if text.trim().is_empty() => ProblemKind::NoId,
                 _ => ProblemKind::Unreadable("not a skeleton file".to_string()),
             };
+            clear_asset_id(&self.root, path);
             self.problems.push(Problem {
                 path: path.to_path_buf(),
                 kind,
@@ -148,6 +153,7 @@ impl Library {
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let id = asset.id.clone();
+                remember_asset_id(&self.root, &id, path);
                 self.by_id.entry(id.clone()).or_default().push(Entry {
                     id,
                     path: path.to_path_buf(),
@@ -155,10 +161,13 @@ impl Library {
                     skeleton: Arc::new(asset.skeleton()),
                 });
             }
-            Err(error) => self.problems.push(Problem {
-                path: path.to_path_buf(),
-                kind: ProblemKind::Unreadable(error),
-            }),
+            Err(error) => {
+                clear_asset_id(&self.root, path);
+                self.problems.push(Problem {
+                    path: path.to_path_buf(),
+                    kind: ProblemKind::Unreadable(error),
+                });
+            }
         }
     }
 
@@ -265,40 +274,106 @@ pub(super) fn same_file(a: &Path, b: &Path) -> bool {
 
 /// Every file with `extension` under `root`, in path order.
 pub(super) fn collect(root: &Path, extension: &str) -> Vec<PathBuf> {
-    let Ok(entries) = engine_fs::virtual_fs::manifest(root) else {
-        return Vec::new();
+    let indexed = engine_fs::open_project_file_index(root)
+        .ok()
+        .flatten()
+        .and_then(|index| {
+            index
+                .query(&engine_fs::FileIndexQuery {
+                    extension: Some(extension.to_owned()),
+                    sort: engine_fs::FileIndexSort::Path,
+                    ..Default::default()
+                })
+                .ok()
+        });
+    let entries = indexed.map(|files| files.into_iter().map(|file| file.path).collect::<Vec<_>>());
+    let mut out: Vec<PathBuf> = match entries {
+        Some(paths) => paths
+            .into_iter()
+            .filter(|path| !is_skipped_index_path(Path::new(path)))
+            .map(|path| root.join(path.replace('/', std::path::MAIN_SEPARATOR_STR)))
+            .take(MAX_FILES)
+            .collect(),
+        None => {
+            // Remote providers and an unavailable local index retain the
+            // provider manifest path; normal local projects use the shared DB.
+            let Ok(entries) = engine_fs::virtual_fs::manifest(root) else {
+                return Vec::new();
+            };
+            entries
+                .into_iter()
+                .filter(|e| !e.is_dir)
+                .filter(|e| {
+                    let path = Path::new(&e.path);
+                    !is_skipped_index_path(path)
+                        && path
+                            .extension()
+                            .is_some_and(|x| x.eq_ignore_ascii_case(extension))
+                })
+                .map(|e| root.join(e.path))
+                .take(MAX_FILES)
+                .collect()
+        }
     };
-    let mut out: Vec<PathBuf> = entries
-        .into_iter()
-        .filter(|e| !e.is_dir)
-        .filter(|e| {
-            let path = Path::new(&e.path);
-            let skipped = path.components().any(|c| {
-                let name = c.as_os_str().to_string_lossy();
-                SKIPPED_DIRS.contains(&name.as_ref()) || name.starts_with('.')
-            });
-            !skipped
-                && path
-                    .extension()
-                    .is_some_and(|x| x.eq_ignore_ascii_case(extension))
-        })
-        .map(|e| root.join(e.path))
-        .take(MAX_FILES)
-        .collect();
     out.sort();
     out
+}
+
+fn is_skipped_index_path(path: &Path) -> bool {
+    path.components().any(|c| {
+        let name = c.as_os_str().to_string_lossy();
+        SKIPPED_DIRS.contains(&name.as_ref()) || name.starts_with('.')
+    })
+}
+
+fn remember_asset_id(root: &Path, id: &SkeletonId, path: &Path) {
+    if let Ok(Some(index)) = engine_fs::open_project_file_index(root) {
+        let result = (|| {
+            index.refresh_path(path)?;
+            let paths = index.paths_for_asset_id(id.as_str())?;
+            if !paths.iter().any(|indexed| same_file(indexed, path)) {
+                index.record_asset_id(id.as_str(), path)?;
+            }
+            Ok::<(), anyhow::Error>(())
+        })();
+        if let Err(error) = result {
+            log::debug!("Could not cache skeleton id for {path:?}: {error:#}");
+        }
+    }
+}
+
+fn clear_asset_id(root: &Path, path: &Path) {
+    if let Ok(Some(index)) = engine_fs::open_project_file_index(root) {
+        if let Err(error) = index.clear_asset_ids(path) {
+            log::debug!("Could not clear stale skeleton id for {path:?}: {error:#}");
+        }
+    }
 }
 
 /// Write an id into the skeleton file at `path` if it has none, changing
 /// nothing else. Used to give new or hand-made files their stable id.
 pub fn stamp_file(path: &Path) -> Result<SkeletonId, String> {
-    let text = read(path)?;
+    let text = match read(path) {
+        Ok(text) => text,
+        Err(error) => {
+            clear_asset_id(&project_root(path), path);
+            return Err(error);
+        }
+    };
     if let Some(id) = SkeletonAsset::peek_id(&text) {
+        remember_asset_id(&project_root(path), &id, path);
         return Ok(id);
     }
     // `parse` supplies the fresh id.
-    let asset = SkeletonAsset::parse(&text)?;
+    let asset = match SkeletonAsset::parse(&text) {
+        Ok(asset) => asset,
+        Err(error) => {
+            clear_asset_id(&project_root(path), path);
+            return Err(error);
+        }
+    };
     write(path, &asset)?;
+    remember_asset_id(&project_root(path), &asset.id, path);
     Ok(asset.id)
 }
 
@@ -309,6 +384,7 @@ pub fn regenerate_id(path: &Path) -> Result<SkeletonId, String> {
     let mut asset = SkeletonAsset::parse(&read(path)?)?;
     asset.id = SkeletonId::new();
     write(path, &asset)?;
+    remember_asset_id(&project_root(path), &asset.id, path);
     Ok(asset.id)
 }
 
@@ -355,7 +431,17 @@ mod tests {
         assert_eq!(lib.entry(&a.id).unwrap().name, "Human");
         assert_eq!(lib.entry(&b.id).unwrap().name, "Horse");
         assert!(lib.problems().is_empty());
-        assert_eq!(lib.entry(&a.id).unwrap().skeleton.bones.len(), a.bones.len());
+        assert_eq!(
+            lib.entry(&a.id).unwrap().skeleton.bones.len(),
+            a.bones.len()
+        );
+        let file_index = engine_fs::open_project_file_index(dir.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            file_index.paths_for_asset_id(a.id.as_str()).unwrap(),
+            vec![dir.path().join("rigs/Human.skeleton")]
+        );
     }
 
     #[test]
@@ -365,12 +451,15 @@ mod tests {
         let path = write_asset(dir.path(), "rigs/Human.skeleton", &skeleton);
 
         let before = Library::scan(dir.path());
-        assert!(matches!(before.link(Some(&skeleton.id)), SkeletonLink::Resolved(_)));
+        assert!(matches!(
+            before.link(Some(&skeleton.id)),
+            SkeletonLink::Resolved(_)
+        ));
 
         // Rename and move; nothing inside any file changes.
         std::fs::create_dir_all(dir.path().join("shared")).unwrap();
         let moved = dir.path().join("shared/Biped.skeleton");
-        std::fs::rename(&path, &moved).unwrap();
+        engine_fs::virtual_fs::rename(&path, &moved).unwrap();
 
         let after = Library::scan(dir.path());
         assert_eq!(after.path_of(&skeleton.id), Some(moved.as_path()));
@@ -406,6 +495,17 @@ mod tests {
         assert!(lib.conflicts().is_empty());
         assert_eq!(lib.path_of(&skeleton.id), Some(original.as_path()));
         assert_eq!(lib.path_of(&new_id), Some(copy.as_path()));
+        let file_index = engine_fs::open_project_file_index(dir.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            file_index.paths_for_asset_id(skeleton.id.as_str()).unwrap(),
+            vec![original]
+        );
+        assert_eq!(
+            file_index.paths_for_asset_id(new_id.as_str()).unwrap(),
+            vec![copy]
+        );
     }
 
     #[test]
@@ -432,7 +532,12 @@ mod tests {
         let kinds: Vec<_> = lib
             .problems()
             .iter()
-            .map(|p| (p.path.file_name().unwrap().to_string_lossy().into_owned(), p.kind.clone()))
+            .map(|p| {
+                (
+                    p.path.file_name().unwrap().to_string_lossy().into_owned(),
+                    p.kind.clone(),
+                )
+            })
             .collect();
         assert!(kinds.contains(&("Old.skeleton".into(), ProblemKind::NoId)));
         assert!(kinds.contains(&("Empty.skeleton".into(), ProblemKind::NoId)));
@@ -441,8 +546,35 @@ mod tests {
             .any(|(n, k)| n == "Junk.skeleton" && matches!(k, ProblemKind::Unreadable(_))));
 
         let id = stamp_file(&path).unwrap();
-        assert_eq!(stamp_file(&path).unwrap(), id, "stamping twice keeps the first id");
+        assert_eq!(
+            stamp_file(&path).unwrap(),
+            id,
+            "stamping twice keeps the first id"
+        );
         assert_eq!(Library::scan(dir.path()).entry(&id).unwrap().name, "Old");
+    }
+
+    #[test]
+    fn rescanning_a_broken_skeleton_clears_its_cached_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let skeleton = asset();
+        let path = write_asset(dir.path(), "Broken.skeleton", &skeleton);
+        let _ = Library::scan(dir.path());
+        let file_index = engine_fs::open_project_file_index(dir.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            file_index.paths_for_asset_id(skeleton.id.as_str()).unwrap(),
+            vec![path.clone()]
+        );
+
+        std::fs::write(&path, "{ malformed").unwrap();
+        let broken = Library::scan(dir.path());
+        assert!(!broken.problems().is_empty());
+        assert!(file_index
+            .paths_for_asset_id(skeleton.id.as_str())
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

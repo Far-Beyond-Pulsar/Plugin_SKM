@@ -197,7 +197,6 @@ mod tests {
         assert_eq!(clip.tracks.len(), before + 1, "nothing is deleted");
     }
 
-
     fn resolved_for(asset: &crate::core::assets::SkeletonAsset) -> SkeletonLink {
         SkeletonLink::Resolved(Entry {
             id: asset.id.clone(),
@@ -235,8 +234,8 @@ mod tests {
 
     #[test]
     fn a_preview_mesh_link_only_ever_warns() {
-        use crate::core::mesh_library::MeshEntry;
         use crate::core::ids::SkeletalMeshId;
+        use crate::core::mesh_library::MeshEntry;
 
         let (skeleton, _) = sample::sample_assets();
         let mesh = sample::sample_mesh(&skeleton);
@@ -253,25 +252,41 @@ mod tests {
 
         assert!(check(&MeshLink::Unset, None).is_empty());
         assert!(check(&MeshLink::Resolving(SkeletalMeshId::new()), None).is_empty());
-        assert!(check(&MeshLink::Resolved(entry(Some(skeleton.id.clone()))), Some(&mesh)).is_empty());
+        assert!(check(
+            &MeshLink::Resolved(entry(Some(skeleton.id.clone()))),
+            Some(&mesh)
+        )
+        .is_empty());
 
         let missing = check(&MeshLink::Missing(SkeletalMeshId::new()), None);
         let ambiguous = check(
-            &MeshLink::Ambiguous { id: SkeletalMeshId::new(), paths: vec![PathBuf::from("a"), PathBuf::from("b")] },
+            &MeshLink::Ambiguous {
+                id: SkeletalMeshId::new(),
+                paths: vec![PathBuf::from("a"), PathBuf::from("b")],
+            },
             None,
         );
-        assert!(missing.iter().chain(&ambiguous).all(|i| i.severity == Severity::Warning));
+        assert!(missing
+            .iter()
+            .chain(&ambiguous)
+            .all(|i| i.severity == Severity::Warning));
         assert!(ambiguous[0].message.contains("2 files"));
 
         // Skinned to some other skeleton.
-        let other = check(&MeshLink::Resolved(entry(Some(SkeletonId::new()))), Some(&mesh));
+        let other = check(
+            &MeshLink::Resolved(entry(Some(SkeletonId::new()))),
+            Some(&mesh),
+        );
         assert_eq!(other.len(), 1);
         assert!(other[0].message.contains("different skeleton"));
 
         // Joints that follow bones this skeleton lacks.
         let mut odd = mesh.clone();
         odd.joints[2].bone = "wing".into();
-        let issues = check(&MeshLink::Resolved(entry(Some(skeleton.id.clone()))), Some(&odd));
+        let issues = check(
+            &MeshLink::Resolved(entry(Some(skeleton.id.clone()))),
+            Some(&odd),
+        );
         assert_eq!(issues.len(), 1);
         assert!(issues[0].message.contains("wing"));
     }
@@ -279,12 +294,20 @@ mod tests {
     fn unresolved_links_are_reported() {
         let clip = sample::run_animation(&sample::humanoid_skeleton());
         let id = SkeletonId::new();
-        assert_eq!(validate_sequence(&clip, &SkeletonLink::Unset)[0].severity, Severity::Warning);
-        assert_eq!(validate_sequence(&clip, &SkeletonLink::Missing(id.clone()))[0].severity, Severity::Error);
+        assert_eq!(
+            validate_sequence(&clip, &SkeletonLink::Unset)[0].severity,
+            Severity::Warning
+        );
+        assert_eq!(
+            validate_sequence(&clip, &SkeletonLink::Missing(id.clone()))[0].severity,
+            Severity::Error
+        );
         let ambiguous = SkeletonLink::Ambiguous {
             id,
             paths: vec![PathBuf::from("a"), PathBuf::from("b")],
         };
-        assert!(validate_sequence(&clip, &ambiguous)[0].message.contains("2 files"));
+        assert!(validate_sequence(&clip, &ambiguous)[0]
+            .message
+            .contains("2 files"));
     }
 }

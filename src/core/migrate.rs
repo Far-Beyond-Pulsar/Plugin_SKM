@@ -80,7 +80,13 @@ pub fn migrate_folder(dir: &Path) -> anyhow::Result<Migrated> {
     let (skeleton_asset, sequence_asset) = convert(skeleton, clip);
 
     let (skeleton_path, sequence_path) = (1..)
-        .map(|n| if n == 1 { stem.clone() } else { format!("{stem} {n}") })
+        .map(|n| {
+            if n == 1 {
+                stem.clone()
+            } else {
+                format!("{stem} {n}")
+            }
+        })
         .map(|name| paths(&name))
         .find(|(s, a)| !s.exists() && !a.exists())
         .expect("an unbounded range always yields a free name");
@@ -143,7 +149,10 @@ mod tests {
 
         // The project index resolves the new reference.
         let lib = Library::scan(dir.path());
-        assert!(matches!(lib.link(sequence.skeleton.as_ref()), SkeletonLink::Resolved(_)));
+        assert!(matches!(
+            lib.link(sequence.skeleton.as_ref()),
+            SkeletonLink::Resolved(_)
+        ));
 
         // The old folder is exactly as it was.
         assert!(is_legacy_folder(&folder));
@@ -173,7 +182,12 @@ mod tests {
         let migrated = migrate_folder(&folder).unwrap();
         assert_eq!(migrated.skeleton_path, dir.path().join("Run 2.skeleton"));
         assert_eq!(migrated.sequence_path, dir.path().join("Run 2.animseq"));
-        assert_eq!(load_skeleton_asset(&dir.path().join("Run.skeleton")).unwrap().id, theirs.id);
+        assert_eq!(
+            load_skeleton_asset(&dir.path().join("Run.skeleton"))
+                .unwrap()
+                .id,
+            theirs.id
+        );
     }
 
     #[test]

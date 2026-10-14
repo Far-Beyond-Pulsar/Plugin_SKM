@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use skeletal_assets::skmesh::{SkeletalMeshAsset, SKMESH_EXTENSION};
 
 use super::ids::{SkeletalMeshId, SkeletonId};
-use super::library::{collect, same_file};
+use super::library::{collect, project_root, same_file};
 
 /// One skeletal mesh file in the project.
 #[derive(Clone, Debug)]
@@ -95,6 +95,7 @@ impl MeshLibrary {
         let bytes = match engine_fs::virtual_fs::read_file(path) {
             Ok(bytes) => bytes,
             Err(error) => {
+                clear_asset_id(&self.root, path);
                 self.problems.push(MeshProblem {
                     path: path.to_path_buf(),
                     error: error.to_string(),
@@ -108,6 +109,7 @@ impl MeshLibrary {
                     .file_stem()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default();
+                remember_asset_id(&self.root, &id, path);
                 self.by_id.entry(id.clone()).or_default().push(MeshEntry {
                     id,
                     path: path.to_path_buf(),
@@ -115,10 +117,13 @@ impl MeshLibrary {
                     skeleton: SkeletalMeshAsset::peek_skeleton(&bytes),
                 });
             }
-            None => self.problems.push(MeshProblem {
-                path: path.to_path_buf(),
-                error: "not a skeletal mesh file".to_string(),
-            }),
+            None => {
+                clear_asset_id(&self.root, path);
+                self.problems.push(MeshProblem {
+                    path: path.to_path_buf(),
+                    error: "not a skeletal mesh file".to_string(),
+                });
+            }
         }
     }
 
@@ -201,20 +206,68 @@ impl MeshLibrary {
 
 /// The id of the mesh file at `path`.
 pub fn read_id(path: &Path) -> Result<SkeletalMeshId, String> {
-    let bytes = engine_fs::virtual_fs::read_file(path).map_err(|e| e.to_string())?;
-    SkeletalMeshAsset::peek_id(&bytes).ok_or_else(|| "not a skeletal mesh file".to_string())
+    let bytes = match engine_fs::virtual_fs::read_file(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            clear_asset_id(&project_root(path), path);
+            return Err(error.to_string());
+        }
+    };
+    let Some(id) = SkeletalMeshAsset::peek_id(&bytes) else {
+        clear_asset_id(&project_root(path), path);
+        return Err("not a skeletal mesh file".to_string());
+    };
+    remember_asset_id(&project_root(path), &id, path);
+    Ok(id)
 }
 
 /// Give the mesh file at `path` a new id. This is how one of two copies that
 /// share an id is made distinct; links to the shared id stay with the copy that
 /// kept it.
 pub fn regenerate_id(path: &Path) -> Result<SkeletalMeshId, String> {
-    let bytes = engine_fs::virtual_fs::read_file(path).map_err(|e| e.to_string())?;
-    let mut mesh = SkeletalMeshAsset::decode(&bytes)?;
+    let bytes = match engine_fs::virtual_fs::read_file(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            clear_asset_id(&project_root(path), path);
+            return Err(error.to_string());
+        }
+    };
+    let mut mesh = match SkeletalMeshAsset::decode(&bytes) {
+        Ok(mesh) => mesh,
+        Err(error) => {
+            clear_asset_id(&project_root(path), path);
+            return Err(error.to_string());
+        }
+    };
     mesh.id = SkeletalMeshId::new();
     engine_fs::virtual_fs::write_file_atomically(path, &mesh.encode())
         .map_err(|e| e.to_string())?;
+    remember_asset_id(&project_root(path), &mesh.id, path);
     Ok(mesh.id)
+}
+
+fn remember_asset_id(root: &Path, id: &SkeletalMeshId, path: &Path) {
+    if let Ok(Some(index)) = engine_fs::open_project_file_index(root) {
+        let result = (|| {
+            index.refresh_path(path)?;
+            let paths = index.paths_for_asset_id(id.as_str())?;
+            if !paths.iter().any(|indexed| same_file(indexed, path)) {
+                index.record_asset_id(id.as_str(), path)?;
+            }
+            Ok::<(), anyhow::Error>(())
+        })();
+        if let Err(error) = result {
+            log::debug!("Could not cache skeletal mesh id for {path:?}: {error:#}");
+        }
+    }
+}
+
+fn clear_asset_id(root: &Path, path: &Path) {
+    if let Ok(Some(index)) = engine_fs::open_project_file_index(root) {
+        if let Err(error) = index.clear_asset_ids(path) {
+            log::debug!("Could not clear stale skeletal mesh id for {path:?}: {error:#}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -248,6 +301,13 @@ mod tests {
         assert_eq!(lib.entry(&a.id).unwrap().skeleton, a.skeleton);
         assert_eq!(lib.entry(&b.id).unwrap().name, "Horse");
         assert!(lib.problems().is_empty());
+        let file_index = engine_fs::open_project_file_index(dir.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            file_index.paths_for_asset_id(a.id.as_str()).unwrap(),
+            vec![dir.path().join("chars/Hero.skmesh")]
+        );
     }
 
     #[test]
@@ -262,7 +322,7 @@ mod tests {
 
         std::fs::create_dir_all(dir.path().join("shared")).unwrap();
         let moved = dir.path().join("shared/Knight.skmesh");
-        std::fs::rename(&path, &moved).unwrap();
+        engine_fs::virtual_fs::rename(&path, &moved).unwrap();
         let after = MeshLibrary::scan(dir.path());
         assert_eq!(after.path_of(&m.id), Some(moved.as_path()));
         match after.link(Some(&m.id)) {
@@ -294,6 +354,17 @@ mod tests {
         assert_eq!(lib.path_of(&m.id), Some(original.as_path()));
         assert_eq!(lib.path_of(&new_id), Some(copy.as_path()));
         assert_eq!(read_id(&copy).unwrap(), new_id);
+        let file_index = engine_fs::open_project_file_index(dir.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            file_index.paths_for_asset_id(m.id.as_str()).unwrap(),
+            vec![original]
+        );
+        assert_eq!(
+            file_index.paths_for_asset_id(new_id.as_str()).unwrap(),
+            vec![copy]
+        );
     }
 
     #[test]
@@ -322,5 +393,28 @@ mod tests {
             lib.entry(&m.id).is_some(),
             "adding twice does not make it ambiguous"
         );
+    }
+
+    #[test]
+    fn rescanning_a_broken_mesh_clears_its_cached_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let mesh = mesh();
+        let path = write_mesh(dir.path(), "Broken.skmesh", &mesh);
+        let _ = MeshLibrary::scan(dir.path());
+        let file_index = engine_fs::open_project_file_index(dir.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            file_index.paths_for_asset_id(mesh.id.as_str()).unwrap(),
+            vec![path.clone()]
+        );
+
+        std::fs::write(&path, "not a mesh").unwrap();
+        let broken = MeshLibrary::scan(dir.path());
+        assert!(!broken.problems().is_empty());
+        assert!(file_index
+            .paths_for_asset_id(mesh.id.as_str())
+            .unwrap()
+            .is_empty());
     }
 }

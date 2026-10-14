@@ -11,7 +11,9 @@ pub mod validate;
 
 pub use skeletal_assets::{animation, assets, ids, issue, math, skeleton, skinning, skmesh};
 
-pub use animation::{bone_world_transform, evaluate_world_transforms, AnimationClip, BoneTrack, Keyframe};
+pub use animation::{
+    bone_world_transform, evaluate_world_transforms, AnimationClip, BoneTrack, Keyframe,
+};
 pub use ids::{SkeletalMeshId, SkeletonId};
 pub use library::{Library, SkeletonLink};
 pub use math::{Mat4, Transform, Vec3};

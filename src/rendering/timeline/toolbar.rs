@@ -30,7 +30,11 @@ impl TimelinePanel {
         }
     }
 
-    pub(super) fn render_toolbar(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_toolbar(
+        &self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(editor) = self.editor.upgrade() else {
             return div().into_any_element();
         };
@@ -77,10 +81,18 @@ impl TimelinePanel {
             )
             .child(
                 Button::new("tl-play")
-                    .icon(if playing { IconName::Pause } else { IconName::Play })
+                    .icon(if playing {
+                        IconName::Pause
+                    } else {
+                        IconName::Play
+                    })
                     .primary()
                     .small()
-                    .tooltip(if playing { "Pause (Space)" } else { "Play (Space)" })
+                    .tooltip(if playing {
+                        "Pause (Space)"
+                    } else {
+                        "Play (Space)"
+                    })
                     .on_click(self.editor_click(|e, _w, cx| e.toggle_play(cx))),
             )
             .child(
@@ -242,9 +254,17 @@ impl TimelinePanel {
                 .gap_1p5()
                 .items_center()
                 .child(caption("Range", cx))
-                .child(div().w(px(84.0)).child(NumberInput::new(&inputs.start).small()))
+                .child(
+                    div()
+                        .w(px(84.0))
+                        .child(NumberInput::new(&inputs.start).small()),
+                )
                 .child(caption("to", cx))
-                .child(div().w(px(84.0)).child(NumberInput::new(&inputs.end).small()))
+                .child(
+                    div()
+                        .w(px(84.0))
+                        .child(NumberInput::new(&inputs.end).small()),
+                )
                 .child(
                     Button::new("tl-range-reset")
                         .icon(IconName::Refresh)
@@ -354,11 +374,11 @@ impl TimelinePanel {
                     .small()
                     .child(if self.snap { "Snap on" } else { "Snap off" }),
             )
-            .right(
-                Tag::secondary()
-                    .small()
-                    .child(if e.playback.looping { "Loop" } else { "One-shot" }),
-            )
+            .right(Tag::secondary().small().child(if e.playback.looping {
+                "Loop"
+            } else {
+                "One-shot"
+            }))
             .right(mono(format!("Zoom {:.0}%", self.view.zoom * 100.0)))
             .into_any_element()
     }
