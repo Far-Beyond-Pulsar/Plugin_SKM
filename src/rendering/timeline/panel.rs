@@ -906,12 +906,28 @@ impl Render for TimelinePanel {
                             || (panel.canvas_size.height - size.height).abs() > 0.5;
                         panel.canvas_origin = origin;
                         panel.canvas_size = size;
+                        // The GPU device was lost: the surface and the
+                        // renderer's buffers are on it. Start over on the
+                        // window's new device.
+                        if panel
+                            .surface
+                            .as_ref()
+                            .is_some_and(WgpuSurfaceHandle::is_device_lost)
+                        {
+                            panel.surface = None;
+                            panel.renderer = TimelineRenderer::new();
+                        }
                         if panel.surface.is_none() {
-                            if let Some(s) = window.create_wgpu_surface(
-                                sw.max(64),
-                                sh.max(64),
-                                wgpu::TextureFormat::Bgra8UnormSrgb,
-                            ) {
+                            // Until the window has a new device, a new surface
+                            // is on the lost one too; it renders again once it has.
+                            if let Some(s) = window
+                                .create_wgpu_surface(
+                                    sw.max(64),
+                                    sh.max(64),
+                                    wgpu::TextureFormat::Bgra8UnormSrgb,
+                                )
+                                .filter(|s| !s.is_device_lost())
+                            {
                                 panel.surface = Some(s);
                                 cx.notify();
                             }
