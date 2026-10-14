@@ -19,6 +19,7 @@ ui      = { workspace = true }
 
 plugin_editor_api = { workspace = true }
 ui_common         = { workspace = true }
+engine_fs         = { workspace = true }
 
 uuid       = { workspace = true }
 smol       = { workspace = true }
@@ -31,5 +32,6 @@ wgpu       = { workspace = true }
 bytemuck   = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 # Validates the WGSL sources offline with the same front end wgpu uses.
 naga = { version = "30", features = ["wgsl-in"] }

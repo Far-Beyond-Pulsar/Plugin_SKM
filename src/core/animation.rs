@@ -158,3 +158,14 @@ pub fn bone_world_transform(
     }
     Some(world)
 }
+
+impl AnimationClip {
+    /// Tracks whose bone does not exist in `skeleton`. They are kept in the
+    /// clip (nothing is deleted) but have no effect on the pose.
+    pub fn orphan_tracks<'a>(&'a self, skeleton: &Skeleton) -> Vec<&'a BoneTrack> {
+        self.tracks
+            .iter()
+            .filter(|t| skeleton.bone(&t.bone_id).is_none())
+            .collect()
+    }
+}

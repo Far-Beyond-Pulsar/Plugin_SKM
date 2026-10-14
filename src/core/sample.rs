@@ -2,6 +2,7 @@
 //! the standalone example.
 
 use super::animation::{AnimationClip, BoneTrack, Keyframe};
+use super::assets::{AnimSeqAsset, SkeletonAsset};
 use super::math::{Transform, Vec3};
 use super::skeleton::{Bone, Skeleton};
 
@@ -263,5 +264,26 @@ pub fn run_animation(skeleton: &Skeleton) -> AnimationClip {
         duration: RUN_DURATION,
         fps: 30.0,
         tracks,
+    }
+}
+
+/// A new humanoid skeleton asset (with a fresh id) and a running sequence
+/// that refers to it by that id.
+pub fn sample_assets() -> (SkeletonAsset, AnimSeqAsset) {
+    let skeleton = SkeletonAsset::new(humanoid_skeleton());
+    let sequence = AnimSeqAsset::new(Some(skeleton.id.clone()), run_animation(&skeleton.skeleton()));
+    (skeleton, sequence)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_sample_sequence_references_the_sample_skeleton_by_id() {
+        let (skeleton, sequence) = sample_assets();
+        assert_eq!(sequence.skeleton.as_ref(), Some(&skeleton.id));
+        assert!(sequence.clip.orphan_tracks(&skeleton.skeleton()).is_empty());
+        assert_ne!(sample_assets().0.id, skeleton.id, "every call makes a new skeleton");
     }
 }
