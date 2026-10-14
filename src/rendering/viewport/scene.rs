@@ -13,6 +13,7 @@ use crate::core::{
 };
 use crate::editor::panel::ViewOptions;
 use crate::style::{mix, with_alpha, Palette};
+use pulsar_physics::{SkeletalPhysicsAsset, SkeletalShape};
 
 use super::camera::{OrbitCamera, ViewAxis};
 use super::types::*;
@@ -48,6 +49,8 @@ pub struct SceneInput<'a> {
     /// A skeletal mesh to draw skinned by the pose, if there is one and the
     /// view shows it.
     pub skin: Option<SkinInput<'a>>,
+    /// Optional authored physics rig for the displayed skeletal mesh.
+    pub physics: Option<&'a SkeletalPhysicsAsset>,
 }
 
 /// The skinned mesh of a scene.
@@ -194,6 +197,12 @@ pub fn build_scene(input: &SceneInput) -> SceneGeometry {
     let world = evaluate_world_transforms(skeleton, input.clip, input.time);
     let position = |id: &str| world.get(id).map(|m| m.transform_point(Vec3::ZERO));
 
+    if input.view.physics {
+        if let Some(physics) = input.physics {
+            push_physics_overlay(&mut geo.ribbons, physics, &world);
+        }
+    }
+
     // Bones on the path from the selection up to the root get a faint tint.
     let mut chain: HashSet<&str> = HashSet::new();
     if let Some(selected) = input.selected {
@@ -299,7 +308,13 @@ pub fn build_scene(input: &SceneInput) -> SceneGeometry {
     // The skinned mesh, posed by the same world transforms as the bones.
     let mut points: Vec<Vec3> = geo.joint_positions.iter().map(|(_, p)| *p).collect();
     if let Some(skin) = input.skin {
-        points.extend(push_skin(&mut geo.skin, &skin, &world, p));
+        points.extend(push_skin(
+            &mut geo.skin,
+            &skin,
+            &world,
+            p,
+            input.view.mesh_lod,
+        ));
     }
 
     // Bounds for framing and the shadow.
@@ -405,6 +420,150 @@ pub fn build_scene(input: &SceneInput) -> SceneGeometry {
     geo
 }
 
+/// Draw authored collider wireframes and constraint links in the same posed
+/// 3D coordinates as the skeleton. This is an editor visualization only; it
+/// does not create runtime rigid bodies.
+fn push_physics_overlay(
+    out: &mut Vec<RibbonSegment>,
+    physics: &SkeletalPhysicsAsset,
+    world: &HashMap<String, Mat4>,
+) {
+    const COLOR: [f32; 4] = [0.25, 0.95, 0.75, 0.96];
+    const JOINT_COLOR: [f32; 4] = [1.0, 0.62, 0.18, 0.98];
+    let local = |v: [f32; 3]| Vec3::new(v[0], v[1], v[2]);
+    let segment = |out: &mut Vec<RibbonSegment>, a: Vec3, b: Vec3, color| {
+        out.push(RibbonSegment::solid(a.to_array(), b.to_array(), 1.8, color).with_bias(0.0015));
+    };
+    let circle = |out: &mut Vec<RibbonSegment>,
+                  transform: Mat4,
+                  center: Vec3,
+                  radius: f32,
+                  axis: usize,
+                  color| {
+        let steps = 16;
+        let point = |angle: f32| {
+            let (s, c) = angle.sin_cos();
+            let offset = match axis {
+                0 => Vec3::new(0.0, c * radius, s * radius),
+                1 => Vec3::new(c * radius, 0.0, s * radius),
+                _ => Vec3::new(c * radius, s * radius, 0.0),
+            };
+            transform.transform_point(center.add(offset))
+        };
+        for i in 0..steps {
+            let a = point(std::f32::consts::TAU * i as f32 / steps as f32);
+            let b = point(std::f32::consts::TAU * (i + 1) as f32 / steps as f32);
+            segment(out, a, b, color);
+        }
+    };
+
+    for body in &physics.bodies {
+        let Some(transform) = world.get(&body.bone_id).copied() else {
+            continue;
+        };
+        let center = local(body.center);
+        let [x, y, z] = body.dimensions.map(|d| d.abs().max(0.005));
+        match body.shape {
+            SkeletalShape::Sphere => {
+                for axis in 0..3 {
+                    circle(out, transform, center, x, axis, COLOR);
+                }
+            }
+            SkeletalShape::Capsule | SkeletalShape::Cylinder => {
+                let half = y * 0.5;
+                circle(
+                    out,
+                    transform,
+                    center.add(Vec3::new(0.0, half, 0.0)),
+                    x,
+                    1,
+                    COLOR,
+                );
+                circle(
+                    out,
+                    transform,
+                    center.sub(Vec3::new(0.0, half, 0.0)),
+                    x,
+                    1,
+                    COLOR,
+                );
+                if body.shape == SkeletalShape::Capsule {
+                    for side in [-1.0_f32, 1.0] {
+                        for radial in 0..8 {
+                            let azimuth = std::f32::consts::TAU * radial as f32 / 8.0;
+                            let mut previous = transform.transform_point(center.add(Vec3::new(
+                                azimuth.cos() * x,
+                                side * half,
+                                azimuth.sin() * x,
+                            )));
+                            for step in 1..=8 {
+                                let angle = std::f32::consts::FRAC_PI_2 * step as f32 / 8.0;
+                                let next = transform.transform_point(center.add(Vec3::new(
+                                    azimuth.cos() * x * angle.cos(),
+                                    side * (half + x * angle.sin()),
+                                    azimuth.sin() * x * angle.cos(),
+                                )));
+                                segment(out, previous, next, COLOR);
+                                previous = next;
+                            }
+                        }
+                    }
+                }
+                for i in 0..8 {
+                    let angle = std::f32::consts::TAU * i as f32 / 8.0;
+                    let radial = Vec3::new(angle.cos() * x, 0.0, angle.sin() * x);
+                    segment(
+                        out,
+                        transform
+                            .transform_point(center.add(radial).add(Vec3::new(0.0, -half, 0.0))),
+                        transform
+                            .transform_point(center.add(radial).add(Vec3::new(0.0, half, 0.0))),
+                        COLOR,
+                    );
+                }
+            }
+            SkeletalShape::Box => {
+                let corners: Vec<Vec3> = (0..8)
+                    .map(|bits| {
+                        Vec3::new(
+                            if bits & 1 == 0 { -x } else { x },
+                            if bits & 2 == 0 { -y } else { y },
+                            if bits & 4 == 0 { -z } else { z },
+                        )
+                    })
+                    .collect();
+                for i in 0..8 {
+                    for axis in [1, 2, 4] {
+                        if i & axis == 0 {
+                            segment(
+                                out,
+                                transform.transform_point(center.add(corners[i])),
+                                transform.transform_point(center.add(corners[i | axis])),
+                                COLOR,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for joint in &physics.constraints {
+        let (Some(a), Some(b)) = (
+            world.get(&joint.bone_id),
+            world.get(&joint.connected_bone_id),
+        ) else {
+            continue;
+        };
+        let a = a.transform_point(local(joint.anchor));
+        let b = b.transform_point(local(joint.connected_anchor));
+        segment(out, a, b, JOINT_COLOR);
+        // Short crossbars make joint locations readable even when the anchors coincide.
+        let d = Vec3::new(0.035, 0.035, 0.035);
+        segment(out, a.sub(d), a.add(d), JOINT_COLOR);
+    }
+}
+
 /// Weight heat map: blue (no influence) through cyan, green and yellow to red
 /// (full influence), in the linear space the shaders output.
 pub fn weight_color(weight: f32) -> [f32; 4] {
@@ -433,8 +592,10 @@ fn push_skin(
     skin: &SkinInput,
     world: &HashMap<String, Mat4>,
     p: &Palette,
+    lod_index: usize,
 ) -> Vec<Vec3> {
-    let Some(lod) = skin.mesh.lod0() else {
+    let lod_index = lod_index.min(skin.mesh.lods.len().saturating_sub(1));
+    let Some(lod) = skin.mesh.lods.get(lod_index) else {
         return Vec::new();
     };
     let posed = skin_lod(lod, &joint_matrices(skin.mesh, world));
@@ -672,6 +833,7 @@ mod tests {
             palette,
             tracers: None,
             skin: None,
+            physics: None,
         }
     }
 

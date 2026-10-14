@@ -32,8 +32,8 @@
 //! # Limitations
 //!
 //! Material slots carry a typed stable material id and retain a project-relative
-//! path cache for older readers. There is one LOD today, but the layout is a
-//! list so more can be added without a format change.
+//! path cache for older readers. Each LOD has a normalized screen-size
+//! threshold; LOD 0 is the most detailed and later LODs use decreasing values.
 
 use std::path::Path;
 
@@ -86,6 +86,9 @@ pub struct MeshSection {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MeshLod {
+    /// Minimum normalized projected screen size for selecting this LOD. LOD 0
+    /// is the most detailed and has threshold 1.0 by default.
+    pub screen_size_threshold: f32,
     pub vertices: Vec<SkinnedVertex>,
     /// Triangle list into `vertices`.
     pub indices: Vec<u32>,
@@ -148,6 +151,8 @@ struct Header {
 
 #[derive(Serialize, Deserialize)]
 struct LodHeader {
+    #[serde(default)]
+    screen_size_threshold: Option<f32>,
     vertex_count: u32,
     index_count: u32,
     #[serde(default)]
@@ -182,6 +187,7 @@ impl SkeletalMeshAsset {
                 .lods
                 .iter()
                 .map(|lod| LodHeader {
+                    screen_size_threshold: Some(lod.screen_size_threshold),
                     vertex_count: lod.vertices.len() as u32,
                     index_count: lod.indices.len() as u32,
                     sections: lod.sections.clone(),
@@ -229,7 +235,7 @@ impl SkeletalMeshAsset {
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
         let (header, mut at) = read_header(bytes)?;
         let mut lods = Vec::with_capacity(header.lods.len());
-        for lod in &header.lods {
+        for (lod_index, lod) in header.lods.iter().enumerate() {
             let (vc, ic) = (lod.vertex_count as usize, lod.index_count as usize);
             let end = vc
                 .checked_mul(VERTEX_BYTES)
@@ -242,6 +248,9 @@ impl SkeletalMeshAsset {
             let indices = (0..ic).map(|_| r.u32()).collect();
             at = end;
             lods.push(MeshLod {
+                screen_size_threshold: lod
+                    .screen_size_threshold
+                    .unwrap_or_else(|| 1.0 / (lod_index as f32 + 1.0)),
                 vertices,
                 indices,
                 sections: lod.sections.clone(),
@@ -415,6 +424,20 @@ pub fn validate_mesh(mesh: &SkeletalMeshAsset, skeleton: Option<&Skeleton>) -> V
         } else {
             String::new()
         };
+        if !lod.screen_size_threshold.is_finite()
+            || !(0.0..=1.0).contains(&lod.screen_size_threshold)
+        {
+            error(format!(
+                "{lod_label}screen-size threshold must be finite and between 0 and 1."
+            ));
+        }
+        if lod_index > 0
+            && lod.screen_size_threshold >= mesh.lods[lod_index - 1].screen_size_threshold
+        {
+            error(format!(
+                "{lod_label}screen-size threshold must be lower than the previous LOD."
+            ));
+        }
 
         // Weights and joint indices, collected per kind so one bad mesh gives
         // a few lines, not one per vertex.
@@ -588,6 +611,7 @@ mod tests {
                 material: Some("mats/Body.mat".into()),
             }],
             lods: vec![MeshLod {
+                screen_size_threshold: 1.0,
                 vertices: vec![
                     vertex(0.0, [0, 0, 0, 0], [1.0, 0.0, 0.0, 0.0]),
                     vertex(1.0, [0, 1, 0, 0], [0.25, 0.75, 0.0, 0.0]),
@@ -630,6 +654,7 @@ mod tests {
         let mut mesh = triangle();
         let lod = mesh.lods[0].clone();
         mesh.lods.push(MeshLod {
+            screen_size_threshold: 0.5,
             indices: vec![2, 1, 0],
             ..lod
         });

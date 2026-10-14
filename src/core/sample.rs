@@ -275,14 +275,14 @@ fn run_track(skeleton: &Skeleton, bone_id: &str, f: fn(f32) -> (Vec3, Vec3)) -> 
         .map(|i| {
             let t = i as f32 / RUN_STEPS as f32;
             let (dt, dr) = f(t * TAU);
-            Keyframe {
-                time: t * RUN_DURATION,
-                transform: Transform {
+            Keyframe::linear(
+                t * RUN_DURATION,
+                Transform {
                     translation: base.translation.add(dt),
                     rotation: base.rotation.add(dr),
                     scale: base.scale,
                 },
-            }
+            )
         })
         .collect();
 
@@ -535,6 +535,7 @@ pub fn sample_mesh(skeleton: &SkeletonAsset) -> SkeletalMeshAsset {
         indices.extend([base + 4, base + 5, base + 6, base + 4, base + 6, base + 7]);
     }
     mesh.lods = vec![MeshLod {
+        screen_size_threshold: 1.0,
         sections: vec![MeshSection {
             first_index: 0,
             index_count: indices.len() as u32,

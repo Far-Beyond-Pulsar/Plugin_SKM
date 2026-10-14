@@ -129,6 +129,7 @@ mod tests {
             ],
             material_slots: Vec::new(),
             lods: vec![MeshLod {
+                screen_size_threshold: 1.0,
                 vertices: vec![
                     // Rigid to the root.
                     vertex([0.0, 1.0, 0.0], [0, 0, 0, 0], [1.0, 0.0, 0.0, 0.0]),

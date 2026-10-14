@@ -195,10 +195,7 @@ mod tests {
         }
 
         pub fn run_animation(_skeleton: &Skeleton) -> AnimationClip {
-            let key = |time: f32| Keyframe {
-                time,
-                transform: Transform::IDENTITY,
-            };
+            let key = |time: f32| Keyframe::linear(time, Transform::IDENTITY);
             AnimationClip {
                 name: "Run".into(),
                 duration: 1.0,

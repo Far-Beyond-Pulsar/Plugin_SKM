@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use crate::core::AnimationClip;
+use crate::core::{AnimationClip, KeyInterpolation};
 use crate::style::{mix, with_alpha, Palette};
 
 use super::types::*;
@@ -561,6 +561,92 @@ impl<'a> Scene<'a> {
                 let selected = self.key_selected(&track.bone_id, k, &mut probe);
                 let hovered = hover_key == Some((ti, k));
                 let x = kf.time * pps;
+                // Imported cubic-spline keys retain their in/out derivatives.
+                // Show compact control handles in three lanes (translation,
+                // rotation, scale) so spline keys are distinguishable and
+                // their tangent direction is visible without opening a curve
+                // inspector.
+                let prior = k.checked_sub(1).and_then(|i| track.keyframes.get(i));
+                for (channel, mode, incoming, outgoing, lane, color) in [
+                    (
+                        0usize,
+                        kf.translation_interpolation,
+                        kf.in_tangent.translation[1],
+                        kf.out_tangent.translation[1],
+                        -5.0,
+                        p.axis_y,
+                    ),
+                    (
+                        1usize,
+                        kf.rotation_interpolation,
+                        kf.in_tangent.rotation[2],
+                        kf.out_tangent.rotation[2],
+                        0.0,
+                        p.axis_z,
+                    ),
+                    (
+                        2usize,
+                        kf.scale_interpolation,
+                        kf.in_tangent.scale[1],
+                        kf.out_tangent.scale[1],
+                        5.0,
+                        p.axis_x,
+                    ),
+                ] {
+                    let _ = channel;
+                    let show_in = prior.is_some_and(|prev| match channel {
+                        0 => prev.translation_interpolation == KeyInterpolation::CubicSpline,
+                        1 => prev.rotation_interpolation == KeyInterpolation::CubicSpline,
+                        _ => prev.scale_interpolation == KeyInterpolation::CubicSpline,
+                    });
+                    let show_out = mode == KeyInterpolation::CubicSpline
+                        && track.keyframes.get(k + 1).is_some();
+                    if !show_in && !show_out {
+                        continue;
+                    }
+                    let mut handle = |left: bool, slope: f32, span: f32| {
+                        let dx = (span * pps * 0.25).clamp(7.0, 18.0);
+                        let dy = (-slope * span * 3.0).clamp(-5.0, 5.0);
+                        let hx = x + if left { -dx } else { dx };
+                        let hy = cy + lane + dy;
+                        let start_x = x.min(hx);
+                        // L-shaped tangent guide: horizontal time handle and
+                        // vertical value handle, ending in a square control.
+                        r.push(RectInstance::new(
+                            [start_x, cy + lane - 0.5],
+                            [dx, 1.0],
+                            with_alpha(color, 0.42),
+                        ));
+                        if dy.abs() > 0.75 {
+                            r.push(RectInstance::new(
+                                [hx - 0.5, hy.min(cy + lane)],
+                                [1.0, dy.abs()],
+                                with_alpha(color, 0.42),
+                            ));
+                        }
+                        r.push(
+                            RectInstance::new(
+                                [hx - 2.0, hy - 2.0],
+                                [4.0, 4.0],
+                                with_alpha(color, 0.9),
+                            )
+                            .outline(color, 0.75),
+                        );
+                    };
+                    if show_in {
+                        let span = (kf.time - prior.unwrap().time).max(0.001);
+                        handle(true, incoming, span);
+                    }
+                    if show_out {
+                        let span = track
+                            .keyframes
+                            .get(k + 1)
+                            .map(|next| next.time - kf.time)
+                            .unwrap_or(0.25)
+                            .max(0.001);
+                        handle(false, outgoing, span);
+                    }
+                }
                 let s = if selected { KEY_SIZE + 1.0 } else { KEY_SIZE };
                 let (fill, edge) = if selected {
                     (sel_color, sel_edge)

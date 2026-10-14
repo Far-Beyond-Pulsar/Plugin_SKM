@@ -111,6 +111,11 @@ pub struct ViewOptions {
     pub mesh: bool,
     /// Color the mesh by the selected bone's weights.
     pub weights: bool,
+    /// Per-bone colliders and joint limits from the matching `.physasset`.
+    pub physics: bool,
+    /// LOD currently shown in the viewport; explicitly selectable independent
+    /// of zoom so artists can inspect all imported levels.
+    pub mesh_lod: usize,
 }
 
 impl Default for ViewOptions {
@@ -124,6 +129,8 @@ impl Default for ViewOptions {
             motion_path: true,
             mesh: true,
             weights: true,
+            physics: true,
+            mesh_lod: 0,
         }
     }
 }
@@ -719,7 +726,9 @@ impl SkeletalAnimEditorPanel {
                     .iter()
                     .position(|k| k.time > time)
                     .unwrap_or(track.keyframes.len());
-                track.keyframes.insert(pos, Keyframe { time, transform });
+                track
+                    .keyframes
+                    .insert(pos, Keyframe::linear(time, transform));
                 pos
             }
         };
@@ -926,7 +935,9 @@ impl SkeletalAnimEditorPanel {
                     .iter()
                     .position(|k| k.time > time)
                     .unwrap_or(track.keyframes.len());
-                track.keyframes.insert(pos, Keyframe { time, transform });
+                track
+                    .keyframes
+                    .insert(pos, Keyframe::linear(time, transform));
                 pos
             }
         }
@@ -1069,7 +1080,7 @@ impl SkeletalAnimEditorPanel {
                     keys.push((
                         Keyframe {
                             time: kf.time + delta,
-                            transform: kf.transform.clone(),
+                            ..kf.clone()
                         },
                         true,
                         i,

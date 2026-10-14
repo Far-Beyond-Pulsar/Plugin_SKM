@@ -18,8 +18,12 @@
 //! | F / Home             | Frame selection / frame everything       |
 //! | Space                | Play / pause                             |
 
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use pulsar_physics::SkeletalPhysicsAsset;
 use ui::button::{Button, ButtonVariants};
 use ui::tag::Tag;
 use ui::{
@@ -78,6 +82,9 @@ pub struct ViewportPanel {
     bounds: (Vec3, f32),
     gizmo_layout: GizmoLayout,
     palette: Palette,
+    physics_cache_key: Option<(PathBuf, String)>,
+    physics_asset: Option<SkeletalPhysicsAsset>,
+    physics_cache_checked: Instant,
 }
 
 impl ViewportPanel {
@@ -100,6 +107,9 @@ impl ViewportPanel {
             bounds: (Vec3::ZERO, 1.0),
             gizmo_layout: GizmoLayout::default(),
             palette: Palette::from_theme(cx.theme()),
+            physics_cache_key: None,
+            physics_asset: None,
+            physics_cache_checked: Instant::now() - Duration::from_secs(2),
         };
 
         let weak = cx.weak_entity();
@@ -439,11 +449,12 @@ impl ViewportPanel {
         &self,
         options: ViewOptions,
         tracers: bool,
-        has_mesh: bool,
+        mesh_lod_count: usize,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = cx.theme().clone();
         let editor = self.editor.clone();
+        let lod_editor = editor.clone();
 
         h_flex()
             .absolute()
@@ -503,13 +514,20 @@ impl ViewportPanel {
                 |o| &mut o.joints,
             ))
             .child(self.view_toggle(
+                "vp-physics",
+                IconName::Circle,
+                "Physics rig: show per-bone colliders and joint limits",
+                options.physics,
+                |o| &mut o.physics,
+            ))
+            .child(self.view_toggle(
                 "vp-xray",
                 IconName::Eye,
                 "X-ray: show bones hidden behind others",
                 options.xray,
                 |o| &mut o.xray,
             ))
-            .when(has_mesh, |bar| {
+            .when(mesh_lod_count > 0, |bar| {
                 bar.child(toolbar_divider(cx))
                     .child(self.view_toggle(
                         "vp-mesh",
@@ -525,6 +543,25 @@ impl ViewportPanel {
                         options.weights,
                         |o| &mut o.weights,
                     ))
+                    .child(
+                        Button::new("vp-mesh-lod")
+                            .label(format!(
+                                "LOD {}",
+                                options.mesh_lod.min(mesh_lod_count - 1) + 1
+                            ))
+                            .ghost()
+                            .small()
+                            .tooltip("Cycle the skeletal mesh viewport LOD")
+                            .on_click(move |_, _, cx| {
+                                if let Some(editor) = lod_editor.upgrade() {
+                                    editor.update(cx, |e, cx| {
+                                        e.view_options.mesh_lod =
+                                            (e.view_options.mesh_lod + 1) % mesh_lod_count;
+                                        cx.notify();
+                                    });
+                                }
+                            }),
+                    )
             })
             .child(toolbar_divider(cx))
             .child(self.view_toggle(
@@ -661,6 +698,32 @@ impl ui::dock::Panel for ViewportPanel {
     }
 }
 
+fn load_physics_asset(root: &std::path::Path, mesh_id: &str) -> Option<SkeletalPhysicsAsset> {
+    let index = engine_fs::open_project_file_index(root).ok().flatten()?;
+    let files = index
+        .query(&engine_fs::FileIndexQuery {
+            extension: Some("physasset".to_owned()),
+            sort: engine_fs::FileIndexSort::Path,
+            ..Default::default()
+        })
+        .ok()?;
+    for file in files {
+        let path = index
+            .project_root()
+            .join(file.path.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let Ok(bytes) = engine_fs::virtual_fs::read_file(&path) else {
+            continue;
+        };
+        let Ok(asset) = serde_json::from_slice::<SkeletalPhysicsAsset>(&bytes) else {
+            continue;
+        };
+        if asset.skeletal_mesh.as_str() == mesh_id {
+            return Some(asset);
+        }
+    }
+    None
+}
+
 impl Render for ViewportPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(editor) = self.editor.upgrade() else {
@@ -670,8 +733,25 @@ impl Render for ViewportPanel {
         self.palette = Palette::from_theme(cx.theme());
         let palette = self.palette;
 
+        let physics_key = {
+            let e = editor.read(cx);
+            e.mesh_id
+                .as_ref()
+                .or(e.preview_mesh_ref.as_ref())
+                .map(|id| (e.project_root.clone(), id.as_str().to_owned()))
+        };
+        if physics_key != self.physics_cache_key
+            || self.physics_cache_checked.elapsed() >= Duration::from_secs(1)
+        {
+            self.physics_asset = physics_key
+                .as_ref()
+                .and_then(|(root, id)| load_physics_asset(root, id));
+            self.physics_cache_key = physics_key;
+            self.physics_cache_checked = Instant::now();
+        }
+
         // Build the frame's geometry from the editor's current pose.
-        let (geo, options, tracers_on, has_mesh, hud, labels) = {
+        let (geo, options, tracers_on, mesh_lod_count, hud, labels) = {
             let e = editor.read(cx);
             let (start, end) = e.play_range_seconds();
             let geo = build_scene(&SceneInput {
@@ -699,6 +779,7 @@ impl Render for ViewportPanel {
                             .then(|| e.selected_bone.as_deref())
                             .flatten(),
                     }),
+                physics: self.physics_asset.as_ref(),
             });
             let name = |id: &str| {
                 e.skeleton
@@ -721,7 +802,7 @@ impl Render for ViewportPanel {
                 geo,
                 e.view_options,
                 e.debug.show_tracers,
-                e.mesh.is_some(),
+                e.mesh.as_deref().map_or(0, |mesh| mesh.lods.len()),
                 self.render_hud(e, cx).into_any_element(),
                 labels,
             )
@@ -746,7 +827,7 @@ impl Render for ViewportPanel {
             .iter()
             .filter_map(|(id, selected, name)| self.bone_label(id, *selected, name, cx))
             .collect();
-        let toolbar = self.render_toolbar(options, tracers_on, has_mesh, cx);
+        let toolbar = self.render_toolbar(options, tracers_on, mesh_lod_count, cx);
 
         let gpu_display: AnyElement = if let Some(ref s) = self.surface {
             wgpu_surface(s.clone())

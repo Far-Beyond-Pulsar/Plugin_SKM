@@ -22,6 +22,7 @@ skeletal_assets   = { workspace = true }
 ui_common         = { workspace = true }
 engine_fs         = { workspace = true }
 pulsar_reflection = { workspace = true }
+pulsar_physics = { workspace = true }
 
 uuid       = { workspace = true }
 smol       = { workspace = true }

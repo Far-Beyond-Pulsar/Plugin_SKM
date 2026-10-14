@@ -4,14 +4,65 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::math::{Mat4, Transform};
+use super::math::{Mat4, Transform, Vec3};
 use super::skeleton::Skeleton;
+
+/// Interpolation used from this key to the next key for one transform channel.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KeyInterpolation {
+    #[default]
+    Linear,
+    Step,
+    CubicSpline,
+}
+
+/// Per-second glTF spline tangents, stored as components so quaternion tangents
+/// survive the `.animseq` round trip without being converted to Euler angles.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct KeyframeTangent {
+    #[serde(default)]
+    pub translation: [f32; 3],
+    #[serde(default)]
+    pub rotation: [f32; 4],
+    #[serde(default)]
+    pub scale: [f32; 3],
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Keyframe {
     /// Time in seconds.
     pub time: f32,
     pub transform: Transform,
+    /// Interpolation from this key to the next, independently per channel.
+    #[serde(default)]
+    pub translation_interpolation: KeyInterpolation,
+    #[serde(default)]
+    pub rotation_interpolation: KeyInterpolation,
+    #[serde(default)]
+    pub scale_interpolation: KeyInterpolation,
+    /// Cubic spline tangents. Linear/step keys ignore these values.
+    #[serde(default)]
+    pub in_tangent: KeyframeTangent,
+    #[serde(default)]
+    pub out_tangent: KeyframeTangent,
+    /// Original quaternion value for cubic rotation sampling.
+    #[serde(default)]
+    pub rotation_quaternion: Option<[f32; 4]>,
+}
+
+impl Keyframe {
+    pub fn linear(time: f32, transform: Transform) -> Self {
+        Self {
+            time,
+            transform,
+            translation_interpolation: KeyInterpolation::Linear,
+            rotation_interpolation: KeyInterpolation::Linear,
+            scale_interpolation: KeyInterpolation::Linear,
+            in_tangent: KeyframeTangent::default(),
+            out_tangent: KeyframeTangent::default(),
+            rotation_quaternion: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -22,8 +73,8 @@ pub struct BoneTrack {
 
 impl BoneTrack {
     /// Sample the track's transform at `time`, holding the nearest keyframe
-    /// outside the track's range and interpolating linearly between the two
-    /// surrounding keyframes inside it.
+    /// outside the track's range and applying each channel's interpolation
+    /// mode between surrounding keys.
     pub fn sample(&self, time: f32) -> Option<Transform> {
         let kfs = &self.keyframes;
         if kfs.is_empty() {
@@ -41,11 +92,108 @@ impl BoneTrack {
             if time >= a.time && time <= b.time {
                 let span = (b.time - a.time).max(1e-6);
                 let t = (time - a.time) / span;
-                return Some(a.transform.lerp(&b.transform, t));
+                return Some(sample_pair(a, b, t, span));
             }
         }
         Some(kfs[kfs.len() - 1].transform.clone())
     }
+}
+
+fn sample_pair(a: &Keyframe, b: &Keyframe, t: f32, span: f32) -> Transform {
+    let mut result = a.transform.lerp(&b.transform, t);
+    if a.translation_interpolation == KeyInterpolation::Step {
+        result.translation = a.transform.translation;
+    } else if a.translation_interpolation == KeyInterpolation::CubicSpline {
+        result.translation = Vec3::new(
+            hermite(
+                a.transform.translation.x,
+                b.transform.translation.x,
+                a.out_tangent.translation[0],
+                b.in_tangent.translation[0],
+                t,
+                span,
+            ),
+            hermite(
+                a.transform.translation.y,
+                b.transform.translation.y,
+                a.out_tangent.translation[1],
+                b.in_tangent.translation[1],
+                t,
+                span,
+            ),
+            hermite(
+                a.transform.translation.z,
+                b.transform.translation.z,
+                a.out_tangent.translation[2],
+                b.in_tangent.translation[2],
+                t,
+                span,
+            ),
+        );
+    }
+    if a.scale_interpolation == KeyInterpolation::Step {
+        result.scale = a.transform.scale;
+    } else if a.scale_interpolation == KeyInterpolation::CubicSpline {
+        result.scale = Vec3::new(
+            hermite(
+                a.transform.scale.x,
+                b.transform.scale.x,
+                a.out_tangent.scale[0],
+                b.in_tangent.scale[0],
+                t,
+                span,
+            ),
+            hermite(
+                a.transform.scale.y,
+                b.transform.scale.y,
+                a.out_tangent.scale[1],
+                b.in_tangent.scale[1],
+                t,
+                span,
+            ),
+            hermite(
+                a.transform.scale.z,
+                b.transform.scale.z,
+                a.out_tangent.scale[2],
+                b.in_tangent.scale[2],
+                t,
+                span,
+            ),
+        );
+    }
+    if a.rotation_interpolation == KeyInterpolation::Step {
+        result.rotation = a.transform.rotation;
+    } else if a.rotation_interpolation == KeyInterpolation::CubicSpline {
+        if let (Some(qa), Some(qb)) = (a.rotation_quaternion, b.rotation_quaternion) {
+            let mut q = [0.0; 4];
+            for (i, value) in q.iter_mut().enumerate() {
+                *value = hermite(
+                    qa[i],
+                    qb[i],
+                    a.out_tangent.rotation[i],
+                    b.in_tangent.rotation[i],
+                    t,
+                    span,
+                );
+            }
+            let length = q.iter().map(|v| v * v).sum::<f32>().sqrt();
+            if length > 1e-8 {
+                q.iter_mut().for_each(|v| *v /= length);
+                result =
+                    Transform::from_trs(result.translation.to_array(), q, result.scale.to_array());
+            }
+        }
+    }
+    result
+}
+
+fn hermite(a: f32, b: f32, outgoing: f32, incoming: f32, t: f32, span: f32) -> f32 {
+    let t2 = t * t;
+    let t3 = t2 * t;
+    (2.0 * t3 - 3.0 * t2 + 1.0) * a
+        + (t3 - 2.0 * t2 + t) * span * outgoing
+        + (-2.0 * t3 + 3.0 * t2) * b
+        + (t3 - t2) * span * incoming
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

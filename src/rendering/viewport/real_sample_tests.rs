@@ -110,6 +110,7 @@ fn render_real_sample() {
                 mesh: &mesh,
                 weights_of: selected,
             }),
+            physics: None,
         };
         // Frame the whole animation, not just this pose, so frames compare.
         let mut bounds: Option<(crate::core::Vec3, f32)> = None;
@@ -171,7 +172,12 @@ fn render_real_sample() {
     render("real_bind_bones", &bind, 0.0, None, 35.0, true);
     // A joint with many vertices, for the weight view.
     let counts = joint_vertex_counts(&mesh, &mesh.lods[0]);
-    let busiest = counts.iter().enumerate().max_by_key(|(_, c)| **c).unwrap().0;
+    let busiest = counts
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, c)| **c)
+        .unwrap()
+        .0;
     let bone = mesh.joints[busiest].bone.clone();
     render("real_weights", &bind, 0.0, Some(&bone), 35.0, true);
     for (n, sequence) in sequences.iter().enumerate() {

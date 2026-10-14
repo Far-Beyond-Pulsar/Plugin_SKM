@@ -44,6 +44,7 @@ fn render_shot(gpu: &Gpu, shot: Shot) -> Vec<u8> {
             mesh: &mesh,
             weights_of: shot.selected,
         }),
+        physics: None,
     });
 
     let (w, h) = shot.size;
@@ -242,6 +243,7 @@ fn render_viewport_in_motion() {
                 palette: &palette,
                 tracers: None,
                 skin: None,
+                physics: None,
             });
             if i == 0 {
                 camera.frame_sphere(geo.center, geo.radius);
