@@ -856,12 +856,28 @@ impl Render for ViewportPanel {
                             Point::new(bounds.origin.x.as_f32(), bounds.origin.y.as_f32());
                         panel.last_size =
                             Size::new(bounds.size.width.as_f32(), bounds.size.height.as_f32());
+                        // The GPU device was lost: the surface and the
+                        // renderer's buffers are on it. Start over on the
+                        // window's new device.
+                        if panel
+                            .surface
+                            .as_ref()
+                            .is_some_and(WgpuSurfaceHandle::is_device_lost)
+                        {
+                            panel.surface = None;
+                            panel.renderer = ViewportRenderer::new();
+                        }
                         if panel.surface.is_none() {
-                            if let Some(s) = window.create_wgpu_surface(
-                                sw.max(64),
-                                sh.max(64),
-                                wgpu::TextureFormat::Bgra8UnormSrgb,
-                            ) {
+                            // Until the window has a new device, a new surface
+                            // is on the lost one too; it renders again once it has.
+                            if let Some(s) = window
+                                .create_wgpu_surface(
+                                    sw.max(64),
+                                    sh.max(64),
+                                    wgpu::TextureFormat::Bgra8UnormSrgb,
+                                )
+                                .filter(|s| !s.is_device_lost())
+                            {
                                 panel.surface = Some(s);
                                 cx.notify();
                             }
