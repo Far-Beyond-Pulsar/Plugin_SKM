@@ -18,6 +18,66 @@ use crate::ui_components::{BoneHierarchyPanel, BonePropertiesPanel};
 
 use super::panel::SkeletalAnimEditorPanel;
 use crate::ui_components::chrome::{toolbar_divider, MONO};
+use plugin_editor_api::{EditorMenu, EditorMenuStrip};
+
+actions!(
+    skeletal_anim_editor,
+    [
+        SaveAnimation,
+        TogglePlay,
+        GoToStart,
+        GoToEnd,
+        PreviousKeyframe,
+        NextKeyframe,
+        InsertKeyframe,
+        DeleteKeyframes,
+        CutKeyframes,
+        CopyKeyframes,
+        PasteKeyframes,
+        SelectAllKeyframes,
+        ToggleLoop,
+        CyclePlaybackSpeed,
+        ToggleBoneTracers,
+        ExpandAllBones,
+        CollapseAllBones,
+    ]
+);
+
+/// The animation editor's menus (Pulsar-Native#1012): its timeline and
+/// keyframe tools, dispatched from the strip to the panel's handlers.
+fn editor_menus(has_path: bool) -> EditorMenuStrip {
+    EditorMenuStrip::new("skeletal-anim-menus")
+        .menu(EditorMenu::new("File").action_if("Save", SaveAnimation, has_path))
+        .menu(
+            EditorMenu::new("Edit")
+                .action("Cut Keyframes", CutKeyframes)
+                .action("Copy Keyframes", CopyKeyframes)
+                .action("Paste Keyframes", PasteKeyframes)
+                .separator()
+                .action("Select All Keyframes", SelectAllKeyframes)
+                .action("Delete Keyframes", DeleteKeyframes),
+        )
+        .menu(
+            EditorMenu::new("Tools")
+                .action("Play / Pause", TogglePlay)
+                .action("Go to Start", GoToStart)
+                .action("Go to End", GoToEnd)
+                .action("Previous Keyframe", PreviousKeyframe)
+                .action("Next Keyframe", NextKeyframe)
+                .separator()
+                .action("Insert Keyframe", InsertKeyframe)
+                .separator()
+                .action("Toggle Loop", ToggleLoop)
+                .action("Cycle Playback Speed", CyclePlaybackSpeed),
+        )
+        .menu(
+            EditorMenu::new("View")
+                .action("Bone Tracers", ToggleBoneTracers)
+                .separator()
+                .action("Expand All Bones", ExpandAllBones)
+                .action("Collapse All Bones", CollapseAllBones),
+        )
+}
 
 impl SkeletalAnimEditorPanel {
     pub fn initialize_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -141,6 +201,8 @@ impl Render for SkeletalAnimEditorPanel {
             .bg(theme.secondary)
             .border_b_1()
             .border_color(theme.border)
+            .child(editor_menus(has_path))
+            .child(toolbar_divider(cx))
             .child(
                 Button::new("skeletal-save")
                     .icon(IconName::FloppyDisk)
@@ -243,6 +305,43 @@ impl Render for SkeletalAnimEditorPanel {
                     cx.stop_propagation();
                 }
             }))
+            .on_action(cx.listener(|this, _: &SaveAnimation, _, cx| this.save_and_report(cx)))
+            .on_action(cx.listener(|this, _: &TogglePlay, _, cx| this.toggle_play(cx)))
+            .on_action(cx.listener(|this, _: &GoToStart, window, cx| this.goto_start(window, cx)))
+            .on_action(cx.listener(|this, _: &GoToEnd, window, cx| this.goto_end(window, cx)))
+            .on_action(cx.listener(|this, _: &PreviousKeyframe, window, cx| {
+                this.goto_prev_keyframe(window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &NextKeyframe, window, cx| {
+                    this.goto_next_keyframe(window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &InsertKeyframe, window, cx| {
+                    this.insert_keyframe(window, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &DeleteKeyframes, window, cx| {
+                this.delete_selected_keyframes(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &CutKeyframes, window, cx| {
+                this.cut_selected_keyframes(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &CopyKeyframes, _, _| this.copy_selected_keyframes()))
+            .on_action(
+                cx.listener(|this, _: &PasteKeyframes, window, cx| {
+                    this.paste_keyframes(window, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &SelectAllKeyframes, window, cx| {
+                this.select_all_keyframes(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleLoop, _, cx| this.toggle_loop(cx)))
+            .on_action(cx.listener(|this, _: &CyclePlaybackSpeed, _, cx| this.cycle_speed(cx)))
+            .on_action(cx.listener(|this, _: &ToggleBoneTracers, _, cx| this.toggle_tracers(cx)))
+            .on_action(cx.listener(|this, _: &ExpandAllBones, _, cx| this.expand_all_bones(cx)))
+            .on_action(cx.listener(|this, _: &CollapseAllBones, _, cx| this.collapse_all_bones(cx)))
             .child(toolbar)
             .child(div().flex_1().min_h_0().map(|el| {
                 if let Some(workspace) = &self.workspace {
