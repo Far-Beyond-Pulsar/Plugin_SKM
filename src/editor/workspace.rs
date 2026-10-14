@@ -14,7 +14,7 @@ use ui::workspace::Workspace;
 use ui::{h_flex, ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt};
 
 use crate::rendering::{TimelinePanel, ViewportPanel};
-use crate::ui_components::{BoneHierarchyPanel, BonePropertiesPanel};
+use crate::ui_components::{BoneHierarchyPanel, BonePropertiesPanel, MeshInspectorPanel};
 
 use super::panel::{EditorMode, SkeletalAnimEditorPanel};
 use crate::ui_components::chrome::{toolbar_divider, MONO};
@@ -43,13 +43,13 @@ actions!(
     ]
 );
 
-/// The editor's menus (Pulsar-Native#1012): a skeleton gets File and View; a
-/// sequence adds its timeline and
-/// keyframe tools, dispatched from the strip to the panel's handlers.
+/// The editor's menus (Pulsar-Native#1012): a skeleton or a mesh gets File and
+/// View; a sequence adds its timeline and keyframe tools, dispatched from the
+/// strip to the panel's handlers.
 fn editor_menus(has_path: bool, mode: EditorMode) -> EditorMenuStrip {
     let strip = EditorMenuStrip::new("skeletal-anim-menus")
         .menu(EditorMenu::new("File").action_if("Save", SaveAnimation, has_path));
-    if mode == EditorMode::Skeleton {
+    if mode != EditorMode::Sequence {
         return strip.menu(
             EditorMenu::new("View")
                 .action("Expand All Bones", ExpandAllBones)
@@ -97,15 +97,25 @@ impl SkeletalAnimEditorPanel {
         let editor_weak = cx.entity().downgrade();
 
         let workspace = cx.new(|cx| {
-            Workspace::new_with_channel("skeletal-anim-workspace", ui::dock::DockChannel(1), window, cx)
+            Workspace::new_with_channel(
+                "skeletal-anim-workspace",
+                ui::dock::DockChannel(1),
+                window,
+                cx,
+            )
         });
 
         let viewport_panel = cx.new(|cx| ViewportPanel::new(editor_weak.clone(), cx));
         // A skeleton has no animation, so no timeline.
         let has_timeline = self.mode == EditorMode::Sequence;
-        let timeline_panel = has_timeline.then(|| cx.new(|cx| TimelinePanel::new(editor_weak.clone(), cx)));
+        let timeline_panel =
+            has_timeline.then(|| cx.new(|cx| TimelinePanel::new(editor_weak.clone(), cx)));
         let hierarchy_panel = cx.new(|cx| BoneHierarchyPanel::new(editor_weak.clone(), cx));
         let properties_panel = cx.new(|cx| BonePropertiesPanel::new(editor_weak.clone(), cx));
+        // A mesh has no bone transforms to edit; its right dock is the inspector.
+        let mesh_panel = (self.mode == EditorMode::Mesh)
+            .then(|| cx.new(|cx| MeshInspectorPanel::new(editor_weak.clone(), cx)));
+        self.init_slot_pickers(window, cx);
 
         // The sidebars render from their own snapshots and refresh only when
         // what they show changes, instead of on every editor notify.
@@ -135,13 +145,11 @@ impl SkeletalAnimEditorPanel {
                 cx,
             );
 
-            let right = DockItem::tabs(
-                vec![Arc::new(properties_panel.clone()) as Arc<dyn ui::dock::PanelView>],
-                Some(0),
-                &dock_area_weak,
-                window,
-                cx,
-            );
+            let right_panel: Arc<dyn ui::dock::PanelView> = match &mesh_panel {
+                Some(mesh_panel) => Arc::new(mesh_panel.clone()),
+                None => Arc::new(properties_panel.clone()),
+            };
+            let right = DockItem::tabs(vec![right_panel], Some(0), &dock_area_weak, window, cx);
 
             let bottom = timeline_panel.as_ref().map(|timeline_panel| {
                 DockItem::tabs(
@@ -186,6 +194,7 @@ impl ui::dock::Panel for SkeletalAnimEditorPanel {
         match self.mode {
             EditorMode::Skeleton => "skeleton-editor",
             EditorMode::Sequence => "animation-sequence-editor",
+            EditorMode::Mesh => "skeletal-mesh-editor",
         }
     }
 
@@ -193,6 +202,7 @@ impl ui::dock::Panel for SkeletalAnimEditorPanel {
         match self.mode {
             EditorMode::Skeleton => "Skeleton",
             EditorMode::Sequence => "Animation Sequence",
+            EditorMode::Mesh => "Skeletal Mesh",
         }
         .into_any_element()
     }
@@ -212,7 +222,10 @@ impl Render for SkeletalAnimEditorPanel {
         let fps = self.animation.fps_clamped();
         let mode = self.mode;
         let is_sequence = mode == EditorMode::Sequence;
-        let skeleton_field = is_sequence.then(|| self.render_skeleton_field(window, cx));
+        let has_skeleton_ref = mode != EditorMode::Skeleton;
+        let skeleton_field = has_skeleton_ref.then(|| self.render_skeleton_field(window, cx));
+        let has_preview = mode != EditorMode::Mesh;
+        let preview_field = has_preview.then(|| self.render_preview_mesh_field(window, cx));
         let banner = self.render_banner(cx);
 
         let save_entity = entity.clone();
@@ -311,10 +324,8 @@ impl Render for SkeletalAnimEditorPanel {
                                 .child(format!("{} frames", self.animation.last_frame() + 1)),
                         ),
                 )
-                .child(toolbar_divider(cx))
-                .children(skeleton_field)
             })
-            .when(!is_sequence, |bar| {
+            .when(mode == EditorMode::Skeleton, |bar| {
                 bar.child(
                     h_flex()
                         .gap_1p5()
@@ -341,9 +352,50 @@ impl Render for SkeletalAnimEditorPanel {
                         }),
                 )
             })
+            .when(mode == EditorMode::Mesh, |bar| {
+                let stats = self.mesh.as_deref().map(|m| m.stats()).unwrap_or_default();
+                bar.child(
+                    h_flex()
+                        .gap_1p5()
+                        .items_center()
+                        .child(
+                            Icon::new(IconName::Cube)
+                                .size(px(14.0))
+                                .text_color(theme.info),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .text_color(theme.foreground)
+                                .child("Skeletal Mesh"),
+                        )
+                        .child(
+                            Tag::secondary()
+                                .small()
+                                .child(format!("{} verts", stats.vertices)),
+                        )
+                        .child(
+                            Tag::secondary()
+                                .small()
+                                .child(format!("{} joints", stats.joints)),
+                        )
+                        .when_some(self.mesh_id.as_ref(), |row, id| {
+                            row.child(Tag::secondary().small().child(format!("id {}", id.short())))
+                        }),
+                )
+            })
+            // The references to the other assets, in the same place in every mode.
+            .when(has_skeleton_ref, |bar| bar.child(toolbar_divider(cx)))
+            .children(skeleton_field)
+            .when(has_preview, |bar| bar.child(toolbar_divider(cx)))
+            .children(preview_field)
             .child(div().flex_1())
             .child(if is_dirty {
-                Tag::warning().small().child("Unsaved changes").into_any_element()
+                Tag::warning()
+                    .small()
+                    .child("Unsaved changes")
+                    .into_any_element()
             } else if has_path {
                 Tag::success().small().child("Saved").into_any_element()
             } else {

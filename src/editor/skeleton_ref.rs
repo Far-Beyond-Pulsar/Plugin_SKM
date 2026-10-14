@@ -1,12 +1,10 @@
-//! A sequence's reference to its skeleton: resolving the stored id through the
+//! An asset's reference to its skeleton: resolving the stored id through the
 //! project library, the typed asset picker that changes it, and the banner
-//! that explains an unresolved link.
+//! that explains an unresolved link (of the skeleton, or of a preview mesh).
 //!
-//! The sequence stores only a [`SkeletonId`]. The name and path shown here are
-//! looked up from that id on every render, so renaming or moving the skeleton
-//! file never leaves a stale label behind.
-
-use std::path::Path;
+//! A sequence or a skeletal mesh stores only a [`SkeletonId`]. The name and
+//! path shown here are looked up from that id on every render, so renaming or
+//! moving the skeleton file never leaves a stale label behind.
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -18,35 +16,83 @@ use ui_common::{AssetPickedEvent, AssetQuery, MeshAssetPicker};
 
 use crate::core::assets::SKELETON_EXTENSION;
 use crate::core::library::{self, Library};
-use crate::core::validate::{validate_sequence, Severity};
-use crate::core::{Skeleton, SkeletonId, SkeletonLink};
+use crate::core::validate::{
+    validate_preview, validate_sequence, validate_skeletal_mesh, Severity,
+};
+use crate::core::{MeshLibrary, MeshLink, Skeleton, SkeletonId, SkeletonLink};
 
+use super::link_state::{self, display_path, FieldState, Tone};
 use super::panel::{EditorMode, SkeletalAnimEditorPanel, TracerState};
 
+/// A status tag in the color of its tone.
+pub(crate) fn status_tag(state: &FieldState) -> AnyElement {
+    match state.tone {
+        Tone::Warning => Tag::warning()
+            .small()
+            .child(state.status)
+            .into_any_element(),
+        Tone::Secondary => Tag::secondary()
+            .small()
+            .child(state.status)
+            .into_any_element(),
+        Tone::Success => Tag::success()
+            .small()
+            .child(state.status)
+            .into_any_element(),
+        Tone::Danger => Tag::danger().small().child(state.status).into_any_element(),
+    }
+}
+
 impl SkeletalAnimEditorPanel {
-    /// Recompute [`Self::issues`] for the current link.
+    /// Recompute [`Self::issues`] for the current links and data.
     pub(crate) fn refresh_issues(&mut self) {
+        let preview = |this: &Self, skeleton_id: Option<&SkeletonId>| {
+            validate_preview(
+                &this.preview_link,
+                skeleton_id,
+                &this.skeleton,
+                this.mesh.as_deref(),
+            )
+        };
         self.issues = match self.mode {
-            EditorMode::Skeleton => Vec::new(),
-            EditorMode::Sequence => validate_sequence(&self.animation, &self.link),
+            EditorMode::Skeleton => preview(self, self.asset_id.as_ref()),
+            EditorMode::Sequence => {
+                let mut issues = validate_sequence(&self.animation, &self.link);
+                issues.extend(preview(self, self.skeleton_ref.as_ref()));
+                issues
+            }
+            EditorMode::Mesh => self
+                .mesh
+                .as_deref()
+                .map(|mesh| validate_skeletal_mesh(mesh, &self.link))
+                .unwrap_or_default(),
         };
     }
 
-    /// Scan the project for skeletons off the UI thread, then re-resolve the
-    /// reference against the result. A scan started later supersedes an
-    /// earlier one that is still running.
+    /// Scan the project for skeletons (and for meshes, if a preview mesh is
+    /// named) off the UI thread, then re-resolve the references against the
+    /// result. A scan started later supersedes an earlier one that is still
+    /// running.
     pub(crate) fn rescan_library(&mut self, cx: &mut Context<Self>) {
         self.scan_generation += 1;
         let generation = self.scan_generation;
         let root = self.project_root.clone();
+        // A skeleton being edited is its own source: nothing to resolve.
+        let scan_skeletons = self.mode != EditorMode::Skeleton;
+        let scan_meshes = self.preview_mesh_ref.is_some();
         cx.spawn(async move |this, cx| {
-            let library = cx
+            let (skeletons, meshes) = cx
                 .background_executor()
-                .spawn(async move { Library::scan(&root) })
+                .spawn(async move {
+                    (
+                        scan_skeletons.then(|| Library::scan(&root)),
+                        scan_meshes.then(|| MeshLibrary::scan(&root)),
+                    )
+                })
                 .await;
             this.update(cx, |this, cx| {
                 if this.scan_generation == generation {
-                    this.set_library(library, cx);
+                    this.set_libraries(skeletons, meshes, cx);
                 }
             })
             .ok();
@@ -54,10 +100,23 @@ impl SkeletalAnimEditorPanel {
         .detach();
     }
 
-    fn set_library(&mut self, library: Library, cx: &mut Context<Self>) {
-        self.library = library;
-        let link = self.library.link(self.skeleton_ref.as_ref());
-        self.apply_link(link);
+    fn set_libraries(
+        &mut self,
+        skeletons: Option<Library>,
+        meshes: Option<MeshLibrary>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(library) = skeletons {
+            self.library = library;
+            let link = self.library.link(self.skeleton_ref.as_ref());
+            self.apply_link(link);
+        }
+        if let Some(library) = meshes {
+            self.mesh_library = library;
+            let link = self.mesh_library.link(self.preview_mesh_ref.as_ref());
+            self.apply_preview_link(link, cx);
+        }
+        self.refresh_issues();
         cx.notify();
     }
 
@@ -77,14 +136,19 @@ impl SkeletalAnimEditorPanel {
         {
             self.selected_bone = None;
         }
-        let roots: Vec<String> = self.skeleton.root_bones().iter().map(|b| b.id.clone()).collect();
+        let roots: Vec<String> = self
+            .skeleton
+            .root_bones()
+            .iter()
+            .map(|b| b.id.clone())
+            .collect();
         self.expanded_bones.extend(roots);
         self.refresh_issues();
     }
 
-    /// Point the sequence at the skeleton with `id` (or at none).
+    /// Point the sequence or mesh at the skeleton with `id` (or at none).
     pub fn set_skeleton_ref(&mut self, id: Option<SkeletonId>, cx: &mut Context<Self>) {
-        if self.mode != EditorMode::Sequence || id == self.skeleton_ref {
+        if self.mode == EditorMode::Skeleton || id == self.skeleton_ref {
             return;
         }
         self.skeleton_ref = id;
@@ -117,20 +181,6 @@ impl SkeletalAnimEditorPanel {
         }
     }
 
-    /// Where the referenced skeleton is, relative to the project, for the
-    /// picker's highlight.
-    fn picked_path(&self) -> String {
-        match &self.link {
-            SkeletonLink::Resolved(entry) => entry
-                .path
-                .strip_prefix(&self.project_root)
-                .unwrap_or(&entry.path)
-                .to_string_lossy()
-                .replace('\\', "/"),
-            _ => String::new(),
-        }
-    }
-
     /// The `.skeleton` search popover's content, created on first use. `None`
     /// when there is no project to search (the unsaved sample).
     fn skeleton_picker(
@@ -142,7 +192,10 @@ impl SkeletalAnimEditorPanel {
             return None;
         }
         if self.skeleton_picker.is_none() {
-            let (selected, root) = (self.picked_path(), self.project_root.clone());
+            let (selected, root) = (
+                link_state::skeleton_picked_path(&self.link, &self.project_root),
+                self.project_root.clone(),
+            );
             let picker = cx.new(|cx| {
                 MeshAssetPicker::new(
                     selected,
@@ -164,7 +217,7 @@ impl SkeletalAnimEditorPanel {
             self.skeleton_picker = Some(picker);
         }
         let picker = self.skeleton_picker.clone()?;
-        let current = self.picked_path();
+        let current = link_state::skeleton_picked_path(&self.link, &self.project_root);
         if picker.read(cx).selected_path() != current {
             picker.update(cx, |p, _| p.set_selected_path(current));
         }
@@ -180,52 +233,18 @@ impl SkeletalAnimEditorPanel {
     ) -> AnyElement {
         let theme = cx.theme().clone();
         let picker = self.skeleton_picker(window, cx);
-
-        let (label, tooltip, status): (String, String, AnyElement) = match &self.link {
-            SkeletonLink::Unset => (
-                "No skeleton".into(),
-                "Pick the skeleton this sequence animates".into(),
-                Tag::warning().small().child("Unset").into_any_element(),
-            ),
-            SkeletonLink::Resolving(id) => (
-                format!("Skeleton {}", id.short()),
-                "Looking for the skeleton in the project".into(),
-                Tag::secondary().small().child("Resolving").into_any_element(),
-            ),
-            SkeletonLink::Resolved(entry) => (
-                entry.name.clone(),
-                if entry.path.as_os_str().is_empty() {
-                    "Sample skeleton (not saved)".into()
-                } else {
-                    display_path(&entry.path, &self.project_root)
-                },
-                Tag::success().small().child("Linked").into_any_element(),
-            ),
-            SkeletonLink::Missing(id) => (
-                format!("Missing {}", id.short()),
-                format!("No skeleton with id {id} is in the project"),
-                Tag::danger().small().child("Missing").into_any_element(),
-            ),
-            SkeletonLink::Ambiguous { id, paths } => (
-                format!("Ambiguous {}", id.short()),
-                format!(
-                    "Claimed by: {}",
-                    paths
-                        .iter()
-                        .map(|p| display_path(p, &self.project_root))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                Tag::danger().small().child("Ambiguous").into_any_element(),
-            ),
+        let unset_hint = match self.mode {
+            EditorMode::Mesh => "Pick the skeleton this mesh is skinned to",
+            _ => "Pick the skeleton this sequence animates",
         };
+        let state = link_state::skeleton_field(&self.link, &self.project_root, unset_hint);
 
         let trigger = Button::new("skeleton-ref")
-            .label(label)
+            .label(state.label.clone())
             .small()
             .outline()
             .dropdown_caret(true)
-            .tooltip(tooltip)
+            .tooltip(state.tooltip.clone())
             .disabled(picker.is_none());
         let field: AnyElement = match picker {
             Some(picker) => Popover::<MeshAssetPicker>::new("skeleton-ref-popover")
@@ -246,7 +265,7 @@ impl SkeletalAnimEditorPanel {
                     .text_color(theme.muted_foreground),
             )
             .child(field)
-            .child(status)
+            .child(status_tag(&state))
             .when(self.skeleton_ref.is_some(), |row| {
                 row.child(
                     Button::new("skeleton-ref-clear")
@@ -262,7 +281,9 @@ impl SkeletalAnimEditorPanel {
             .into_any_element()
     }
 
-    /// Rows under the toolbar for the one-off notice and any issues.
+    /// Rows under the toolbar for the one-off notice and any issues, and,
+    /// when a reference is ambiguous, the files that share its id with a
+    /// button to give each a new one.
     pub(crate) fn render_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let theme = cx.theme().clone();
         let editor = cx.entity();
@@ -271,19 +292,65 @@ impl SkeletalAnimEditorPanel {
             rows.push((Severity::Info, notice.clone()));
         }
         rows.extend(self.issues.iter().map(|i| (i.severity, i.message.clone())));
-        // Files sharing the referenced id, by project-relative name.
-        let copies = match &self.link {
-            SkeletonLink::Ambiguous { paths, .. } => Some(
-                paths
-                    .iter()
-                    .map(|p| (display_path(p, &self.project_root), p.clone()))
-                    .collect::<Vec<_>>(),
-            ),
+
+        // Files sharing a referenced id, by project-relative name.
+        let relative = |paths: &[std::path::PathBuf]| {
+            paths
+                .iter()
+                .map(|p| (display_path(p, &self.project_root), p.clone()))
+                .collect::<Vec<_>>()
+        };
+        let skeleton_copies = match &self.link {
+            SkeletonLink::Ambiguous { paths, .. } => Some(relative(paths)),
+            _ => None,
+        };
+        let mesh_copies = match &self.preview_link {
+            MeshLink::Ambiguous { paths, .. } => Some(relative(paths)),
             _ => None,
         };
         if rows.is_empty() {
             return None;
         }
+        let copies_row =
+            |id: &'static str, copies: Vec<(String, std::path::PathBuf)>, is_mesh: bool| {
+                let editor = editor.clone();
+                h_flex()
+                    .w_full()
+                    .px_3()
+                    .py_1()
+                    .gap_2()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("Give a new id to:"),
+                    )
+                    .children(
+                        copies
+                            .into_iter()
+                            .enumerate()
+                            .map(move |(i, (shown, path))| {
+                                let editor = editor.clone();
+                                Button::new((id, i))
+                        .label(shown)
+                        .small()
+                        .outline()
+                        .tooltip("Make this file a distinct asset; the others keep the shared id")
+                        .on_click(move |_, _window, cx| {
+                            editor.update(cx, |editor, cx| {
+                                if is_mesh {
+                                    editor.regenerate_mesh_id(path.clone(), cx)
+                                } else {
+                                    editor.regenerate_skeleton_id(path.clone(), cx)
+                                }
+                            });
+                        })
+                            }),
+                    )
+            };
         Some(
             v_flex()
                 .w_full()
@@ -313,44 +380,13 @@ impl SkeletalAnimEditorPanel {
                                 .child(message),
                         )
                 }))
-                .when_some(copies, |column, paths| {
-                    column.child(
-                        h_flex()
-                            .w_full()
-                            .px_3()
-                            .py_1()
-                            .gap_2()
-                            .items_center()
-                            .border_b_1()
-                            .border_color(theme.border)
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("Give a new id to:"),
-                            )
-                            .children(paths.into_iter().enumerate().map(|(i, (shown, path))| {
-                                let editor = editor.clone();
-                                Button::new(("skeleton-new-id", i))
-                                    .label(shown)
-                                    .small()
-                                    .outline()
-                                    .tooltip("Make this file a distinct skeleton; the others keep the shared id")
-                                    .on_click(move |_, _window, cx| {
-                                        editor.update(cx, |editor, cx| editor.regenerate_skeleton_id(path.clone(), cx));
-                                    })
-                            })),
-                    )
+                .when_some(skeleton_copies, |column, copies| {
+                    column.child(copies_row("skeleton-new-id", copies, false))
+                })
+                .when_some(mesh_copies, |column, copies| {
+                    column.child(copies_row("mesh-new-id", copies, true))
                 })
                 .into_any_element(),
         )
     }
-}
-
-/// `path` relative to the project, with `/` separators.
-fn display_path(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
 }

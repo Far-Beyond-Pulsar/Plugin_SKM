@@ -5,10 +5,16 @@
 //! dock workspace (center viewport, bone hierarchy, properties, timeline) is
 //! built lazily on first render in [`super::workspace`].
 //!
-//! One panel type serves both assets (see [`EditorMode`]). In `Skeleton` mode
+//! One panel type serves the three assets (see [`EditorMode`]). In `Skeleton` mode
 //! it edits a `.skeleton` file's bones and bind pose. In `Sequence` mode it
 //! edits a `.animseq` file; the skeleton shown is the one the sequence
 //! references by id, resolved through the project [`Library`] and read-only.
+//! In `Mesh` mode it edits a `.skmesh`: the skeleton is again the referenced
+//! one, and the mesh is drawn skinned to it, with the weights inspectable.
+//!
+//! A skeleton or sequence can also name a skeletal mesh to preview (by id,
+//! resolved through the [`MeshLibrary`]); the mesh is then drawn posed by the
+//! clip, for orientation only.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -22,11 +28,11 @@ use crate::core::assets::{
 };
 use crate::core::library::{self, Entry};
 use crate::core::migrate;
-use crate::core::skmesh::SkeletalMeshAsset;
+use crate::core::skmesh::{self, SkeletalMeshAsset, SKMESH_EXTENSION};
 use crate::core::validate::Issue;
 use crate::core::{
-    self, evaluate_world_transforms, AnimationClip, BoneTrack, Keyframe, Library, Skeleton,
-    SkeletonId, SkeletonLink, Transform, Vec3,
+    self, evaluate_world_transforms, AnimationClip, BoneTrack, Keyframe, Library, MeshLibrary,
+    MeshLink, SkeletalMeshId, Skeleton, SkeletonId, SkeletonLink, Transform, Vec3,
 };
 use crate::rendering::{TimelinePanel, ViewportPanel};
 
@@ -39,22 +45,30 @@ pub enum EditorMode {
     Skeleton,
     /// An `.animseq`: timeline, viewport and hierarchy over its skeleton.
     Sequence,
+    /// A `.skmesh`: the mesh skinned to its skeleton, with weights, joints,
+    /// material slots and statistics, no timeline.
+    Mesh,
 }
 
 /// What kind of thing a path opened in the editor is.
 enum Opened {
     Skeleton,
     Sequence,
+    Mesh,
     /// An old `.skelanim` folder, converted on open.
     Legacy,
 }
 
 impl Opened {
     fn of(path: &Path) -> Option<Self> {
-        let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase);
         match ext.as_deref() {
             Some(SKELETON_EXTENSION) => Some(Self::Skeleton),
             Some(ANIMSEQ_EXTENSION) => Some(Self::Sequence),
+            Some(SKMESH_EXTENSION) => Some(Self::Mesh),
             _ if migrate::is_legacy_folder(path) => Some(Self::Legacy),
             _ => None,
         }
@@ -185,7 +199,7 @@ pub struct SkeletalAnimEditorPanel {
     pub(crate) workspace: Option<Entity<ui::workspace::Workspace>>,
 
     pub mode: EditorMode,
-    /// The `.skeleton` or `.animseq` file being edited, if opened from disk.
+    /// The `.skeleton`, `.animseq` or `.skmesh` file being edited, if opened from disk.
     pub current_asset_path: Option<PathBuf>,
     pub is_dirty: bool,
 
@@ -200,23 +214,45 @@ pub struct SkeletalAnimEditorPanel {
 
     /// `Skeleton` mode: the edited skeleton's own id.
     pub asset_id: Option<SkeletonId>,
-    /// `Sequence` mode: the skeleton the sequence refers to. Kept as is even
-    /// when nothing in the project has this id.
+    /// `Sequence` and `Mesh` modes: the skeleton the asset refers to. Kept as is
+    /// even when nothing in the project has this id.
     pub skeleton_ref: Option<SkeletonId>,
     /// What `skeleton_ref` currently resolves to.
     pub link: SkeletonLink,
     /// Skeletons in the project, as of the last scan.
     pub library: Library,
     pub project_root: PathBuf,
-    /// The skeletal mesh drawn skinned by the pose, if any.
+
+    /// `Mesh` mode: the edited mesh's own id.
+    pub mesh_id: Option<SkeletalMeshId>,
+    /// The skeletal mesh on screen: the one being edited in `Mesh` mode, the
+    /// loaded preview mesh otherwise. Shared so a preview can be handed to the
+    /// viewport cheaply; `Mesh` mode edits it through `Arc::make_mut`.
     pub mesh: Option<Arc<SkeletalMeshAsset>>,
-    /// Problems with the sequence's skeleton link; recomputed on link changes.
+    /// Bumped whenever `mesh` is replaced or edited.
+    pub mesh_revision: u64,
+    /// `Skeleton` and `Sequence` modes: the mesh previewed with the asset.
+    /// Kept as is even when nothing in the project has this id.
+    pub preview_mesh_ref: Option<SkeletalMeshId>,
+    /// What `preview_mesh_ref` currently resolves to.
+    pub preview_link: MeshLink,
+    /// Skeletal meshes in the project, as of the last scan.
+    pub mesh_library: MeshLibrary,
+    /// File the preview `mesh` was loaded from, so a rescan that finds the
+    /// same file does not load it again.
+    pub(crate) preview_loaded_from: Option<PathBuf>,
+    /// Problems with the asset and its links; recomputed on changes.
     pub issues: Vec<Issue>,
     /// One-off message under the toolbar (e.g. that an old asset was converted).
     pub notice: Option<String>,
     pub(crate) skeleton_picker: Option<Entity<ui_common::MeshAssetPicker>>,
+    pub(crate) mesh_picker: Option<Entity<ui_common::MeshAssetPicker>>,
+    /// `Mesh` mode: one material picker per slot.
+    pub(crate) slot_pickers: Vec<Entity<ui_common::MeshAssetPicker>>,
     /// Counts library scans, so a stale one finishing late is ignored.
     pub(crate) scan_generation: u64,
+    /// Counts preview-mesh loads, for the same reason.
+    pub(crate) mesh_generation: u64,
 
     pub selected_bone: Option<String>,
     pub expanded_bones: HashSet<String>,
@@ -272,7 +308,7 @@ impl SkeletalAnimEditorPanel {
         panel
     }
 
-    /// Open a `.skeleton` or `.animseq` file. An old `.skelanim` folder is
+    /// Open a `.skeleton`, `.animseq` or `.skmesh` file. An old `.skelanim` folder is
     /// first converted to a pair of such files next to it (leaving the folder
     /// alone), and the new sequence is opened.
     pub fn new_with_path(
@@ -283,19 +319,31 @@ impl SkeletalAnimEditorPanel {
         match Opened::of(&file_path) {
             Some(Opened::Skeleton) => Self::open_skeleton(file_path, window, cx),
             Some(Opened::Sequence) => Self::open_sequence(file_path, None, window, cx),
+            Some(Opened::Mesh) => Self::open_mesh(file_path, window, cx),
             Some(Opened::Legacy) => {
                 let migrated = migrate::migrate_folder(&file_path)?;
-                let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = |p: &Path| {
+                    p.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                };
                 let notice = format!(
                     "{} {} as {} and {}. The original folder was left in place.",
-                    if migrated.reused { "Opened the earlier conversion of" } else { "Converted" },
+                    if migrated.reused {
+                        "Opened the earlier conversion of"
+                    } else {
+                        "Converted"
+                    },
                     name(&file_path),
                     name(&migrated.skeleton_path),
                     name(&migrated.sequence_path),
                 );
                 Self::open_sequence(migrated.sequence_path, Some(notice), window, cx)
             }
-            None => anyhow::bail!("{} is not a skeleton, animation sequence or old skeletal animation", file_path.display()),
+            None => anyhow::bail!(
+                "{} is not a skeleton, skeletal mesh, animation sequence or old skeletal animation",
+                file_path.display()
+            ),
         }
     }
 
@@ -306,23 +354,21 @@ impl SkeletalAnimEditorPanel {
     ) -> anyhow::Result<Self> {
         let text = assets::read_text(&path)?;
         let had_id = SkeletonAsset::peek_id(&text).is_some();
-        let asset = SkeletonAsset::parse(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+        let asset =
+            SkeletonAsset::parse(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
 
-        let bind_pose = AnimationClip {
-            name: "Bind pose".to_string(),
-            duration: 1.0,
-            fps: 30.0,
-            tracks: Vec::new(),
-        };
         let mut panel = Self::new_internal(
             EditorMode::Skeleton,
             asset.skeleton(),
-            bind_pose,
+            AnimationClip::bind_pose(),
             Some(path.clone()),
             window,
             cx,
         );
         panel.asset_id = Some(asset.id.clone());
+        panel.project_root = library::project_root(&path);
+        panel.mesh_library = MeshLibrary::empty(panel.project_root.clone());
+        panel.set_preview_ref_unscanned(asset.preview_mesh.clone());
         // A new file has no id yet; give it one now so it can be referenced
         // before the first save.
         if !had_id {
@@ -330,6 +376,10 @@ impl SkeletalAnimEditorPanel {
                 log::warn!("Failed to write the id into {path:?}: {err}");
                 panel.is_dirty = true;
             }
+        }
+        panel.refresh_issues();
+        if panel.preview_mesh_ref.is_some() {
+            panel.rescan_library(cx);
         }
         Ok(panel)
     }
@@ -357,7 +407,42 @@ impl SkeletalAnimEditorPanel {
             None => SkeletonLink::Unset,
         };
         panel.skeleton_ref = asset.skeleton;
+        panel.mesh_library = MeshLibrary::empty(panel.project_root.clone());
+        panel.set_preview_ref_unscanned(asset.preview_mesh.clone());
         panel.notice = notice;
+        panel.refresh_issues();
+        if panel.skeleton_ref.is_some() || panel.preview_mesh_ref.is_some() {
+            panel.rescan_library(cx);
+        }
+        Ok(panel)
+    }
+
+    fn open_mesh(
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<Self> {
+        let asset = skmesh::load_skmesh_asset(&path)?;
+        // The skeleton arrives when the project scan finishes; until then the
+        // mesh is drawn as stored.
+        let mut panel = Self::new_internal(
+            EditorMode::Mesh,
+            Skeleton::default(),
+            AnimationClip::bind_pose(),
+            Some(path.clone()),
+            window,
+            cx,
+        );
+        panel.project_root = library::project_root(&path);
+        panel.library = Library::empty(panel.project_root.clone());
+        panel.link = match &asset.skeleton {
+            Some(id) => SkeletonLink::Resolving(id.clone()),
+            None => SkeletonLink::Unset,
+        };
+        panel.skeleton_ref = asset.skeleton.clone();
+        panel.mesh_id = Some(asset.id.clone());
+        panel.mesh = Some(Arc::new(asset));
+        panel.mesh_revision += 1;
         panel.refresh_issues();
         if panel.skeleton_ref.is_some() {
             panel.rescan_library(cx);
@@ -405,7 +490,10 @@ impl SkeletalAnimEditorPanel {
         }
 
         let root_id = skeleton.root_bones().first().map(|b| b.id.clone());
-        let default_play_range = (0, (animation.duration * animation.fps).round().max(0.0) as i32);
+        let default_play_range = (
+            0,
+            (animation.duration * animation.fps).round().max(0.0) as i32,
+        );
         let tracer_state = TracerState::new(&skeleton);
 
         let mut panel = Self {
@@ -422,11 +510,20 @@ impl SkeletalAnimEditorPanel {
             link: SkeletonLink::Unset,
             library: Library::default(),
             project_root: PathBuf::new(),
+            mesh_id: None,
             mesh: None,
+            mesh_revision: 0,
+            preview_mesh_ref: None,
+            preview_link: MeshLink::Unset,
+            mesh_library: MeshLibrary::default(),
+            preview_loaded_from: None,
             issues: Vec::new(),
             notice: None,
             skeleton_picker: None,
+            mesh_picker: None,
+            slot_pickers: Vec::new(),
             scan_generation: 0,
+            mesh_generation: 0,
             selected_bone: None,
             expanded_bones: HashSet::new(),
             selected_keyframe: None,
@@ -452,6 +549,9 @@ impl SkeletalAnimEditorPanel {
         if let Some(root_id) = root_id {
             panel.expanded_bones.insert(root_id);
         }
+        // The weight heat map is what a mesh is edited for; a preview mesh is only
+        // there for orientation and should not change color with the selection.
+        panel.view_options.weights = mode == EditorMode::Mesh;
 
         panel
     }
@@ -459,7 +559,12 @@ impl SkeletalAnimEditorPanel {
     /// Select a bone (or clear selection), refreshing the properties panel.
     /// The keyframe selection is resynced to whatever (if anything) the new
     /// bone has keyed at the current playhead time.
-    pub fn select_bone(&mut self, bone_id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn select_bone(
+        &mut self,
+        bone_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(id) = &bone_id {
             self.expand_ancestors(id);
         }
@@ -814,7 +919,12 @@ impl SkeletalAnimEditorPanel {
 
     /// Key or un-key one specific bone at the playhead (the per-track button
     /// in the timeline gutter).
-    pub fn toggle_key_for_bone(&mut self, bone_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn toggle_key_for_bone(
+        &mut self,
+        bone_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.editable() {
             return;
         }
@@ -829,7 +939,9 @@ impl SkeletalAnimEditorPanel {
             self.sync_transform_inputs(window, cx);
             cx.notify();
         } else {
-            let pose = self.animation.local_transform(&self.skeleton, bone_id, time);
+            let pose = self
+                .animation
+                .local_transform(&self.skeleton, bone_id, time);
             let index = self.upsert_key(bone_id, time, pose);
             self.is_dirty = true;
             self.selected_bone = Some(bone_id.to_string());
@@ -882,7 +994,13 @@ impl SkeletalAnimEditorPanel {
         let selection: Vec<(String, usize)> = self.selected_keyframes.iter().cloned().collect();
         let min_time = selection
             .iter()
-            .filter_map(|(bone, i)| self.animation.track(bone)?.keyframes.get(*i).map(|k| k.time))
+            .filter_map(|(bone, i)| {
+                self.animation
+                    .track(bone)?
+                    .keyframes
+                    .get(*i)
+                    .map(|k| k.time)
+            })
             .fold(f32::MAX, f32::min);
         Some(KeyDrag {
             tracks: self.animation.tracks.clone(),
@@ -941,7 +1059,10 @@ impl SkeletalAnimEditorPanel {
                         true,
                         i,
                     ));
-                } else if !moved_times.iter().any(|t| (t - kf.time).abs() < KEYFRAME_EPS) {
+                } else if !moved_times
+                    .iter()
+                    .any(|t| (t - kf.time).abs() < KEYFRAME_EPS)
+                {
                     keys.push((kf.clone(), false, i));
                 }
             }
@@ -949,7 +1070,9 @@ impl SkeletalAnimEditorPanel {
             for (new_index, (_, moved, old_index)) in keys.iter().enumerate() {
                 if *moved {
                     new_selection.insert((track.bone_id.clone(), new_index));
-                    if (track.bone_id.as_str(), *old_index) == (drag.anchor.0.as_str(), drag.anchor.1) {
+                    if (track.bone_id.as_str(), *old_index)
+                        == (drag.anchor.0.as_str(), drag.anchor.1)
+                    {
                         new_primary = Some((track.bone_id.clone(), new_index));
                     }
                 }
@@ -962,7 +1085,8 @@ impl SkeletalAnimEditorPanel {
 
         self.animation.tracks = tracks;
         self.selected_keyframes = new_selection;
-        self.selected_keyframe = new_primary.or_else(|| self.selected_keyframes.iter().next().cloned());
+        self.selected_keyframe =
+            new_primary.or_else(|| self.selected_keyframes.iter().next().cloned());
         if drag.moved {
             self.is_dirty = true;
         }
@@ -1126,7 +1250,7 @@ impl SkeletalAnimEditorPanel {
     /// Start or stop clip playback. While playing, the playhead advances at
     /// real time and loops back to the start at the end of the clip.
     pub fn toggle_play(&mut self, cx: &mut Context<Self>) {
-        if self.mode == EditorMode::Skeleton {
+        if self.mode != EditorMode::Sequence {
             return;
         }
         self.playback.playing = !self.playback.playing;
@@ -1157,7 +1281,8 @@ impl SkeletalAnimEditorPanel {
                                 this.playback.time = start + (this.playback.time - start) % span;
                             } else {
                                 // One-shot: park on the last frame and stop.
-                                this.playback.time = (end - 1.0 / this.animation.fps_clamped()).max(start);
+                                this.playback.time =
+                                    (end - 1.0 / this.animation.fps_clamped()).max(start);
                                 this.playback.playing = false;
                             }
                         }
@@ -1226,7 +1351,8 @@ impl SkeletalAnimEditorPanel {
 
     fn sync_transform_inputs(&self, window: &mut Window, cx: &mut App) {
         let transform = self.current_transform();
-        self.transform_inputs.set_from_transform(&transform, window, cx);
+        self.transform_inputs
+            .set_from_transform(&transform, window, cx);
     }
 
     /// Write the properties panel's nine inputs back into the selected
@@ -1298,13 +1424,21 @@ impl SkeletalAnimEditorPanel {
                     version: assets::FORMAT_VERSION,
                     id,
                     bones: self.skeleton.bones.clone(),
-                    preview_mesh: None,
+                    preview_mesh: self.preview_mesh_ref.clone(),
                 };
                 assets::save_skeleton_asset(&path, &asset)?;
             }
             EditorMode::Sequence => {
-                let asset = AnimSeqAsset::new(self.skeleton_ref.clone(), self.animation.clone());
+                let asset = AnimSeqAsset::new(self.skeleton_ref.clone(), self.animation.clone())
+                    .with_preview_mesh(self.preview_mesh_ref.clone());
                 assets::save_animseq_asset(&path, &asset)?;
+            }
+            EditorMode::Mesh => {
+                if let Some(mesh) = self.mesh.as_deref() {
+                    let mut mesh = mesh.clone();
+                    mesh.skeleton = self.skeleton_ref.clone();
+                    skmesh::save_skmesh_asset(&path, &mesh)?;
+                }
             }
         }
         self.is_dirty = false;
@@ -1317,6 +1451,8 @@ impl SkeletalAnimEditorPanel {
         match self.mode {
             EditorMode::Skeleton => true,
             EditorMode::Sequence => matches!(self.link, SkeletonLink::Resolved(_)),
+            // Nothing on the timeline or in the pose; the mesh has its own edits.
+            EditorMode::Mesh => false,
         }
     }
 
@@ -1328,6 +1464,7 @@ impl SkeletalAnimEditorPanel {
             && match self.mode {
                 EditorMode::Skeleton => true,
                 EditorMode::Sequence => self.selected_keyframe.is_some(),
+                EditorMode::Mesh => false,
             }
     }
 

@@ -1,6 +1,6 @@
 //! # Skeletal Animation Editor Plugin
 //!
-//! Editors for two linked animation assets, in the Unreal style:
+//! Editors for three linked animation assets, in the Unreal style:
 //!
 //! - **Skeleton** (`.skeleton`): the bone hierarchy and bind pose, with its own
 //!   stable id. Edited with a hierarchy tree, a 3D viewport and bone transform
@@ -8,16 +8,24 @@
 //! - **Animation Sequence** (`.animseq`): tracks and keyframes over time. It
 //!   refers to its skeleton by that id, never by path, and adds a keyframe
 //!   timeline to the same panels.
+//! - **Skeletal Mesh** (`.skmesh`): skinned geometry (per-vertex joints and
+//!   weights) bound to a skeleton by id, with its own id. The editor draws it
+//!   skinned to the posed skeleton and inspects its weights, joints, material
+//!   slots and statistics. It is made by importing a rigged model
+//!   (`asset_import`), not created from the menu.
+//!
+//! A skeleton or a sequence can name a skeletal mesh (by id) to draw with it.
 //!
 //! Old `.skelanim` folders (skeleton and clip in one asset) are converted to a
 //! pair of the new assets when opened; the folder is left in place.
 //!
 //! ## Architecture
 //!
-//! - **core**: Data model (skeleton, animation clips, math, sample data), the
-//!   asset formats, the skeleton id and project library, validation, migration
+//! - **core**: The project libraries (skeletons and meshes by id), validation,
+//!   migration and sample data. The asset formats, ids, math and skinning are
+//!   in the `skeletal_assets` crate, which the importer shares
 //! - **editor**: Top-level editor panel, transform inputs, dock workspace
-//!   layout, and the sequence's skeleton reference
+//!   layout, and the skeleton and preview-mesh references
 //! - **rendering**: Custom WGPU-rendered viewport and timeline panels
 //! - **ui_components**: Bone hierarchy and properties dock panels
 
@@ -41,13 +49,21 @@ pub use editor::{EditorMode, SkeletalAnimEditorPanel};
 pub const SKELETON_EDITOR_ID: &str = "skeleton-editor";
 /// Id of the Animation Sequence editor (which also opens old `.skelanim` folders).
 pub const ANIM_SEQUENCE_EDITOR_ID: &str = "animation-sequence-editor";
+/// Id of the Skeletal Mesh editor.
+pub const SKELETAL_MESH_EDITOR_ID: &str = "skeletal-mesh-editor";
 /// Every editor id this plugin provides.
-pub const EDITOR_IDS: [&str; 2] = [SKELETON_EDITOR_ID, ANIM_SEQUENCE_EDITOR_ID];
+pub const EDITOR_IDS: [&str; 3] = [
+    SKELETON_EDITOR_ID,
+    ANIM_SEQUENCE_EDITOR_ID,
+    SKELETAL_MESH_EDITOR_ID,
+];
 
 /// File type of `.skeleton` assets.
 pub const SKELETON_FILE_TYPE: &str = "skeleton";
 /// File type of `.animseq` assets.
 pub const ANIM_SEQUENCE_FILE_TYPE: &str = "animation_sequence";
+/// File type of `.skmesh` assets.
+pub const SKELETAL_MESH_FILE_TYPE: &str = "skeletal_mesh";
 /// File type of the old `.skelanim` folders. Kept so they still open (and
 /// convert); it is never offered in the create menu.
 pub const LEGACY_FILE_TYPE: &str = "skeletal_animation";
@@ -68,7 +84,9 @@ impl EditorPlugin for SkeletalAnimationPlugin {
             name: "Skeletal Animation Editor".into(),
             version: "0.1.0".into(),
             author: "Pulsar Team".into(),
-            description: "Editors for skeletons and the animation sequences that use them".into(),
+            description:
+                "Editors for skeletons, skeletal meshes and the animation sequences that use them"
+                    .into(),
         }
     }
 
@@ -113,6 +131,19 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 creation_directory: None,
             },
             FileTypeDefinition {
+                id: FileTypeId::new(SKELETAL_MESH_FILE_TYPE),
+                extension: core::skmesh::SKMESH_EXTENSION.to_string(),
+                display_name: "Skeletal Mesh".to_string(),
+                icon: ui::IconName::Cube,
+                color: gpui::rgb(0x4CAF50).into(),
+                structure: FileStructure::Standalone,
+                // Made by importing a rigged model; there is nothing to create
+                // from the menu (the empty string hides the type there).
+                default_content: json!(""),
+                categories: vec!["Animation".to_string()],
+                creation_directory: None,
+            },
+            FileTypeDefinition {
                 id: FileTypeId::new(LEGACY_FILE_TYPE),
                 extension: "skelanim".to_string(),
                 display_name: "Skeletal Animation (old)".to_string(),
@@ -144,6 +175,11 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                     FileTypeId::new(ANIM_SEQUENCE_FILE_TYPE),
                     FileTypeId::new(LEGACY_FILE_TYPE),
                 ],
+            },
+            EditorMetadata {
+                id: EditorId::new(SKELETAL_MESH_EDITOR_ID),
+                display_name: "Skeletal Mesh Editor".into(),
+                supported_file_types: vec![FileTypeId::new(SKELETAL_MESH_FILE_TYPE)],
             },
         ]
     }
@@ -202,3 +238,50 @@ impl SkeletalAnimationPlugin {
 // process-global dynamic loader symbols shared by every plugin.
 #[cfg(not(feature = "builtin"))]
 export_plugin!(SkeletalAnimationPlugin);
+
+#[cfg(test)]
+mod tests {
+    // Not `use super::*`: it would bring in gpui's `test` attribute macro.
+    use super::{
+        provides_editor, SkeletalAnimationPlugin, ANIM_SEQUENCE_FILE_TYPE, EDITOR_IDS,
+        LEGACY_FILE_TYPE, SKELETAL_MESH_FILE_TYPE, SKELETON_FILE_TYPE,
+    };
+    use plugin_editor_api::EditorPlugin;
+
+    #[test]
+    fn every_asset_has_a_file_type_and_an_editor_and_only_the_first_two_can_be_created() {
+        let plugin = SkeletalAnimationPlugin::default();
+        let file_types = plugin.file_types();
+        let editors = plugin.editors();
+
+        for (file_type, extension, creatable) in [
+            (SKELETON_FILE_TYPE, "skeleton", true),
+            (ANIM_SEQUENCE_FILE_TYPE, "animseq", true),
+            (SKELETAL_MESH_FILE_TYPE, "skmesh", false),
+            (LEGACY_FILE_TYPE, "skelanim", false),
+        ] {
+            let definition = file_types
+                .iter()
+                .find(|d| d.id.as_str() == file_type)
+                .unwrap_or_else(|| panic!("no file type {file_type}"));
+            assert_eq!(definition.extension, extension);
+            assert_eq!(definition.is_creatable(), creatable, "{file_type}");
+            assert!(
+                editors.iter().any(|e| e
+                    .supported_file_types
+                    .iter()
+                    .any(|t| t.as_str() == file_type)),
+                "{file_type} has no editor"
+            );
+        }
+
+        for id in EDITOR_IDS {
+            assert!(provides_editor(id));
+            assert!(
+                editors.iter().any(|e| e.id.as_str() == id),
+                "{id} is not listed"
+            );
+        }
+        assert!(!provides_editor("something-else"));
+    }
+}
