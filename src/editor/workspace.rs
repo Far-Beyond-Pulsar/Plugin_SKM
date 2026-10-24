@@ -11,6 +11,7 @@ use ui::button::{Button, ButtonVariants};
 use ui::dock::{DockItem, PanelEvent};
 use ui::tag::Tag;
 use ui::workspace::Workspace;
+use ui::ContextModal;
 use ui::{h_flex, ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt};
 
 use crate::rendering::{TimelinePanel, ViewportPanel};
@@ -46,9 +47,16 @@ actions!(
 /// The editor's menus (Pulsar-Native#1012): a skeleton or a mesh gets File and
 /// View; a sequence adds its timeline and keyframe tools, dispatched from the
 /// strip to the panel's handlers.
-fn editor_menus(has_path: bool, mode: EditorMode) -> EditorMenuStrip {
-    let strip = EditorMenuStrip::new("skeletal-anim-menus")
+fn editor_menus(
+    has_path: bool,
+    mode: EditorMode,
+    history: plugin_editor_api::SharedHistory<super::hierarchy_history::HierarchyEdit>,
+) -> EditorMenuStrip {
+    let mut strip = EditorMenuStrip::new("skeletal-anim-menus")
         .menu(EditorMenu::new("File").action_if("Save", SaveAnimation, has_path));
+    if mode == EditorMode::Skeleton {
+        strip = strip.menu(EditorMenu::new("Edit").undo_redo("Undo", "Redo", Some(history as _)));
+    }
     if mode != EditorMode::Sequence {
         return strip.menu(
             EditorMenu::new("View")
@@ -242,7 +250,10 @@ impl Render for SkeletalAnimEditorPanel {
             .bg(theme.secondary)
             .border_b_1()
             .border_color(theme.border)
-            .child(editor_menus(has_path, mode))
+            .child(
+                editor_menus(has_path, mode, self.hierarchy_history.clone())
+                    .action_context(self.focus_handle.clone()),
+            )
             .child(toolbar_divider(cx))
             .child(
                 Button::new("skeletal-save")
@@ -409,7 +420,32 @@ impl Render for SkeletalAnimEditorPanel {
             .size_full()
             .flex()
             .flex_col()
+            .track_focus(&self.focus_handle)
             .bg(theme.background)
+            .on_action(
+                cx.listener(|this, _: &plugin_editor_api::Undo, window, cx| {
+                    if window
+                        .focused_input(cx)
+                        .is_some_and(|input| input.focus_handle(cx).is_focused(window))
+                    {
+                        cx.propagate();
+                    } else {
+                        this.undo_hierarchy(false, window, cx)
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &plugin_editor_api::Redo, window, cx| {
+                    if window
+                        .focused_input(cx)
+                        .is_some_and(|input| input.focus_handle(cx).is_focused(window))
+                    {
+                        cx.propagate();
+                    } else {
+                        this.undo_hierarchy(true, window, cx)
+                    }
+                }),
+            )
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
                 if event.keystroke.modifiers.secondary() && event.keystroke.key == "s" {
                     this.save_and_report(cx);

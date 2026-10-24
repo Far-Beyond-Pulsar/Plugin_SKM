@@ -780,6 +780,7 @@ impl Render for ViewportPanel {
                             .flatten(),
                     }),
                 physics: self.physics_asset.as_ref(),
+                sockets: Some((&e.sockets, e.selected_socket.as_deref())),
             });
             let name = |id: &str| {
                 e.skeleton

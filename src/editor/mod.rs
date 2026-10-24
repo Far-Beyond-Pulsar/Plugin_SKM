@@ -7,3 +7,9 @@ pub mod transform_inputs;
 pub mod workspace;
 
 pub use panel::{EditorMode, SkeletalAnimEditorPanel};
+
+pub(crate) mod hierarchy_edit;
+pub(crate) mod hierarchy_history;
+
+#[cfg(test)]
+mod hierarchy_tests;

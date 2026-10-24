@@ -173,6 +173,7 @@ mod tests {
             path: PathBuf::new(),
             name: "Humanoid".into(),
             skeleton: Arc::new(sample::humanoid_skeleton()),
+            sockets: Default::default(),
         })
     }
 
@@ -203,6 +204,7 @@ mod tests {
             path: PathBuf::new(),
             name: "Humanoid".into(),
             skeleton: Arc::new(asset.skeleton()),
+            sockets: Default::default(),
         })
     }
 

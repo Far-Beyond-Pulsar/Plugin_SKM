@@ -216,6 +216,7 @@ pub struct SkeletalAnimEditorPanel {
     pub skeleton: Skeleton,
     /// Bumped whenever `skeleton` is replaced, so snapshots of it refresh.
     pub skeleton_revision: u64,
+    pub(crate) hierarchy_revision: u64,
     /// The sequence being edited; empty in `Skeleton` mode.
     pub animation: AnimationClip,
 
@@ -263,6 +264,16 @@ pub struct SkeletalAnimEditorPanel {
     /// Counts preview-mesh loads, for the same reason.
     pub(crate) mesh_generation: u64,
 
+    pub(crate) sockets: skeletal_assets::sockets::Sockets,
+    pub(crate) selected_socket: Option<String>,
+    pub(crate) hierarchy_history:
+        plugin_editor_api::SharedHistory<super::hierarchy_history::HierarchyEdit>,
+    pub(crate) checking_hierarchy: bool,
+    pub(crate) saving_hierarchy: bool,
+    pub(crate) saved_hierarchy: Skeleton,
+    pub(crate) saved_asset_id: Option<SkeletonId>,
+    pub(crate) saved_sockets: skeletal_assets::sockets::Sockets,
+    pub(crate) saved_preview_ref: Option<SkeletalMeshId>,
     pub selected_bone: Option<String>,
     pub expanded_bones: HashSet<String>,
     /// "Primary" selected keyframe, used by the properties panel.
@@ -302,6 +313,7 @@ impl SkeletalAnimEditorPanel {
             path: PathBuf::new(),
             name: "Humanoid (sample)".to_string(),
             skeleton: Arc::new(skeleton.skeleton()),
+            sockets: Default::default(),
         };
         let mut panel = Self::new_internal(
             EditorMode::Sequence,
@@ -374,6 +386,9 @@ impl SkeletalAnimEditorPanel {
             window,
             cx,
         );
+        panel.sockets = asset.sockets.clone();
+        panel.saved_sockets = asset.sockets.clone();
+        panel.saved_preview_ref = asset.preview_mesh.clone();
         panel.asset_id = Some(asset.id.clone());
         panel.project_root = library::project_root(&path);
         panel.mesh_library = MeshLibrary::empty(panel.project_root.clone());
@@ -386,6 +401,7 @@ impl SkeletalAnimEditorPanel {
                 panel.is_dirty = true;
             }
         }
+        panel.saved_asset_id = (!panel.is_dirty).then(|| asset.id.clone());
         remember_asset_id(&panel.project_root, &asset.id.to_string(), &path);
         panel.refresh_issues();
         if panel.preview_mesh_ref.is_some() {
@@ -485,10 +501,12 @@ impl SkeletalAnimEditorPanel {
             subscriptions.push(cx.subscribe_in(
                 input,
                 window,
-                |this, _input, event: &InputEvent, window, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        this.apply_transform_inputs(window, cx);
+                |this, _input, event: &InputEvent, window, cx| match event {
+                    InputEvent::Change => this.apply_transform_inputs(window, cx),
+                    InputEvent::Focus | InputEvent::Blur | InputEvent::PressEnter { .. } => {
+                        plugin_editor_api::undo::lock(&this.hierarchy_history).seal();
                     }
+                    _ => {}
                 },
             ));
             subscriptions.push(cx.subscribe_in(
@@ -523,8 +541,11 @@ impl SkeletalAnimEditorPanel {
             mode,
             current_asset_path: asset_path,
             is_dirty: false,
+            saved_hierarchy: skeleton.clone(),
+            saved_asset_id: None,
             skeleton,
             skeleton_revision: 0,
+            hierarchy_revision: 0,
             animation,
             asset_id: None,
             animation_id: (mode == EditorMode::Sequence).then(AnimSequenceId::new),
@@ -546,6 +567,15 @@ impl SkeletalAnimEditorPanel {
             slot_pickers: Vec::new(),
             scan_generation: 0,
             mesh_generation: 0,
+            selected_socket: None,
+            sockets: Default::default(),
+            saved_sockets: Default::default(),
+            saved_preview_ref: None,
+            hierarchy_history: Arc::new(std::sync::Mutex::new(
+                plugin_editor_api::History::default(),
+            )),
+            checking_hierarchy: false,
+            saving_hierarchy: false,
             selected_bone: None,
             expanded_bones: HashSet::new(),
             selected_keyframe: None,
@@ -590,7 +620,9 @@ impl SkeletalAnimEditorPanel {
         if let Some(id) = &bone_id {
             self.expand_ancestors(id);
         }
-        self.selected_bone = bone_id;
+        plugin_editor_api::undo::lock(&self.hierarchy_history).seal();
+        self.selected_socket = None;
+        self.selected_bone = bone_id.filter(|id| self.skeleton.bone(id).is_some());
         self.resync_selected_keyframe();
         self.sync_transform_inputs(window, cx);
         cx.notify();
@@ -604,6 +636,7 @@ impl SkeletalAnimEditorPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.selected_socket = None;
         self.selected_keyframes.clear();
         if let Some(key) = &keyframe {
             self.selected_keyframes.insert(key.clone());
@@ -620,6 +653,7 @@ impl SkeletalAnimEditorPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.selected_socket = None;
         if !self.selected_keyframes.remove(&key) {
             self.selected_keyframes.insert(key.clone());
         }
@@ -638,6 +672,7 @@ impl SkeletalAnimEditorPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.selected_socket = None;
         if additive {
             self.selected_keyframes.extend(keys);
         } else {
@@ -1256,14 +1291,10 @@ impl SkeletalAnimEditorPanel {
 
     /// Expand every bone that has children.
     pub fn expand_all_bones(&mut self, cx: &mut Context<Self>) {
-        let parents: Vec<String> = self
-            .skeleton
-            .bones
-            .iter()
-            .filter(|b| !self.skeleton.children_of(&b.id).is_empty())
-            .map(|b| b.id.clone())
-            .collect();
-        self.expanded_bones.extend(parents);
+        self.expanded_bones
+            .extend(self.skeleton.bones.iter().filter_map(|b| b.parent.clone()));
+        self.expanded_bones
+            .extend(self.sockets.iter().map(|s| s.bone_id.clone()));
         cx.notify();
     }
 
@@ -1358,6 +1389,13 @@ impl SkeletalAnimEditorPanel {
     /// The transform currently shown in the properties panel: the selected
     /// keyframe's transform, the selected bone's bind pose, or identity.
     pub fn current_transform(&self) -> Transform {
+        if let Some(socket) = self
+            .selected_socket
+            .as_deref()
+            .and_then(|id| self.sockets.get(id))
+        {
+            return socket.local_transform.clone();
+        }
         if let Some((bone_id, index)) = &self.selected_keyframe {
             if let Some(kf) = self
                 .animation
@@ -1375,7 +1413,7 @@ impl SkeletalAnimEditorPanel {
         Transform::IDENTITY
     }
 
-    fn sync_transform_inputs(&self, window: &mut Window, cx: &mut App) {
+    pub(crate) fn sync_transform_inputs(&self, window: &mut Window, cx: &mut App) {
         let transform = self.current_transform();
         self.transform_inputs
             .set_from_transform(&transform, window, cx);
@@ -1384,11 +1422,28 @@ impl SkeletalAnimEditorPanel {
     /// Write the properties panel's nine inputs back into the selected
     /// keyframe's transform (or the selected bone's bind pose if no keyframe
     /// is selected).
-    pub fn apply_transform_inputs(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn apply_transform_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.transform_editable() {
             return;
         }
-        let transform = self.transform_inputs.to_transform(cx);
+        let Some(changed) = self.transform_inputs.take_changed(cx) else {
+            return;
+        };
+        let Some(transform) =
+            self.transform_inputs
+                .apply_changes(self.current_transform(), changed, cx)
+        else {
+            return;
+        };
+        if self.mode == EditorMode::Skeleton {
+            self.apply_hierarchy_command(
+                super::hierarchy_edit::HierarchyCommand::Transform(transform),
+                false,
+                window,
+                cx,
+            );
+            return;
+        }
 
         if let Some((bone_id, index)) = self.selected_keyframe.clone() {
             if let Some(track) = self.animation.track_mut(&bone_id) {
@@ -1415,11 +1470,38 @@ impl SkeletalAnimEditorPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let value = format!("{:.3}", group.default_value());
-        for input in self.transform_inputs.group(group).iter() {
-            input.update(cx, |input, cx| input.set_value(value.clone(), window, cx));
+        if !self.transform_editable() {
+            return;
         }
-        self.apply_transform_inputs(window, cx);
+        let mut transform = self.current_transform();
+        let value = group.default_value();
+        let default = Vec3::new(value, value, value);
+        match group {
+            TransformGroup::Translation => transform.translation = default,
+            TransformGroup::Rotation => transform.rotation = default,
+            TransformGroup::Scale => transform.scale = default,
+        }
+        plugin_editor_api::undo::lock(&self.hierarchy_history).seal();
+        if self.mode == EditorMode::Skeleton {
+            self.apply_hierarchy_command(
+                super::hierarchy_edit::HierarchyCommand::Transform(transform),
+                true,
+                window,
+                cx,
+            );
+        } else if let Some((bone, index)) = &self.selected_keyframe {
+            if let Some(key) = self
+                .animation
+                .track_mut(bone)
+                .and_then(|t| t.keyframes.get_mut(*index))
+            {
+                key.transform = transform;
+                self.is_dirty = true;
+            }
+        }
+        plugin_editor_api::undo::lock(&self.hierarchy_history).seal();
+        self.sync_transform_inputs(window, cx);
+        cx.notify();
     }
 
     /// World-space position of `bone_id`'s joint at the playhead.
@@ -1430,8 +1512,15 @@ impl SkeletalAnimEditorPanel {
 
     /// Save, logging a failure instead of returning it (button / shortcut handlers).
     pub fn save_and_report(&mut self, cx: &mut Context<Self>) {
+        if self.mode == EditorMode::Skeleton {
+            self.save_hierarchy_async(cx);
+            return;
+        }
         if let Err(err) = self.save() {
+            self.notice = Some(format!("Could not save: {err}"));
             log::error!("Failed to save skeletal animation asset: {err}");
+        } else {
+            self.notice = None;
         }
         cx.notify();
     }
@@ -1445,14 +1534,10 @@ impl SkeletalAnimEditorPanel {
         };
         match self.mode {
             EditorMode::Skeleton => {
-                let id = self.asset_id.get_or_insert_with(SkeletonId::new).clone();
-                let asset = SkeletonAsset {
-                    version: assets::FORMAT_VERSION,
-                    id,
-                    bones: self.skeleton.bones.clone(),
-                    preview_mesh: self.preview_mesh_ref.clone(),
-                };
-                assets::save_skeleton_asset(&path, &asset)?;
+                self.check_saved_hierarchy_references()
+                    .map_err(anyhow::Error::msg)?;
+                self.save_hierarchy_validated()?;
+                return Ok(());
             }
             EditorMode::Sequence => {
                 let mut asset =
@@ -1477,6 +1562,29 @@ impl SkeletalAnimEditorPanel {
         Ok(())
     }
 
+    pub(crate) fn save_hierarchy_validated(&mut self) -> anyhow::Result<()> {
+        let Some(path) = &self.current_asset_path else {
+            return Ok(());
+        };
+        let id = self.asset_id.clone().unwrap_or_default();
+        let asset = SkeletonAsset {
+            version: assets::FORMAT_VERSION,
+            id: id.clone(),
+            bones: self.skeleton.bones.clone(),
+            sockets: self.sockets.clone(),
+            preview_mesh: self.preview_mesh_ref.clone(),
+        };
+        assets::save_skeleton_asset(path, &asset)?;
+        self.asset_id = Some(id);
+        plugin_editor_api::undo::lock(&self.hierarchy_history).mark_saved();
+        self.saved_hierarchy = self.skeleton.clone();
+        self.saved_asset_id = self.asset_id.clone();
+        self.saved_sockets = self.sockets.clone();
+        self.saved_preview_ref = self.preview_mesh_ref.clone();
+        self.is_dirty = false;
+        Ok(())
+    }
+
     /// Whether the data on screen may be changed. A sequence is read-only
     /// until its skeleton resolves, because there is no pose to edit against.
     pub fn editable(&self) -> bool {
@@ -1492,9 +1600,15 @@ impl SkeletalAnimEditorPanel {
     /// skeleton edits bind poses; a sequence only edits its keyframes, since
     /// the bind pose belongs to the skeleton asset.
     pub fn transform_editable(&self) -> bool {
+        if let Some(id) = &self.selected_socket {
+            return self.mode == EditorMode::Skeleton && self.sockets.get(id).is_some();
+        }
         self.editable()
             && match self.mode {
-                EditorMode::Skeleton => true,
+                EditorMode::Skeleton => self
+                    .selected_bone
+                    .as_deref()
+                    .is_some_and(|id| self.skeleton.bone(id).is_some()),
                 EditorMode::Sequence => self.selected_keyframe.is_some(),
                 EditorMode::Mesh => false,
             }
@@ -1502,9 +1616,13 @@ impl SkeletalAnimEditorPanel {
 
     /// Mark `bone_id` and all of its ancestors as expanded in the hierarchy
     /// panel so a programmatic selection (e.g. from the viewport) is visible.
-    fn expand_ancestors(&mut self, bone_id: &str) {
+    pub(crate) fn expand_ancestors(&mut self, bone_id: &str) {
         let mut current = self.skeleton.bone(bone_id).and_then(|b| b.parent.clone());
+        let mut visited = HashSet::new();
         while let Some(id) = current {
+            if !visited.insert(id.clone()) {
+                break;
+            }
             self.expanded_bones.insert(id.clone());
             current = self.skeleton.bone(&id).and_then(|b| b.parent.clone());
         }

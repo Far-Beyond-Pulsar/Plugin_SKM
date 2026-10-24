@@ -36,6 +36,7 @@ pub type TracerColors = HashMap<String, [f32; 4]>;
 
 pub struct SceneInput<'a> {
     pub skeleton: &'a Skeleton,
+    pub sockets: Option<(&'a skeletal_assets::sockets::Sockets, Option<&'a str>)>,
     pub clip: &'a AnimationClip,
     pub time: f32,
     /// Play range in seconds, used to bound the motion path and onion skin.
@@ -315,6 +316,46 @@ pub fn build_scene(input: &SceneInput) -> SceneGeometry {
             p,
             input.view.mesh_lod,
         ));
+    }
+
+    if input.view.bones {
+        if let Some((sockets, selected)) = input.sockets {
+            for socket in sockets.iter() {
+                let Some(bone) = world.get(&socket.bone_id) else {
+                    continue;
+                };
+                let matrix = bone.mul(&socket.local_transform.to_matrix());
+                let position = matrix.transform_point(Vec3::ZERO);
+                points.push(position);
+                let active = selected == Some(socket.id.as_str());
+                geo.joints.push(JointInstance {
+                    center: position.to_array(),
+                    size: if active { 20.0 } else { 10.0 },
+                    color: if active { p.warning } else { p.info },
+                    style: JOINT_KEY,
+                });
+                geo.ribbons.push(RibbonSegment::solid(
+                    bone.transform_point(Vec3::ZERO).to_array(),
+                    position.to_array(),
+                    1.0,
+                    with_alpha(p.info, 0.6),
+                ));
+                if active {
+                    for (axis, color) in [
+                        (Vec3::new(0.15, 0.0, 0.0), p.danger),
+                        (Vec3::new(0.0, 0.15, 0.0), p.success),
+                        (Vec3::new(0.0, 0.0, 0.15), p.info),
+                    ] {
+                        geo.ribbons.push(RibbonSegment::solid(
+                            position.to_array(),
+                            matrix.transform_point(axis).to_array(),
+                            2.0,
+                            color,
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     // Bounds for framing and the shadow.
@@ -834,6 +875,7 @@ mod tests {
             tracers: None,
             skin: None,
             physics: None,
+            sockets: None,
         }
     }
 
@@ -973,5 +1015,70 @@ mod tests {
             assert_eq!(gizmo.layout.hit(center), Some(axis));
         }
         assert_eq!(gizmo.layout.hit((5.0, 590.0)), None);
+    }
+}
+
+#[cfg(test)]
+mod socket_geometry_tests {
+    use super::*;
+    use crate::core::{sample, Transform};
+    use skeletal_assets::sockets::{Socket, Sockets};
+    #[test]
+    fn socket_markers_follow_local_transforms_and_participate_in_framing() {
+        let skeleton = sample::humanoid_skeleton();
+        let clip = AnimationClip::bind_pose();
+        let palette = Palette::test_dark();
+        let mut sockets = Sockets::default();
+        sockets
+            .add(
+                &skeleton,
+                Socket {
+                    id: "weapon".into(),
+                    name: "Weapon".into(),
+                    bone_id: "head".into(),
+                    local_transform: Transform {
+                        translation: Vec3::new(3.0, 0.0, 0.0),
+                        ..Transform::IDENTITY
+                    },
+                },
+            )
+            .unwrap();
+        let input = SceneInput {
+            skeleton: &skeleton,
+            clip: &clip,
+            time: 0.0,
+            range: (0.0, 1.0),
+            selected: None,
+            hovered: None,
+            view: ViewOptions::default(),
+            palette: &palette,
+            tracers: None,
+            skin: None,
+            physics: None,
+            sockets: Some((&sockets, Some("weapon"))),
+        };
+        let with_socket = build_scene(&input);
+        let without = build_scene(&SceneInput {
+            sockets: None,
+            ..input
+        });
+        assert_eq!(with_socket.joints.len(), without.joints.len() + 1);
+        assert_eq!(with_socket.ribbons.len(), without.ribbons.len() + 4);
+        assert!(with_socket.radius > without.radius);
+        let world = sockets
+            .get("weapon")
+            .unwrap()
+            .world_transform(&skeleton, &clip, 0.0)
+            .unwrap()
+            .transform_point(Vec3::ZERO);
+        assert_eq!(
+            with_socket
+                .joints
+                .iter()
+                .find(|j| j.style == JOINT_KEY)
+                .unwrap()
+                .center,
+            world.to_array()
+        );
     }
 }

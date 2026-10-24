@@ -17,3 +17,5 @@ pub mod math;
 pub mod skeleton;
 pub mod skinning;
 pub mod skmesh;
+
+pub mod sockets;

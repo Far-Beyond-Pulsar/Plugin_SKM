@@ -87,6 +87,42 @@ impl Mat4 {
         1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
     ]);
 
+    pub fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
+        self.0.iter().zip(other.0).all(|(a, b)| {
+            a.is_finite()
+                && b.is_finite()
+                && (a - b).abs() <= tolerance * (1.0 + a.abs().max(b.abs()))
+        })
+    }
+
+    /// compare affine bases relative to each original column, without a unit-scale floor.
+    /// translation allows 2e-5 units near zero and 2e-5 relative error at larger coordinates.
+    pub fn preserves_affine(&self, original: &Self) -> bool {
+        const TOLERANCE: f64 = 2e-5;
+        if !self.0.iter().chain(&original.0).all(|v| v.is_finite()) {
+            return false;
+        }
+        for col in 0..3 {
+            let norm = (0..3)
+                .map(|r| (original.0[col * 4 + r] as f64).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            let error = (0..3)
+                .map(|r| (self.0[col * 4 + r] as f64 - original.0[col * 4 + r] as f64).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if error > TOLERANCE * norm {
+                return false;
+            }
+        }
+        (12..15).all(|i| {
+            (self.0[i] as f64 - original.0[i] as f64).abs()
+                <= TOLERANCE * (1.0 + (original.0[i] as f64).abs())
+        }) && [3, 7, 11, 15]
+            .into_iter()
+            .all(|i| self.0[i] == original.0[i])
+    }
+
     pub fn from_translation(t: Vec3) -> Mat4 {
         let mut m = Mat4::IDENTITY;
         m.0[12] = t.x;
@@ -306,6 +342,53 @@ impl Transform {
         scale: Vec3::ONE,
     };
 
+    /// decompose an affine matrix without silently discarding shear or singular axes.
+    pub fn try_from_matrix(matrix: &Mat4) -> Option<Self> {
+        let m = &matrix.0;
+        if !m.iter().all(|v| v.is_finite()) || [m[3], m[7], m[11], m[15]] != [0.0, 0.0, 0.0, 1.0] {
+            return None;
+        }
+        let mut axes = [
+            Vec3::new(m[0], m[1], m[2]),
+            Vec3::new(m[4], m[5], m[6]),
+            Vec3::new(m[8], m[9], m[10]),
+        ];
+        let mut scales = axes.map(|v| (v.x as f64).hypot(v.y as f64).hypot(v.z as f64) as f32);
+        if scales.iter().any(|s| !s.is_finite() || *s < 1e-8) {
+            return None;
+        }
+        for i in 0..3 {
+            axes[i] = axes[i].scale(1.0 / scales[i]);
+        }
+        // angular error must not depend on the length of a basis vector.
+        if [(0, 1), (0, 2), (1, 2)]
+            .into_iter()
+            .any(|(a, b)| axes[a].dot(axes[b]).abs() > 2e-5)
+        {
+            return None;
+        }
+        if axes[0].dot(axes[1].cross(axes[2])) < 0.0 {
+            scales[0] = -scales[0];
+            axes[0] = axes[0].scale(-1.0);
+        }
+        let cos_y = axes[0].x.hypot(axes[0].y);
+        let y = (-axes[0].z).atan2(cos_y);
+        let (x, z) = if cos_y > 1e-6 {
+            (axes[1].z.atan2(axes[2].z), axes[0].y.atan2(axes[0].x))
+        } else {
+            ((-axes[2].y).atan2(axes[1].y), 0.0)
+        };
+        let transform = Self {
+            translation: Vec3::new(m[12], m[13], m[14]),
+            rotation: Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees()),
+            scale: Vec3::new(scales[0], scales[1], scales[2]),
+        };
+        transform
+            .to_matrix()
+            .preserves_affine(matrix)
+            .then_some(transform)
+    }
+
     pub fn to_matrix(&self) -> Mat4 {
         Mat4::from_translation(self.translation)
             .mul(&Mat4::from_euler_xyz_deg(self.rotation))
@@ -483,6 +566,59 @@ mod tests {
         for (i, v) in id.0.iter().enumerate() {
             let want = if i % 5 == 0 { 1.0 } else { 0.0 };
             assert!((v - want).abs() < 1e-3, "element {i} = {v}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod decomposition_tests {
+    use super::*;
+    #[test]
+    fn affine_checks_reject_shear_perspective_and_degenerate_axes_at_every_scale() {
+        for scale in [1e-7, 1e-4, 1.0, 1e4, 1e7, 1e20] {
+            let matrix = Transform {
+                rotation: Vec3::new(23.0, 12.0, -42.0),
+                scale: Vec3::new(-scale, scale, scale),
+                ..Transform::IDENTITY
+            }
+            .to_matrix();
+            assert!(Transform::try_from_matrix(&matrix)
+                .unwrap()
+                .to_matrix()
+                .preserves_affine(&matrix));
+            let mut shear = matrix;
+            for row in 0..3 {
+                shear.0[4 + row] += 0.01 * matrix.0[row];
+            }
+            assert!(Transform::try_from_matrix(&shear).is_none());
+        }
+        for scale in [0.0, 1e-9, f32::INFINITY, f32::NAN] {
+            assert!(
+                Transform::try_from_matrix(&Mat4::from_scale(Vec3::new(scale, 1.0, 1.0))).is_none()
+            );
+        }
+        let mut perspective = Mat4::IDENTITY;
+        perspective.0[3] = 1e-7;
+        assert!(Transform::try_from_matrix(&perspective).is_none());
+    }
+
+    #[test]
+    fn decomposition_round_trips_reflections_and_near_gimbal_lock() {
+        for y in [-90.0, -89.99, -30.0, 0.0, 89.99, 90.0] {
+            for scale in [
+                Vec3::ONE,
+                Vec3::new(-2.0, 3.0, 0.5),
+                Vec3::new(1.0, -2.0, -3.0),
+            ] {
+                let matrix = Transform {
+                    translation: Vec3::new(0.5, -1.0, 2.0),
+                    rotation: Vec3::new(23.0, y, -42.0),
+                    scale,
+                }
+                .to_matrix();
+                let transform = Transform::try_from_matrix(&matrix).unwrap();
+                assert!(transform.to_matrix().approx_eq(&matrix, 1e-4));
+            }
         }
     }
 }

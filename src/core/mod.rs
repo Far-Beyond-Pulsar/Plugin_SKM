@@ -21,3 +21,5 @@ pub use library::{Library, SkeletonLink};
 pub use math::{Mat4, Transform, Vec3};
 pub use mesh_library::{MeshLibrary, MeshLink};
 pub use skeleton::Skeleton;
+
+pub(crate) mod hierarchy_references;
