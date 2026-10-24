@@ -108,6 +108,9 @@ impl Skeleton {
             if indices.insert(bone.id.as_str(), i).is_some() {
                 return Err(HierarchyError::DuplicateId(bone.id.clone()));
             }
+            if bone.name.trim().is_empty() {
+                return Err(HierarchyError::EmptyName);
+            }
             validate_transform(&bone.bind_transform)?;
         }
         let mut parents = Vec::with_capacity(self.bones.len());
