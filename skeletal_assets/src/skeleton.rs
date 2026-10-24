@@ -661,6 +661,25 @@ mod tests {
         );
     }
     #[test]
+    fn empty_bone_names_are_rejected_when_loading_assets() {
+        for name in ["", " ", "\t\n"] {
+            let mut skeleton = tree();
+            skeleton.bone_mut("arm").unwrap().name = name.to_string();
+
+            assert_eq!(
+                skeleton.validate(),
+                Err(HierarchyError::EmptyName)
+            );
+
+            let serialized = SkeletonAsset::new(skeleton).to_text();
+
+            assert!(
+                SkeletonAsset::parse(&serialized).is_err(),
+                "accepted invalid bone name: {name:?}"
+            );
+        }
+    }
+    #[test]
     fn malformed_serialized_hierarchies_are_rejected_and_traversal_is_bounded() {
         for bones in [
             vec![bone("a", Some("a"))],
