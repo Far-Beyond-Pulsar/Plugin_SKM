@@ -46,6 +46,7 @@ fn render_shot(gpu: &Gpu, shot: Shot) -> Vec<u8> {
         }),
         physics: None,
         sockets: None,
+        transform_gizmo: None,
     });
 
     let (w, h) = shot.size;
@@ -80,6 +81,7 @@ fn render_shot(gpu: &Gpu, shot: Shot) -> Vec<u8> {
                 &SceneFrame {
                     uniforms: &uniforms,
                     mesh: &geo.mesh,
+                    transform_gizmo: &geo.transform_gizmo_mesh,
                     skin: &geo.skin,
                     ghost: &geo.ghost,
                     ribbons: &geo.ribbons,
@@ -246,6 +248,7 @@ fn render_viewport_in_motion() {
                 skin: None,
                 physics: None,
                 sockets: None,
+                transform_gizmo: None,
             });
             if i == 0 {
                 camera.frame_sphere(geo.center, geo.radius);
@@ -269,6 +272,7 @@ fn render_viewport_in_motion() {
                 &SceneFrame {
                     uniforms: &uniforms,
                     mesh: &geo.mesh,
+                    transform_gizmo: &geo.transform_gizmo_mesh,
                     skin: &geo.skin,
                     ghost: &geo.ghost,
                     ribbons: &geo.ribbons,

@@ -38,7 +38,9 @@ use crate::ui_components::chrome::{toolbar_divider, MONO};
 
 use super::camera::{FlyInput, OrbitCamera, MAX_DISTANCE, MIN_DISTANCE};
 use super::renderer::{SceneFrame, ViewportRenderer};
-use super::scene::{build_gizmo, build_scene, GizmoLayout, SceneInput, SkinInput};
+use super::scene::{
+    build_gizmo, build_scene, GizmoLayout, SceneInput, SkinInput, TransformGizmoMode,
+};
 use super::types::ViewportUniforms;
 
 /// Hit-test radius, in pixels, used to pick the nearest joint.
@@ -59,13 +61,7 @@ enum DragMode {
     Zoom,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-enum TransformTool {
-    #[default]
-    Translate,
-    Rotate,
-    Scale,
-}
+type TransformTool = TransformGizmoMode;
 
 #[derive(Clone)]
 struct TransformDrag {
@@ -73,6 +69,8 @@ struct TransformDrag {
     start: Point<f32>,
     start_transform: crate::core::Transform,
     screen_axis: (f32, f32),
+    world_units_per_pixel: f32,
+    degrees_per_pixel: f32,
 }
 
 pub struct ViewportPanel {
@@ -198,20 +196,44 @@ impl ViewportPanel {
                             let transform = e.current_transform();
                             let origin = self.selected_transform_origin(cx);
                             if let Some(origin) = origin {
-                                let axis = self.project(origin.add(axis_vector(handle)))
-                                    .zip(self.project(origin));
-                                if let Some(((x1, y1), (x0, y0))) = axis {
-                                    let screen_axis = (x1 - x0, y1 - y0);
-                                    let length = (screen_axis.0.powi(2) + screen_axis.1.powi(2)).sqrt();
+                                let center = self.project(origin);
+                                let screen_axis = if self.transform_tool == TransformTool::Rotate {
+                                    center.map(|center| {
+                                        let radial = (local.0 - center.0, local.1 - center.1);
+                                        (-radial.1, radial.0)
+                                    })
+                                } else {
+                                    self.project(origin.add(axis_vector(handle).scale(0.8)))
+                                        .zip(center)
+                                        .map(|((x1, y1), (x0, y0))| (x1 - x0, y1 - y0))
+                                };
+                                if let Some(screen_axis) = screen_axis {
+                                    let length =
+                                        (screen_axis.0.powi(2) + screen_axis.1.powi(2)).sqrt();
                                     if length > 1.0 {
+                                        let radius_px = center.map_or(1.0, |center| {
+                                            ((local.0 - center.0).powi(2)
+                                                + (local.1 - center.1).powi(2))
+                                            .sqrt()
+                                            .max(1.0)
+                                        });
                                         editor.update(cx, |e, _| e.seal_viewport_transform());
                                         self.transform_drag = Some(TransformDrag {
                                             axis: handle,
                                             start: Point::new(local.0, local.1),
                                             start_transform: transform,
-                                            screen_axis: (screen_axis.0 / length, screen_axis.1 / length),
+                                            screen_axis: (
+                                                screen_axis.0 / length,
+                                                screen_axis.1 / length,
+                                            ),
+                                            world_units_per_pixel: 0.8 / length,
+                                            degrees_per_pixel: 180.0
+                                                / (std::f32::consts::PI * radius_px),
                                         });
-                                        self.drag_last = Some(Point::new(event.position.x.as_f32(), event.position.y.as_f32()));
+                                        self.drag_last = Some(Point::new(
+                                            event.position.x.as_f32(),
+                                            event.position.y.as_f32(),
+                                        ));
                                         self.drag_mode = DragMode::None;
                                         return;
                                     }
@@ -359,18 +381,28 @@ impl ViewportPanel {
             let mut transform = drag.start_transform.clone();
             match self.transform_tool {
                 TransformTool::Translate => {
-                    let distance = self.camera.distance * 2.0 * (45.0f32.to_radians() * 0.5).tan()
-                        / self.last_size.height.max(1.0);
-                    let value = along * distance * axis_sign(drag.axis);
-                    set_vec_component(&mut transform.translation, drag.axis, component(drag.start_transform.translation, drag.axis) + value);
+                    let value = along * drag.world_units_per_pixel * axis_sign(drag.axis);
+                    set_vec_component(
+                        &mut transform.translation,
+                        drag.axis,
+                        component(drag.start_transform.translation, drag.axis) + value,
+                    );
                 }
                 TransformTool::Rotate => {
-                    let value = along * 0.7 * axis_sign(drag.axis);
-                    set_vec_component(&mut transform.rotation, drag.axis, component(drag.start_transform.rotation, drag.axis) + value);
+                    let value = along * drag.degrees_per_pixel * axis_sign(drag.axis);
+                    set_vec_component(
+                        &mut transform.rotation,
+                        drag.axis,
+                        component(drag.start_transform.rotation, drag.axis) + value,
+                    );
                 }
                 TransformTool::Scale => {
                     let factor = (along * 0.01).exp().clamp(0.01, 100.0);
-                    set_vec_component(&mut transform.scale, drag.axis, component(drag.start_transform.scale, drag.axis) * factor);
+                    set_vec_component(
+                        &mut transform.scale,
+                        drag.axis,
+                        component(drag.start_transform.scale, drag.axis) * factor,
+                    );
                 }
             }
             if let Some(editor) = self.editor.upgrade() {
@@ -468,11 +500,12 @@ impl ViewportPanel {
         let Some(editor) = self.editor.upgrade() else {
             return;
         };
-        let hover = if self.gizmo_layout.hit(pos).is_some() || self.transform_handle_hit(pos).is_some() {
-            None
-        } else {
-            self.nearest_joint(pos).map(str::to_string)
-        };
+        let hover =
+            if self.gizmo_layout.hit(pos).is_some() || self.transform_handle_hit(pos).is_some() {
+                None
+            } else {
+                self.nearest_joint(pos).map(str::to_string)
+            };
         if editor.read(cx).hovered_bone != hover {
             editor.update(cx, |e, cx| {
                 e.hovered_bone = hover;
@@ -484,18 +517,27 @@ impl ViewportPanel {
     fn selected_transform_origin(&self, cx: &App) -> Option<Vec3> {
         let editor = self.editor.upgrade()?;
         let e = editor.read(cx);
-        if let Some(socket) = e.selected_socket.as_deref().and_then(|id| e.sockets.get(id)) {
-            return socket.world_transform(&e.skeleton, &e.animation, e.playback.time)
+        if let Some(socket) = e
+            .selected_socket
+            .as_deref()
+            .and_then(|id| e.sockets.get(id))
+        {
+            return socket
+                .world_transform(&e.skeleton, &e.animation, e.playback.time)
                 .map(|m| m.transform_point(Vec3::ZERO));
         }
-        e.selected_bone.as_deref().and_then(|id| e.world_position(id))
+        e.selected_bone
+            .as_deref()
+            .and_then(|id| e.world_position(id))
     }
 
     fn transform_handle_hit(&self, pos: (f32, f32)) -> Option<usize> {
         let mut best = None;
         for (axis, origin, end) in &self.transform_handles {
             let d = segment_distance(pos, *origin, *end);
-            if d <= 9.0 && best.is_none_or(|(_, best_d)| d < best_d) { best = Some((*axis, d)); }
+            if d <= 9.0 && best.is_none_or(|(_, best_d)| d < best_d) {
+                best = Some((*axis, d));
+            }
         }
         best.map(|(axis, _)| axis)
     }
@@ -601,9 +643,27 @@ impl ViewportPanel {
                     })),
             )
             .child(toolbar_divider(cx))
-            .child(self.transform_tool_button("vp-tool-translate", "Move", "Translate selected bone or socket (G)", TransformTool::Translate, cx))
-            .child(self.transform_tool_button("vp-tool-rotate", "Rotate", "Rotate selected bone or socket (R)", TransformTool::Rotate, cx))
-            .child(self.transform_tool_button("vp-tool-scale", "Scale", "Scale selected bone or socket (S)", TransformTool::Scale, cx))
+            .child(self.transform_tool_button(
+                "vp-tool-translate",
+                "Move",
+                "Translate selected bone or socket (G)",
+                TransformTool::Translate,
+                cx,
+            ))
+            .child(self.transform_tool_button(
+                "vp-tool-rotate",
+                "Rotate",
+                "Rotate selected bone or socket (R)",
+                TransformTool::Rotate,
+                cx,
+            ))
+            .child(self.transform_tool_button(
+                "vp-tool-scale",
+                "Scale",
+                "Scale selected bone or socket (S)",
+                TransformTool::Scale,
+                cx,
+            ))
             .child(toolbar_divider(cx))
             .child(self.view_toggle(
                 "vp-grid",
@@ -839,14 +899,24 @@ fn axis_vector(axis: usize) -> Vec3 {
     }
 }
 
-fn axis_sign(_axis: usize) -> f32 { 1.0 }
+fn axis_sign(_axis: usize) -> f32 {
+    1.0
+}
 
 fn component(value: Vec3, axis: usize) -> f32 {
-    match axis { 0 => value.x, 1 => value.y, _ => value.z }
+    match axis {
+        0 => value.x,
+        1 => value.y,
+        _ => value.z,
+    }
 }
 
 fn set_vec_component(value: &mut Vec3, axis: usize, component: f32) {
-    match axis { 0 => value.x = component, 1 => value.y = component, _ => value.z = component }
+    match axis {
+        0 => value.x = component,
+        1 => value.y = component,
+        _ => value.z = component,
+    }
 }
 
 fn segment_distance(point: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
@@ -854,7 +924,9 @@ fn segment_distance(point: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
     let length_sq = dx * dx + dy * dy;
     let t = if length_sq > 1e-6 {
         (((point.0 - a.0) * dx + (point.1 - a.1) * dy) / length_sq).clamp(0.0, 1.0)
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     ((point.0 - (a.0 + t * dx)).powi(2) + (point.1 - (a.1 + t * dy)).powi(2)).sqrt()
 }
 
@@ -914,6 +986,25 @@ impl Render for ViewportPanel {
         let (mut geo, options, tracers_on, mesh_lod_count, hud, labels) = {
             let e = editor.read(cx);
             let (start, end) = e.play_range_seconds();
+            let transform_gizmo = if e.transform_editable() {
+                let origin = e
+                    .selected_socket
+                    .as_deref()
+                    .and_then(|id| e.sockets.get(id))
+                    .and_then(|socket| {
+                        socket
+                            .world_transform(&e.skeleton, &e.animation, e.playback.time)
+                            .map(|matrix| matrix.transform_point(Vec3::ZERO))
+                    })
+                    .or_else(|| {
+                        e.selected_bone
+                            .as_deref()
+                            .and_then(|id| e.world_position(id))
+                    });
+                origin.map(|origin| (origin, self.transform_tool))
+            } else {
+                None
+            };
             let geo = build_scene(&SceneInput {
                 skeleton: &e.skeleton,
                 clip: &e.animation,
@@ -941,6 +1032,7 @@ impl Render for ViewportPanel {
                     }),
                 physics: self.physics_asset.as_ref(),
                 sockets: Some((&e.sockets, e.selected_socket.as_deref())),
+                transform_gizmo,
             });
             let name = |id: &str| {
                 e.skeleton
@@ -969,60 +1061,11 @@ impl Render for ViewportPanel {
             )
         };
 
-        self.transform_handles.clear();
-        if editor.read(cx).transform_editable() {
-            if let Some(origin) = self.selected_transform_origin(cx) {
-                let origin_px = self.project(origin);
-                for axis in 0..3 {
-                    let color = [palette.axis_x, palette.axis_y, palette.axis_z][axis];
-                    if self.transform_tool == TransformTool::Rotate {
-                        let radius = 0.58;
-                        let plane = match axis {
-                            0 => (1, 2),
-                            1 => (0, 2),
-                            _ => (0, 1),
-                        };
-                        let mut previous = None;
-                        for step in 0..=48 {
-                            let angle = std::f32::consts::TAU * step as f32 / 48.0;
-                            let mut offset = Vec3::ZERO;
-                            set_vec_component(&mut offset, plane.0, radius * angle.cos());
-                            set_vec_component(&mut offset, plane.1, radius * angle.sin());
-                            let point = origin.add(offset);
-                            if let Some(last) = previous {
-                                if let (Some(a), Some(b)) = (self.project(last), self.project(point)) {
-                                    self.transform_handles.push((axis, a, b));
-                                    geo.ribbons.push(super::types::RibbonSegment::solid(
-                                        [last.x, last.y, last.z], [point.x, point.y, point.z], 3.0, color,
-                                    ));
-                                }
-                            }
-                            previous = Some(point);
-                        }
-                    } else {
-                        let end = origin.add(axis_vector(axis).scale(0.8));
-                        if let (Some(a), Some(b)) = (origin_px, self.project(end)) {
-                            self.transform_handles.push((axis, a, b));
-                            geo.ribbons.push(super::types::RibbonSegment::solid(
-                                [origin.x, origin.y, origin.z], [end.x, end.y, end.z], 3.2, color,
-                            ));
-                            let back = end.sub(axis_vector(axis).scale(0.12));
-                            let wing = match axis {
-                                0 => Vec3::new(0.0, 0.055, 0.0),
-                                1 => Vec3::new(0.055, 0.0, 0.0),
-                                _ => Vec3::new(0.055, 0.0, 0.0),
-                            };
-                            for side in [-1.0, 1.0] {
-                                let tip = back.add(wing.scale(side));
-                                geo.ribbons.push(super::types::RibbonSegment::solid(
-                                    [end.x, end.y, end.z], [tip.x, tip.y, tip.z], 3.2, color,
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        self.transform_handles = geo
+            .transform_handles
+            .iter()
+            .filter_map(|(axis, a, b)| Some((*axis, self.project(*a)?, self.project(*b)?)))
+            .collect();
 
         self.joints = geo.joint_positions.clone();
         self.bounds = (geo.center, geo.radius.max(0.25));
@@ -1141,6 +1184,7 @@ impl Render for ViewportPanel {
                             &SceneFrame {
                                 uniforms: &uniforms,
                                 mesh: &geo.mesh,
+                                transform_gizmo: &geo.transform_gizmo_mesh,
                                 skin: &geo.skin,
                                 ghost: &geo.ghost,
                                 ribbons: &geo.ribbons,
