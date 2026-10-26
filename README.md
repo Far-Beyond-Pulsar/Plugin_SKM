@@ -18,6 +18,13 @@ selected bone · `Ctrl+A/C/X/V`: select all / copy / cut / paste · `Del`: delet
 **Hierarchy** — arrow keys navigate, `←`/`→` collapse/expand, the filter box narrows the tree, hovering a row
 highlights the bone in the viewport.
 
+**Skeleton editing** — Add Root / Add Child build the hierarchy. Select a bone or socket to rename,
+change its parent, edit its local transform, or delete it. `Insert` adds a bone, `F2` focuses its name,
+`Enter` applies the name, and `Delete` removes a leaf or socket. Delete Subtree asks for confirmation.
+The Edit menu and standard undo/redo shortcuts restore hierarchy and socket edits. Referenced skeletons
+in sequence and mesh editors are read-only. See [the hierarchy design and compatibility notes](docs/skeleton-hierarchy.md)
+for bind-pose preservation, dependency checks, socket persistence and the proposed host follow-up.
+
 ## Rendering
 
 Both canvases take their colors from the active engine theme (`style.rs`). The viewport draws an analytic

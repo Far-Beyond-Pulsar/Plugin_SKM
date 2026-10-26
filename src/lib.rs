@@ -264,9 +264,17 @@ impl EditorPluginEditor for SkeletalAnimationPlugin {
             ANIM_SEQUENCE_EDITOR_ID,
             SKELETAL_MESH_EDITOR_ID,
         ] {
-            registry.register_fn(EditorId::new(id), |file_path, window, cx| {
-                Self::create_editor(file_path, window, cx)
-            });
+            registry.register_fn_with_settings(
+                EditorId::new(id),
+                |file_path, settings, window, cx| {
+                    Self::create_editor_with_undo(
+                        file_path,
+                        Some(&settings.services().undo),
+                        window,
+                        cx,
+                    )
+                },
+            );
         }
         for (id, kind) in [
             (
@@ -314,14 +322,31 @@ impl SkeletalAnimationPlugin {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<Arc<dyn PanelView>, PluginError> {
+        Self::create_editor_with_undo(file_path, None, window, cx)
+    }
+
+    /// open an editor with the host's per-document undo service.
+    pub fn create_editor_with_undo(
+        file_path: PathBuf,
+        undo: Option<&UndoService>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<Arc<dyn PanelView>, PluginError> {
+        let mut load_error = None;
         let panel = cx.new(|cx| {
             SkeletalAnimEditorPanel::new_with_path(file_path.clone(), window, cx).unwrap_or_else(
                 |err| {
-                    log::warn!("Failed to load animation asset {file_path:?}: {err}");
+                    load_error = Some(err.to_string());
                     SkeletalAnimEditorPanel::new(window, cx)
                 },
             )
         });
+        if let Some(message) = load_error {
+            return Err(PluginError::Other { message });
+        }
+        if let Some(undo) = undo {
+            panel.update(cx, |panel, _| panel.set_undo_service(undo));
+        }
         Ok(Arc::new(panel) as Arc<dyn PanelView>)
     }
 }

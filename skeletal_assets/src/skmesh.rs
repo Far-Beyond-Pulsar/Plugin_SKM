@@ -285,6 +285,13 @@ impl SkeletalMeshAsset {
 
     /// Read the identity and skeleton reference from a `.skmesh` header only.
     pub fn peek_header_at(path: &Path) -> anyhow::Result<(SkeletalMeshId, Option<SkeletonId>)> {
+        Self::peek_joints_at(path).map(|(id, skeleton, _)| (id, skeleton))
+    }
+
+    /// read reference data without allocating or decoding any vertex/index buffers.
+    pub fn peek_joints_at(
+        path: &Path,
+    ) -> anyhow::Result<(SkeletalMeshId, Option<SkeletonId>, Vec<Joint>)> {
         let prefix = engine_fs::virtual_fs::read_file_prefix(path, PREFIX)?;
         if prefix.len() < PREFIX || &prefix[..4] != MAGIC {
             anyhow::bail!("not a skeletal mesh file");
@@ -295,7 +302,7 @@ impl SkeletalMeshAsset {
         }
         let bytes = engine_fs::virtual_fs::read_file_prefix(path, PREFIX + header_len)?;
         let (header, _) = read_header(&bytes).map_err(anyhow::Error::msg)?;
-        Ok((header.id, header.skeleton))
+        Ok((header.id, header.skeleton, header.joints))
     }
 
     /// The skeleton a file's bytes refer to, reading only the header.

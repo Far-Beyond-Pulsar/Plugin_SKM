@@ -36,6 +36,7 @@ pub type TracerColors = HashMap<String, [f32; 4]>;
 
 pub struct SceneInput<'a> {
     pub skeleton: &'a Skeleton,
+    pub sockets: Option<(&'a skeletal_assets::sockets::Sockets, Option<&'a str>)>,
     pub clip: &'a AnimationClip,
     pub time: f32,
     /// Play range in seconds, used to bound the motion path and onion skin.
@@ -51,6 +52,15 @@ pub struct SceneInput<'a> {
     pub skin: Option<SkinInput<'a>>,
     /// Optional authored physics rig for the displayed skeletal mesh.
     pub physics: Option<&'a SkeletalPhysicsAsset>,
+    /// Renderer-owned transform handle geometry for the selected skeleton item.
+    pub transform_gizmo: Option<(Vec3, TransformGizmoMode)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransformGizmoMode {
+    Translate,
+    Rotate,
+    Scale,
 }
 
 /// The skinned mesh of a scene.
@@ -64,6 +74,9 @@ pub struct SkinInput<'a> {
 #[derive(Default)]
 pub struct SceneGeometry {
     pub mesh: Vec<MeshVertex>,
+    /// Transform controls, submitted in the viewport renderer's depth-tested
+    /// gizmo pass rather than merged with the skeleton's lit mesh batch.
+    pub transform_gizmo_mesh: Vec<MeshVertex>,
     /// The skinned mesh, drawn before the bones so they show through it only
     /// as x-ray.
     pub skin: Vec<MeshVertex>,
@@ -76,6 +89,8 @@ pub struct SceneGeometry {
     pub radius: f32,
     /// Lowest joint height, for fading the contact shadow as the rig lifts.
     pub min_y: f32,
+    /// World-space hit segments corresponding to the rendered transform handles.
+    pub transform_handles: Vec<(usize, Vec3, Vec3)>,
 }
 
 impl SceneGeometry {
@@ -317,6 +332,46 @@ pub fn build_scene(input: &SceneInput) -> SceneGeometry {
         ));
     }
 
+    if input.view.bones {
+        if let Some((sockets, selected)) = input.sockets {
+            for socket in sockets.iter() {
+                let Some(bone) = world.get(&socket.bone_id) else {
+                    continue;
+                };
+                let matrix = bone.mul(&socket.local_transform.to_matrix());
+                let position = matrix.transform_point(Vec3::ZERO);
+                points.push(position);
+                let active = selected == Some(socket.id.as_str());
+                geo.joints.push(JointInstance {
+                    center: position.to_array(),
+                    size: if active { 20.0 } else { 10.0 },
+                    color: if active { p.warning } else { p.info },
+                    style: JOINT_KEY,
+                });
+                geo.ribbons.push(RibbonSegment::solid(
+                    bone.transform_point(Vec3::ZERO).to_array(),
+                    position.to_array(),
+                    1.0,
+                    with_alpha(p.info, 0.6),
+                ));
+                if active {
+                    for (axis, color) in [
+                        (Vec3::new(0.15, 0.0, 0.0), p.danger),
+                        (Vec3::new(0.0, 0.15, 0.0), p.success),
+                        (Vec3::new(0.0, 0.0, 0.15), p.info),
+                    ] {
+                        geo.ribbons.push(RibbonSegment::solid(
+                            position.to_array(),
+                            matrix.transform_point(axis).to_array(),
+                            2.0,
+                            color,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     // Bounds for framing and the shadow.
     if let Some((center, radius)) = super::camera::bounding_sphere(&points) {
         geo.center = center;
@@ -417,7 +472,212 @@ pub fn build_scene(input: &SceneInput) -> SceneGeometry {
         }
     }
 
+    if let Some((origin, mode)) = input.transform_gizmo {
+        push_transform_gizmo(&mut geo, origin, mode, p);
+    }
+
     geo
+}
+
+/// Add transform controls to the viewport's ordinary depth-tested scene mesh
+/// buffer. This keeps the gizmo in the same camera, depth, and shading path as
+/// the skeleton instead of composing it as a screen-space UI layer.
+fn push_transform_gizmo(
+    geo: &mut SceneGeometry,
+    origin: Vec3,
+    mode: TransformGizmoMode,
+    palette: &Palette,
+) {
+    for axis in 0..3 {
+        let axis_vector = match axis {
+            0 => Vec3::new(1.0, 0.0, 0.0),
+            1 => Vec3::new(0.0, 1.0, 0.0),
+            _ => Vec3::new(0.0, 0.0, 1.0),
+        };
+        let color = [palette.axis_x, palette.axis_y, palette.axis_z][axis];
+        if mode == TransformGizmoMode::Rotate {
+            let radius = 0.58;
+            let plane = match axis {
+                0 => (1, 2),
+                1 => (0, 2),
+                _ => (0, 1),
+            };
+            push_transform_ring(
+                &mut geo.transform_gizmo_mesh,
+                origin,
+                plane,
+                radius,
+                0.014,
+                color,
+            );
+            let mut previous = None;
+            for step in 0..=48 {
+                let angle = std::f32::consts::TAU * step as f32 / 48.0;
+                let mut offset = Vec3::ZERO;
+                set_component(&mut offset, plane.0, radius * angle.cos());
+                set_component(&mut offset, plane.1, radius * angle.sin());
+                let point = origin.add(offset);
+                if let Some(last) = previous {
+                    geo.transform_handles.push((axis, last, point));
+                }
+                previous = Some(point);
+            }
+        } else {
+            let end = origin.add(axis_vector.scale(0.8));
+            geo.transform_handles.push((axis, origin, end));
+            if mode == TransformGizmoMode::Scale {
+                let grip = origin.add(axis_vector.scale(0.72));
+                push_transform_cylinder(&mut geo.transform_gizmo_mesh, origin, grip, 0.009, color);
+                push_transform_cube(&mut geo.transform_gizmo_mesh, end, 0.045, color);
+            } else {
+                let shaft_end = origin.add(axis_vector.scale(0.66));
+                push_transform_cylinder(
+                    &mut geo.transform_gizmo_mesh,
+                    origin,
+                    shaft_end,
+                    0.012,
+                    color,
+                );
+                push_transform_cone(&mut geo.transform_gizmo_mesh, shaft_end, end, 0.045, color);
+            }
+        }
+    }
+}
+
+fn set_component(value: &mut Vec3, axis: usize, component: f32) {
+    match axis {
+        0 => value.x = component,
+        1 => value.y = component,
+        _ => value.z = component,
+    }
+}
+
+fn push_transform_triangle(out: &mut Vec<MeshVertex>, a: Vec3, b: Vec3, c: Vec3, color: [f32; 4]) {
+    let normal = b.sub(a).cross(c.sub(a)).normalize().to_array();
+    for point in [a, b, c] {
+        out.push(MeshVertex {
+            pos: point.to_array(),
+            normal,
+            color,
+            glow: 0.08,
+        });
+    }
+}
+
+fn perpendicular_basis(axis: Vec3) -> (Vec3, Vec3) {
+    let reference = if axis.y.abs() > 0.9 {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        Vec3::new(0.0, 1.0, 0.0)
+    };
+    let u = axis.cross(reference).normalize();
+    (u, axis.cross(u).normalize())
+}
+
+fn push_transform_cylinder(
+    out: &mut Vec<MeshVertex>,
+    start: Vec3,
+    end: Vec3,
+    radius: f32,
+    color: [f32; 4],
+) {
+    let direction = end.sub(start).normalize();
+    let (u, v) = perpendicular_basis(direction);
+    const SIDES: usize = 10;
+    for side in 0..SIDES {
+        let a = std::f32::consts::TAU * side as f32 / SIDES as f32;
+        let b = std::f32::consts::TAU * (side + 1) as f32 / SIDES as f32;
+        let radial_a = u.scale(a.cos()).add(v.scale(a.sin()));
+        let radial_b = u.scale(b.cos()).add(v.scale(b.sin()));
+        let p0 = start.add(radial_a.scale(radius));
+        let p1 = start.add(radial_b.scale(radius));
+        let p2 = end.add(radial_b.scale(radius));
+        let p3 = end.add(radial_a.scale(radius));
+        push_transform_triangle(out, p0, p1, p2, color);
+        push_transform_triangle(out, p0, p2, p3, color);
+    }
+}
+
+fn push_transform_cone(
+    out: &mut Vec<MeshVertex>,
+    base: Vec3,
+    tip: Vec3,
+    radius: f32,
+    color: [f32; 4],
+) {
+    let direction = tip.sub(base).normalize();
+    let (u, v) = perpendicular_basis(direction);
+    const SIDES: usize = 12;
+    for side in 0..SIDES {
+        let a = std::f32::consts::TAU * side as f32 / SIDES as f32;
+        let b = std::f32::consts::TAU * (side + 1) as f32 / SIDES as f32;
+        let p = base
+            .add(u.scale(a.cos() * radius))
+            .add(v.scale(a.sin() * radius));
+        let q = base
+            .add(u.scale(b.cos() * radius))
+            .add(v.scale(b.sin() * radius));
+        push_transform_triangle(out, p, q, tip, color);
+    }
+}
+
+fn push_transform_cube(out: &mut Vec<MeshVertex>, center: Vec3, half: f32, color: [f32; 4]) {
+    let offsets = [
+        Vec3::new(-1.0, -1.0, -1.0),
+        Vec3::new(1.0, -1.0, -1.0),
+        Vec3::new(1.0, 1.0, -1.0),
+        Vec3::new(-1.0, 1.0, -1.0),
+        Vec3::new(-1.0, -1.0, 1.0),
+        Vec3::new(1.0, -1.0, 1.0),
+        Vec3::new(1.0, 1.0, 1.0),
+        Vec3::new(-1.0, 1.0, 1.0),
+    ];
+    let points = offsets.map(|offset| center.add(offset.scale(half)));
+    for [a, b, c, d] in [
+        [0, 1, 2, 3],
+        [4, 7, 6, 5],
+        [0, 4, 5, 1],
+        [1, 5, 6, 2],
+        [2, 6, 7, 3],
+        [3, 7, 4, 0],
+    ] {
+        push_transform_triangle(out, points[a], points[b], points[c], color);
+        push_transform_triangle(out, points[a], points[c], points[d], color);
+    }
+}
+
+fn push_transform_ring(
+    out: &mut Vec<MeshVertex>,
+    center: Vec3,
+    plane: (usize, usize),
+    radius: f32,
+    tube_radius: f32,
+    color: [f32; 4],
+) {
+    const SEGMENTS: usize = 48;
+    const TUBE_SEGMENTS: usize = 8;
+    let vertex = |major: usize, minor: usize| {
+        let a = std::f32::consts::TAU * major as f32 / SEGMENTS as f32;
+        let b = std::f32::consts::TAU * minor as f32 / TUBE_SEGMENTS as f32;
+        let mut p = Vec3::ZERO;
+        let mut n = Vec3::ZERO;
+        set_component(&mut p, plane.0, a.cos());
+        set_component(&mut p, plane.1, a.sin());
+        set_component(&mut n, plane.0, a.cos() * b.cos());
+        set_component(&mut n, plane.1, a.sin() * b.cos());
+        set_component(&mut n, 3 - plane.0 - plane.1, b.sin());
+        center.add(p.scale(radius)).add(n.scale(tube_radius))
+    };
+    for major in 0..SEGMENTS {
+        for minor in 0..TUBE_SEGMENTS {
+            let a = vertex(major, minor);
+            let b = vertex(major + 1, minor);
+            let c = vertex(major + 1, minor + 1);
+            let d = vertex(major, minor + 1);
+            push_transform_triangle(out, a, b, c, color);
+            push_transform_triangle(out, a, c, d, color);
+        }
+    }
 }
 
 /// Draw authored collider wireframes and constraint links in the same posed
@@ -834,6 +1094,8 @@ mod tests {
             tracers: None,
             skin: None,
             physics: None,
+            sockets: None,
+            transform_gizmo: None,
         }
     }
 
@@ -973,5 +1235,71 @@ mod tests {
             assert_eq!(gizmo.layout.hit(center), Some(axis));
         }
         assert_eq!(gizmo.layout.hit((5.0, 590.0)), None);
+    }
+}
+
+#[cfg(test)]
+mod socket_geometry_tests {
+    use super::*;
+    use crate::core::{sample, Transform};
+    use skeletal_assets::sockets::{Socket, Sockets};
+    #[test]
+    fn socket_markers_follow_local_transforms_and_participate_in_framing() {
+        let skeleton = sample::humanoid_skeleton();
+        let clip = AnimationClip::bind_pose();
+        let palette = Palette::test_dark();
+        let mut sockets = Sockets::default();
+        sockets
+            .add(
+                &skeleton,
+                Socket {
+                    id: "weapon".into(),
+                    name: "Weapon".into(),
+                    bone_id: "head".into(),
+                    local_transform: Transform {
+                        translation: Vec3::new(3.0, 0.0, 0.0),
+                        ..Transform::IDENTITY
+                    },
+                },
+            )
+            .unwrap();
+        let input = SceneInput {
+            skeleton: &skeleton,
+            clip: &clip,
+            time: 0.0,
+            range: (0.0, 1.0),
+            selected: None,
+            hovered: None,
+            view: ViewOptions::default(),
+            palette: &palette,
+            tracers: None,
+            skin: None,
+            physics: None,
+            sockets: Some((&sockets, Some("weapon"))),
+            transform_gizmo: None,
+        };
+        let with_socket = build_scene(&input);
+        let without = build_scene(&SceneInput {
+            sockets: None,
+            ..input
+        });
+        assert_eq!(with_socket.joints.len(), without.joints.len() + 1);
+        assert_eq!(with_socket.ribbons.len(), without.ribbons.len() + 4);
+        assert!(with_socket.radius > without.radius);
+        let world = sockets
+            .get("weapon")
+            .unwrap()
+            .world_transform(&skeleton, &clip, 0.0)
+            .unwrap()
+            .transform_point(Vec3::ZERO);
+        assert_eq!(
+            with_socket
+                .joints
+                .iter()
+                .find(|j| j.style == JOINT_KEY)
+                .unwrap()
+                .center,
+            world.to_array()
+        );
     }
 }

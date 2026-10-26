@@ -49,6 +49,9 @@ pub struct SkeletonAsset {
     /// Optional, and absent from files written before it existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_mesh: Option<SkeletalMeshId>,
+    /// optional bone-local attachment points; absent in older version 1 files.
+    #[serde(default, skip_serializing_if = "super::sockets::Sockets::is_empty")]
+    pub sockets: super::sockets::Sockets,
 }
 
 impl SkeletonAsset {
@@ -58,6 +61,7 @@ impl SkeletonAsset {
             version: FORMAT_VERSION,
             id: SkeletonId::new(),
             bones: skeleton.bones,
+            sockets: Default::default(),
             preview_mesh: None,
         }
     }
@@ -69,7 +73,12 @@ impl SkeletonAsset {
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
-        parse_versioned(text)
+        let asset: Self = parse_versioned(text)?;
+        asset
+            .sockets
+            .validate(&asset.skeleton())
+            .map_err(|e| e.to_string())?;
+        Ok(asset)
     }
 
     pub fn to_text(&self) -> String {
@@ -161,6 +170,7 @@ pub fn load_skeleton_asset(path: &Path) -> anyhow::Result<SkeletonAsset> {
 }
 
 pub fn save_skeleton_asset(path: &Path, asset: &SkeletonAsset) -> anyhow::Result<()> {
+    asset.sockets.validate(&asset.skeleton())?;
     write_text(path, &asset.to_text())
 }
 
@@ -317,5 +327,33 @@ mod tests {
             load_animseq_asset(&seq_path).unwrap().skeleton,
             Some(asset.id)
         );
+    }
+}
+
+#[cfg(test)]
+mod hierarchy_validation_tests {
+    use super::*;
+    use crate::{math::Transform, skeleton::Bone};
+    #[test]
+    fn invalid_hierarchies_and_sockets_never_overwrite_the_saved_asset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rig.skeleton");
+        let mut asset = SkeletonAsset::new(Skeleton {
+            bones: vec![Bone {
+                id: "root".into(),
+                name: "Root".into(),
+                parent: None,
+                bind_transform: Transform::IDENTITY,
+            }],
+        });
+        save_skeleton_asset(&path, &asset).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        asset.bones[0].parent = Some("absent".into());
+        assert!(save_skeleton_asset(&path, &asset).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        asset.bones[0].parent = None;
+        let mut json = serde_json::to_value(&asset).unwrap();
+        json["sockets"] = serde_json::json!([{"id":"socket","name":"Weapon","bone_id":"absent","local_transform":Transform::IDENTITY}]);
+        assert!(SkeletonAsset::parse(&json.to_string()).is_err());
     }
 }

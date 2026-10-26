@@ -150,6 +150,7 @@ mod tests {
 
     fn skeleton_entry(path: &str) -> Entry {
         Entry {
+            sockets: Default::default(),
             id: SkeletonId::new(),
             path: PathBuf::from(path),
             name: "Humanoid".into(),

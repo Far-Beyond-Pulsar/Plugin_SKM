@@ -51,6 +51,7 @@ pub struct Entry {
     /// The file name without its extension.
     pub name: String,
     pub skeleton: Arc<Skeleton>,
+    pub sockets: Arc<skeletal_assets::sockets::Sockets>,
 }
 
 /// A `.skeleton` file the library could not index.
@@ -159,6 +160,7 @@ impl Library {
                     path: path.to_path_buf(),
                     name,
                     skeleton: Arc::new(asset.skeleton()),
+                    sockets: Arc::new(asset.sockets),
                 });
             }
             Err(error) => {

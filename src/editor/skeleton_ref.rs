@@ -67,6 +67,12 @@ impl SkeletalAnimEditorPanel {
                 .map(|mesh| validate_skeletal_mesh(mesh, &self.link))
                 .unwrap_or_default(),
         };
+        if let Err(error) = self.sockets.validate(&self.skeleton) {
+            self.issues.push(crate::core::validate::Issue::new(
+                crate::core::validate::Severity::Error,
+                error.to_string(),
+            ));
+        }
     }
 
     /// Scan the project for skeletons (and for meshes, if a preview mesh is
@@ -126,8 +132,20 @@ impl SkeletalAnimEditorPanel {
             SkeletonLink::Resolved(entry) => (*entry.skeleton).clone(),
             _ => Skeleton::default(),
         };
+        self.sockets = match &link {
+            SkeletonLink::Resolved(entry) => (*entry.sockets).clone(),
+            _ => Default::default(),
+        };
+        if self
+            .selected_socket
+            .as_deref()
+            .is_some_and(|id| self.sockets.get(id).is_none())
+        {
+            self.selected_socket = None;
+        }
         self.link = link;
         self.skeleton_revision += 1;
+        self.hierarchy_revision += 1;
         self.tracer_state = TracerState::new(&self.skeleton);
         if self
             .selected_bone

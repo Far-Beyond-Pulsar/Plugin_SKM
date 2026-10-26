@@ -32,6 +32,8 @@ pub struct BonePropertiesPanel {
 
 /// Snapshot of what the panel shows, read once per render.
 struct Details {
+    socket: bool,
+    sequence: bool,
     id: String,
     name: String,
     parent: Option<String>,
@@ -87,6 +89,7 @@ impl BonePropertiesPanel {
     fn signature(e: &SkeletalAnimEditorPanel) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         e.selected_bone.hash(&mut h);
+        e.selected_socket.hash(&mut h);
         e.selected_keyframe.hash(&mut h);
         e.playback.playing.hash(&mut h);
         e.skeleton_revision.hash(&mut h);
@@ -108,6 +111,35 @@ impl BonePropertiesPanel {
 
     fn capture(e: &SkeletalAnimEditorPanel) -> Option<Details> {
         let playing = e.playback.playing;
+        if let Some(socket) = e
+            .selected_socket
+            .as_deref()
+            .and_then(|id| e.sockets.get(id))
+        {
+            return Some(Details {
+                socket: true,
+                sequence: false,
+                id: socket.id.clone(),
+                name: socket.name.clone(),
+                parent: e.skeleton.bone(&socket.bone_id).map(|b| b.name.clone()),
+                child_count: 0,
+                key_count: None,
+                selected_key: None,
+                keyed: false,
+                locked: e.mode != EditorMode::Skeleton,
+                timing: "Bone-local attachment transform".into(),
+                world: if playing {
+                    None
+                } else {
+                    socket
+                        .world_transform(&e.skeleton, &e.animation, e.playback.time)
+                        .map(|m| m.transform_point(crate::core::Vec3::ZERO).to_array())
+                },
+                translation: e.transform_inputs.translation.clone(),
+                rotation: e.transform_inputs.rotation.clone(),
+                scale: e.transform_inputs.scale.clone(),
+            });
+        }
         let id = e.selected_bone.clone()?;
         let bone = e.skeleton.bone(&id)?;
         let track = e.animation.track(&id);
@@ -153,6 +185,8 @@ impl BonePropertiesPanel {
         };
 
         Some(Details {
+            socket: false,
+            sequence: e.mode == EditorMode::Sequence,
             parent: bone
                 .parent
                 .as_ref()
@@ -213,6 +247,9 @@ impl BonePropertiesPanel {
                 .into_any_element(),
         };
         let animation = match d.key_count {
+            _ if d.socket => self
+                .chip(IconName::Link, "Follows bone".into(), theme.info, cx)
+                .into_any_element(),
             Some(n) => self
                 .chip(IconName::Keyframes, format!("{n} keys"), theme.success, cx)
                 .into_any_element(),
@@ -477,6 +514,7 @@ impl BonePropertiesPanel {
                     )
                     .child(
                         Button::new(SharedString::from(format!("props-reset-{title}")))
+                            .debug_selector(|| format!("props-reset-{title}"))
                             .icon(IconName::Undo)
                             .ghost()
                             .xsmall()
@@ -583,6 +621,7 @@ impl Render for BonePropertiesPanel {
         let details = self.details.as_ref();
 
         let badge = match &details {
+            Some(d) if d.socket => Some(Tag::info().small().child("Socket")),
             Some(d) if d.selected_key.is_some() => Some(Tag::warning().small().child("Keyframe")),
             Some(_) => Some(Tag::info().small().child("Bone")),
             None => None,
@@ -611,7 +650,7 @@ impl Render for BonePropertiesPanel {
                 .min_h_0()
                 .scrollable(ScrollbarAxis::Vertical)
                 .child(self.render_bone_card(d, cx))
-                .child(self.render_key_card(d, cx))
+                .when(d.sequence, |col| col.child(self.render_key_card(d, cx)))
                 .when(d.locked, |col| {
                     col.child(
                         h_flex()
@@ -636,7 +675,11 @@ impl Render for BonePropertiesPanel {
                                     .flex_1()
                                     .text_xs()
                                     .text_color(theme.foreground.opacity(0.9))
-                                    .child("Add a key at the playhead to edit this pose."),
+                                    .child(if d.socket {
+                                        "Open the skeleton asset to edit this socket."
+                                    } else {
+                                        "Add a key at the playhead to edit this pose."
+                                    }),
                             ),
                     )
                 })
@@ -679,5 +722,107 @@ impl Render for BonePropertiesPanel {
             .child(header)
             .child(body)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod reset_interaction_tests {
+    use super::BonePropertiesPanel;
+    use crate::core::{assets, sample, Transform, Vec3};
+    use crate::editor::hierarchy_edit::HierarchyCommand;
+    use crate::editor::SkeletalAnimEditorPanel;
+    use gpui::{AppContext, Modifiers, TestAppContext};
+
+    #[gpui::test]
+    fn rendered_reset_buttons_use_exact_defaults_and_do_not_collapse_sections(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(ui::init);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Pulsar.toml"), "").unwrap();
+        let path = dir.path().join("rig.skeleton");
+        assets::save_skeleton_asset(
+            &path,
+            &assets::SkeletonAsset::new(sample::humanoid_skeleton()),
+        )
+        .unwrap();
+        let mut editor_entity = None;
+        let mut properties_entity = None;
+        let (_, cx) = cx.add_window_view(|w, cx| {
+            let editor = cx.new(|cx| SkeletalAnimEditorPanel::new_with_path(path, w, cx).unwrap());
+            let properties = cx.new(|cx| BonePropertiesPanel::new(editor.downgrade(), cx));
+            editor_entity = Some(editor);
+            properties_entity = Some(properties.clone());
+            ui::Root::new(properties.into(), w, cx)
+        });
+        let editor = editor_entity.unwrap();
+        let properties = properties_entity.unwrap();
+        editor.update(cx, |e, cx| {
+            properties.update(cx, |p, cx| p.attach(e, &editor, cx))
+        });
+        let precise = Transform {
+            translation: Vec3::new(0.0004, 2.0, 0.0),
+            rotation: Vec3::new(0.0004, 2.0, 0.0),
+            scale: Vec3::new(1.0004, 2.0, 1.0),
+        };
+        for socket in [false, true] {
+            editor.update_in(cx, |e, w, cx| {
+                e.select_bone(Some("root".into()), w, cx);
+                if socket {
+                    e.request_hierarchy_command(
+                        HierarchyCommand::AddSocket {
+                            bone: "root".into(),
+                        },
+                        w,
+                        cx,
+                    );
+                }
+                e.request_hierarchy_command(HierarchyCommand::Transform(precise.clone()), w, cx);
+            });
+            for selector in [
+                "props-reset-Translation",
+                "props-reset-Rotation",
+                "props-reset-Scale",
+            ] {
+                for _ in 0..3 {
+                    cx.run_until_parked();
+                    cx.update(|w, cx| {
+                        w.refresh();
+                        w.draw(cx).clear()
+                    });
+                }
+                let bounds = cx.debug_bounds(selector).unwrap();
+                cx.simulate_mouse_move(bounds.center(), None, Modifiers::default());
+                cx.simulate_mouse_down(
+                    bounds.center(),
+                    gpui::MouseButton::Left,
+                    Modifiers::default(),
+                );
+                cx.update(|w, cx| {
+                    w.refresh();
+                    w.draw(cx).clear()
+                });
+                cx.simulate_mouse_up(
+                    bounds.center(),
+                    gpui::MouseButton::Left,
+                    Modifiers::default(),
+                );
+                cx.run_until_parked();
+            }
+            editor.read_with(cx, |e, _| {
+                assert_eq!(e.current_transform(), Transform::IDENTITY)
+            });
+            properties.read_with(cx, |p, _| assert!(p.collapsed.is_empty()));
+            for _ in 0..3 {
+                editor.update_in(cx, |e, w, cx| e.undo_hierarchy(false, w, cx));
+            }
+            editor.read_with(cx, |e, _| assert_eq!(e.current_transform(), precise));
+            for _ in 0..3 {
+                editor.update_in(cx, |e, w, cx| e.undo_hierarchy(true, w, cx));
+            }
+            editor.read_with(cx, |e, _| {
+                assert_eq!(e.current_transform(), Transform::IDENTITY)
+            });
+        }
     }
 }

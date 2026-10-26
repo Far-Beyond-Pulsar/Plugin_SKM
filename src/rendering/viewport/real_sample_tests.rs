@@ -111,6 +111,8 @@ fn render_real_sample() {
                 weights_of: selected,
             }),
             physics: None,
+            sockets: None,
+            transform_gizmo: None,
         };
         // Frame the whole animation, not just this pose, so frames compare.
         let mut bounds: Option<(crate::core::Vec3, f32)> = None;
@@ -150,6 +152,7 @@ fn render_real_sample() {
                     &SceneFrame {
                         uniforms: &uniforms,
                         mesh: &geo.mesh,
+                        transform_gizmo: &geo.transform_gizmo_mesh,
                         skin: &geo.skin,
                         ghost: &geo.ghost,
                         ribbons: &geo.ribbons,

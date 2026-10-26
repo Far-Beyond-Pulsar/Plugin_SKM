@@ -48,6 +48,8 @@ const JITTER_SAMPLES: [[f32; 2]; 8] = [
 pub struct SceneFrame<'a> {
     pub uniforms: &'a ViewportUniforms,
     pub mesh: &'a [MeshVertex],
+    /// Scene-space transform controls, rendered in a dedicated depth-tested pass.
+    pub transform_gizmo: &'a [MeshVertex],
     /// The skinned mesh, drawn first so bones behind it show only as x-ray.
     pub skin: &'a [MeshVertex],
     /// Translucent onion-skin geometry.
@@ -124,6 +126,7 @@ struct Pipelines {
     sky: wgpu::RenderPipeline,
     grid: wgpu::RenderPipeline,
     mesh: wgpu::RenderPipeline,
+    transform_gizmo: wgpu::RenderPipeline,
     xray: wgpu::RenderPipeline,
     ghost: wgpu::RenderPipeline,
     ribbon: wgpu::RenderPipeline,
@@ -133,6 +136,7 @@ struct Pipelines {
     scene_uniforms: UniformSet,
     gizmo_uniforms: UniformSet,
     mesh_buf: GrowBuf,
+    transform_gizmo_buf: GrowBuf,
     skin_buf: GrowBuf,
     ghost_buf: GrowBuf,
     ribbon_buf: GrowBuf,
@@ -240,6 +244,9 @@ impl ViewportRenderer {
             bytemuck::bytes_of(&gizmo_uniforms),
         );
         let mesh_n = p.mesh_buf.upload(device, queue, frame.mesh);
+        let transform_gizmo_n = p
+            .transform_gizmo_buf
+            .upload(device, queue, frame.transform_gizmo);
         let skin_n = p.skin_buf.upload(device, queue, frame.skin);
         let ghost_n = p.ghost_buf.upload(device, queue, frame.ghost);
         let ribbon_n = p.ribbon_buf.upload(device, queue, frame.ribbons);
@@ -318,6 +325,11 @@ impl ViewportRenderer {
                 pass.set_pipeline(&p.joints);
                 pass.set_vertex_buffer(0, p.joint_buf.buf.slice(..));
                 pass.draw(0..6, 0..joint_n);
+            }
+            if transform_gizmo_n > 0 {
+                pass.set_pipeline(&p.transform_gizmo);
+                pass.set_vertex_buffer(0, p.transform_gizmo_buf.buf.slice(..));
+                pass.draw(0..transform_gizmo_n, 0..1);
             }
         }
 
@@ -762,6 +774,14 @@ impl Pipelines {
             alpha,
             depth_state(true, Cmp::Less),
         );
+        // Transform handles are 3D scene geometry: share the scene camera and
+        // depth attachment while preserving the scene depth for later passes.
+        let transform_gizmo = mesh_pipeline(
+            "viewport_transform_gizmo",
+            "fs_mesh",
+            alpha,
+            depth_state(false, Cmp::LessEqual),
+        );
         let xray = mesh_pipeline(
             "viewport_xray",
             "fs_xray",
@@ -844,6 +864,7 @@ impl Pipelines {
             sky,
             grid,
             mesh,
+            transform_gizmo,
             xray,
             ghost,
             ribbon: ribbon_pipeline,
@@ -853,6 +874,12 @@ impl Pipelines {
             scene_uniforms: uniform_set("viewport_scene_uniforms"),
             gizmo_uniforms: uniform_set("viewport_gizmo_uniforms"),
             mesh_buf: GrowBuf::new(device, "viewport_mesh", Usage::VERTEX, 4096),
+            transform_gizmo_buf: GrowBuf::new(
+                device,
+                "viewport_transform_gizmo",
+                Usage::VERTEX,
+                1024,
+            ),
             skin_buf: GrowBuf::new(device, "viewport_skin", Usage::VERTEX, 4096),
             ghost_buf: GrowBuf::new(device, "viewport_ghost", Usage::VERTEX, 4096),
             ribbon_buf: GrowBuf::new(device, "viewport_ribbons", Usage::VERTEX, 4096),
