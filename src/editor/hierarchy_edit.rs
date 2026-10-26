@@ -40,6 +40,53 @@ impl HierarchyCommand {
 }
 
 impl SkeletalAnimEditorPanel {
+    pub(crate) fn seal_viewport_transform(&self) {
+        undo::lock(&self.hierarchy_history).seal();
+    }
+
+    /// Apply an absolute viewport transform sample through the skeleton
+    /// document's undoable transform path.
+    pub(crate) fn apply_viewport_transform(
+        &mut self,
+        transform: crate::core::Transform,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mode != EditorMode::Skeleton || !self.transform_editable() {
+            return;
+        }
+        let selection = self.hierarchy_selection();
+        let before_bone = self.selected_bone.as_deref()
+            .filter(|_| self.selected_socket.is_none())
+            .and_then(|id| self.skeleton.bones.iter().enumerate().find(|(_, b)| b.id == id))
+            .map(|(index, bone)| (index, bone.clone()));
+        let before_socket = self.selected_socket.as_deref()
+            .and_then(|id| self.sockets.get(id)).cloned();
+        if let Err(error) = self.mutate_hierarchy(HierarchyCommand::Transform(transform)) {
+            self.notice = Some(error);
+            cx.notify();
+            return;
+        }
+        let edit = if let Some(before) = before_socket {
+            self.sockets.get(&before.id).cloned()
+                .and_then(|after| HierarchyEdit::socket_transform(before, after, selection))
+        } else {
+            before_bone.and_then(|(index, before)| self.skeleton.bones.get(index).and_then(|after|
+                HierarchyEdit::bone_transform(index, before, after.clone(), selection)))
+        };
+        if let Some(edit) = edit {
+            undo::lock(&self.hierarchy_history).push(edit);
+            self.notice = None;
+            self.skeleton_revision += 1;
+            self.hovered_bone = None;
+            self.is_dirty = self.asset_id != self.saved_asset_id
+                || self.skeleton != self.saved_hierarchy
+                || self.sockets != self.saved_sockets
+                || self.preview_mesh_ref != self.saved_preview_ref;
+            self.refresh_issues();
+            cx.notify();
+        }
+    }
+
     pub fn set_undo_service(&mut self, service: &UndoService) {
         if self.mode != EditorMode::Skeleton {
             return;

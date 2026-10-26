@@ -1614,6 +1614,7 @@ impl SkeletalAnimEditorPanel {
             }
     }
 
+
     /// Mark `bone_id` and all of its ancestors as expanded in the hierarchy
     /// panel so a programmatic selection (e.g. from the viewport) is visible.
     pub(crate) fn expand_ancestors(&mut self, bone_id: &str) {

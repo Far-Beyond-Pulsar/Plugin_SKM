@@ -59,6 +59,22 @@ enum DragMode {
     Zoom,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum TransformTool {
+    #[default]
+    Translate,
+    Rotate,
+    Scale,
+}
+
+#[derive(Clone)]
+struct TransformDrag {
+    axis: usize,
+    start: Point<f32>,
+    start_transform: crate::core::Transform,
+    screen_axis: (f32, f32),
+}
+
 pub struct ViewportPanel {
     editor: WeakEntity<SkeletalAnimEditorPanel>,
     focus_handle: FocusHandle,
@@ -69,6 +85,8 @@ pub struct ViewportPanel {
     camera_goal: Option<OrbitCamera>,
     drag_last: Option<Point<f32>>,
     drag_mode: DragMode,
+    transform_tool: TransformTool,
+    transform_drag: Option<TransformDrag>,
     keys: FlyInput,
     /// True until the first render where the skeleton's bounds are known.
     needs_fit: bool,
@@ -81,6 +99,7 @@ pub struct ViewportPanel {
     joints: Vec<(String, Vec3)>,
     bounds: (Vec3, f32),
     gizmo_layout: GizmoLayout,
+    transform_handles: Vec<(usize, (f32, f32), (f32, f32))>,
     palette: Palette,
     physics_cache_key: Option<(PathBuf, String)>,
     physics_asset: Option<SkeletalPhysicsAsset>,
@@ -98,6 +117,8 @@ impl ViewportPanel {
             camera_goal: None,
             drag_last: None,
             drag_mode: DragMode::None,
+            transform_tool: TransformTool::Translate,
+            transform_drag: None,
             keys: FlyInput::default(),
             needs_fit: true,
             last_view_proj: Mat4::IDENTITY,
@@ -106,6 +127,7 @@ impl ViewportPanel {
             joints: Vec::new(),
             bounds: (Vec3::ZERO, 1.0),
             gizmo_layout: GizmoLayout::default(),
+            transform_handles: Vec::new(),
             palette: Palette::from_theme(cx.theme()),
             physics_cache_key: None,
             physics_asset: None,
@@ -169,6 +191,35 @@ impl ViewportPanel {
             }
             MouseButton::Left => {
                 let local = self.local(event.position);
+                if let Some(handle) = self.transform_handle_hit(local) {
+                    if let Some(editor) = self.editor.upgrade() {
+                        let e = editor.read(cx);
+                        if e.transform_editable() {
+                            let transform = e.current_transform();
+                            let origin = self.selected_transform_origin(cx);
+                            if let Some(origin) = origin {
+                                let axis = self.project(origin.add(axis_vector(handle)))
+                                    .zip(self.project(origin));
+                                if let Some(((x1, y1), (x0, y0))) = axis {
+                                    let screen_axis = (x1 - x0, y1 - y0);
+                                    let length = (screen_axis.0.powi(2) + screen_axis.1.powi(2)).sqrt();
+                                    if length > 1.0 {
+                                        editor.update(cx, |e, _| e.seal_viewport_transform());
+                                        self.transform_drag = Some(TransformDrag {
+                                            axis: handle,
+                                            start: Point::new(local.0, local.1),
+                                            start_transform: transform,
+                                            screen_axis: (screen_axis.0 / length, screen_axis.1 / length),
+                                        });
+                                        self.drag_last = Some(Point::new(event.position.x.as_f32(), event.position.y.as_f32()));
+                                        self.drag_mode = DragMode::None;
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 if let Some(axis) = self.gizmo_layout.hit(local) {
                     let mut goal = self.camera;
                     goal.snap_to(axis);
@@ -182,12 +233,17 @@ impl ViewportPanel {
         }
     }
 
-    fn handle_mouse_up(&mut self) {
+    fn handle_mouse_up(&mut self, cx: &mut Context<Self>) {
         self.drag_last = None;
         if self.drag_mode == DragMode::Look {
             self.keys = FlyInput::default();
         }
         self.drag_mode = DragMode::None;
+        if self.transform_drag.take().is_some() {
+            if let Some(editor) = self.editor.upgrade() {
+                editor.update(cx, |e, _| e.seal_viewport_transform());
+            }
+        }
     }
 
     fn set_key(&mut self, key: &str, down: bool) -> bool {
@@ -217,6 +273,9 @@ impl ViewportPanel {
             return;
         }
         match key {
+            "g" | "G" => self.transform_tool = TransformTool::Translate,
+            "r" | "R" => self.transform_tool = TransformTool::Rotate,
+            "s" | "S" => self.transform_tool = TransformTool::Scale,
             "f" => self.frame_selected(cx),
             "home" => self.frame_all(),
             "space" | " " => {
@@ -290,6 +349,37 @@ impl ViewportPanel {
     fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         let local = self.local(event.position);
 
+        if let Some(drag) = self.transform_drag.clone() {
+            if event.pressed_button.is_none() {
+                self.handle_mouse_up(cx);
+                return;
+            }
+            let delta = (local.0 - drag.start.x, local.1 - drag.start.y);
+            let along = delta.0 * drag.screen_axis.0 + delta.1 * drag.screen_axis.1;
+            let mut transform = drag.start_transform.clone();
+            match self.transform_tool {
+                TransformTool::Translate => {
+                    let distance = self.camera.distance * 2.0 * (45.0f32.to_radians() * 0.5).tan()
+                        / self.last_size.height.max(1.0);
+                    let value = along * distance * axis_sign(drag.axis);
+                    set_vec_component(&mut transform.translation, drag.axis, component(drag.start_transform.translation, drag.axis) + value);
+                }
+                TransformTool::Rotate => {
+                    let value = along * 0.7 * axis_sign(drag.axis);
+                    set_vec_component(&mut transform.rotation, drag.axis, component(drag.start_transform.rotation, drag.axis) + value);
+                }
+                TransformTool::Scale => {
+                    let factor = (along * 0.01).exp().clamp(0.01, 100.0);
+                    set_vec_component(&mut transform.scale, drag.axis, component(drag.start_transform.scale, drag.axis) * factor);
+                }
+            }
+            if let Some(editor) = self.editor.upgrade() {
+                editor.update(cx, |e, cx| e.apply_viewport_transform(transform, cx));
+            }
+            cx.notify();
+            return;
+        }
+
         let Some(last) = self.drag_last else {
             self.update_hover(local, cx);
             return;
@@ -299,7 +389,7 @@ impl ViewportPanel {
         }
         // Button released outside the panel: end the gesture.
         if event.pressed_button.is_none() {
-            self.handle_mouse_up();
+            self.handle_mouse_up(cx);
             return;
         }
 
@@ -378,7 +468,7 @@ impl ViewportPanel {
         let Some(editor) = self.editor.upgrade() else {
             return;
         };
-        let hover = if self.gizmo_layout.hit(pos).is_some() {
+        let hover = if self.gizmo_layout.hit(pos).is_some() || self.transform_handle_hit(pos).is_some() {
             None
         } else {
             self.nearest_joint(pos).map(str::to_string)
@@ -389,6 +479,25 @@ impl ViewportPanel {
                 cx.notify();
             });
         }
+    }
+
+    fn selected_transform_origin(&self, cx: &App) -> Option<Vec3> {
+        let editor = self.editor.upgrade()?;
+        let e = editor.read(cx);
+        if let Some(socket) = e.selected_socket.as_deref().and_then(|id| e.sockets.get(id)) {
+            return socket.world_transform(&e.skeleton, &e.animation, e.playback.time)
+                .map(|m| m.transform_point(Vec3::ZERO));
+        }
+        e.selected_bone.as_deref().and_then(|id| e.world_position(id))
+    }
+
+    fn transform_handle_hit(&self, pos: (f32, f32)) -> Option<usize> {
+        let mut best = None;
+        for (axis, origin, end) in &self.transform_handles {
+            let d = segment_distance(pos, *origin, *end);
+            if d <= 9.0 && best.is_none_or(|(_, best_d)| d < best_d) { best = Some((*axis, d)); }
+        }
+        best.map(|(axis, _)| axis)
     }
 
     // ── Camera framing ─────────────────────────────────────────────────────
@@ -492,6 +601,10 @@ impl ViewportPanel {
                     })),
             )
             .child(toolbar_divider(cx))
+            .child(self.transform_tool_button("vp-tool-translate", "Move", "Translate selected bone or socket (G)", TransformTool::Translate, cx))
+            .child(self.transform_tool_button("vp-tool-rotate", "Rotate", "Rotate selected bone or socket (R)", TransformTool::Rotate, cx))
+            .child(self.transform_tool_button("vp-tool-scale", "Scale", "Scale selected bone or socket (S)", TransformTool::Scale, cx))
+            .child(toolbar_divider(cx))
             .child(self.view_toggle(
                 "vp-grid",
                 IconName::DotsGrid3x3,
@@ -591,6 +704,26 @@ impl ViewportPanel {
                         }
                     }),
             )
+    }
+
+    fn transform_tool_button(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        tooltip: &'static str,
+        tool: TransformTool,
+        cx: &mut Context<Self>,
+    ) -> Button {
+        Button::new(id)
+            .label(label)
+            .ghost()
+            .small()
+            .selected(self.transform_tool == tool)
+            .tooltip(tooltip)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.transform_tool = tool;
+                cx.notify();
+            }))
     }
 
     /// Floating name tag next to the selected / hovered joint.
@@ -698,6 +831,33 @@ impl ui::dock::Panel for ViewportPanel {
     }
 }
 
+fn axis_vector(axis: usize) -> Vec3 {
+    match axis {
+        0 => Vec3::new(1.0, 0.0, 0.0),
+        1 => Vec3::new(0.0, 1.0, 0.0),
+        _ => Vec3::new(0.0, 0.0, 1.0),
+    }
+}
+
+fn axis_sign(_axis: usize) -> f32 { 1.0 }
+
+fn component(value: Vec3, axis: usize) -> f32 {
+    match axis { 0 => value.x, 1 => value.y, _ => value.z }
+}
+
+fn set_vec_component(value: &mut Vec3, axis: usize, component: f32) {
+    match axis { 0 => value.x = component, 1 => value.y = component, _ => value.z = component }
+}
+
+fn segment_distance(point: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let length_sq = dx * dx + dy * dy;
+    let t = if length_sq > 1e-6 {
+        (((point.0 - a.0) * dx + (point.1 - a.1) * dy) / length_sq).clamp(0.0, 1.0)
+    } else { 0.0 };
+    ((point.0 - (a.0 + t * dx)).powi(2) + (point.1 - (a.1 + t * dy)).powi(2)).sqrt()
+}
+
 fn load_physics_asset(root: &std::path::Path, mesh_id: &str) -> Option<SkeletalPhysicsAsset> {
     let index = engine_fs::open_project_file_index(root).ok().flatten()?;
     let files = index
@@ -751,7 +911,7 @@ impl Render for ViewportPanel {
         }
 
         // Build the frame's geometry from the editor's current pose.
-        let (geo, options, tracers_on, mesh_lod_count, hud, labels) = {
+        let (mut geo, options, tracers_on, mesh_lod_count, hud, labels) = {
             let e = editor.read(cx);
             let (start, end) = e.play_range_seconds();
             let geo = build_scene(&SceneInput {
@@ -808,6 +968,61 @@ impl Render for ViewportPanel {
                 labels,
             )
         };
+
+        self.transform_handles.clear();
+        if editor.read(cx).transform_editable() {
+            if let Some(origin) = self.selected_transform_origin(cx) {
+                let origin_px = self.project(origin);
+                for axis in 0..3 {
+                    let color = [palette.axis_x, palette.axis_y, palette.axis_z][axis];
+                    if self.transform_tool == TransformTool::Rotate {
+                        let radius = 0.58;
+                        let plane = match axis {
+                            0 => (1, 2),
+                            1 => (0, 2),
+                            _ => (0, 1),
+                        };
+                        let mut previous = None;
+                        for step in 0..=48 {
+                            let angle = std::f32::consts::TAU * step as f32 / 48.0;
+                            let mut offset = Vec3::ZERO;
+                            set_vec_component(&mut offset, plane.0, radius * angle.cos());
+                            set_vec_component(&mut offset, plane.1, radius * angle.sin());
+                            let point = origin.add(offset);
+                            if let Some(last) = previous {
+                                if let (Some(a), Some(b)) = (self.project(last), self.project(point)) {
+                                    self.transform_handles.push((axis, a, b));
+                                    geo.ribbons.push(super::types::RibbonSegment::solid(
+                                        [last.x, last.y, last.z], [point.x, point.y, point.z], 3.0, color,
+                                    ));
+                                }
+                            }
+                            previous = Some(point);
+                        }
+                    } else {
+                        let end = origin.add(axis_vector(axis).scale(0.8));
+                        if let (Some(a), Some(b)) = (origin_px, self.project(end)) {
+                            self.transform_handles.push((axis, a, b));
+                            geo.ribbons.push(super::types::RibbonSegment::solid(
+                                [origin.x, origin.y, origin.z], [end.x, end.y, end.z], 3.2, color,
+                            ));
+                            let back = end.sub(axis_vector(axis).scale(0.12));
+                            let wing = match axis {
+                                0 => Vec3::new(0.0, 0.055, 0.0),
+                                1 => Vec3::new(0.055, 0.0, 0.0),
+                                _ => Vec3::new(0.055, 0.0, 0.0),
+                            };
+                            for side in [-1.0, 1.0] {
+                                let tip = back.add(wing.scale(side));
+                                geo.ribbons.push(super::types::RibbonSegment::solid(
+                                    [end.x, end.y, end.z], [tip.x, tip.y, tip.z], 3.2, color,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         self.joints = geo.joint_positions.clone();
         self.bounds = (geo.center, geo.radius.max(0.25));
@@ -968,27 +1183,27 @@ impl Render for ViewportPanel {
             )
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _: &MouseUpEvent, _, _| this.handle_mouse_up()),
+                cx.listener(|this, _: &MouseUpEvent, _, cx| this.handle_mouse_up(cx)),
             )
             .on_mouse_up(
                 MouseButton::Right,
-                cx.listener(|this, _: &MouseUpEvent, _, _| this.handle_mouse_up()),
+                cx.listener(|this, _: &MouseUpEvent, _, cx| this.handle_mouse_up(cx)),
             )
             .on_mouse_up(
                 MouseButton::Middle,
-                cx.listener(|this, _: &MouseUpEvent, _, _| this.handle_mouse_up()),
+                cx.listener(|this, _: &MouseUpEvent, _, cx| this.handle_mouse_up(cx)),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|this, _: &MouseUpEvent, _, _| this.handle_mouse_up()),
+                cx.listener(|this, _: &MouseUpEvent, _, cx| this.handle_mouse_up(cx)),
             )
             .on_mouse_up_out(
                 MouseButton::Right,
-                cx.listener(|this, _: &MouseUpEvent, _, _| this.handle_mouse_up()),
+                cx.listener(|this, _: &MouseUpEvent, _, cx| this.handle_mouse_up(cx)),
             )
             .on_mouse_up_out(
                 MouseButton::Middle,
-                cx.listener(|this, _: &MouseUpEvent, _, _| this.handle_mouse_up()),
+                cx.listener(|this, _: &MouseUpEvent, _, cx| this.handle_mouse_up(cx)),
             )
             .on_mouse_move(
                 cx.listener(|this, e: &MouseMoveEvent, _, cx| this.handle_mouse_move(e, cx)),
