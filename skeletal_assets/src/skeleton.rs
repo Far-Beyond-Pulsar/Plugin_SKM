@@ -666,10 +666,7 @@ mod tests {
             let mut skeleton = tree();
             skeleton.bone_mut("arm").unwrap().name = name.to_string();
 
-            assert_eq!(
-                skeleton.validate(),
-                Err(HierarchyError::EmptyName)
-            );
+            assert_eq!(skeleton.validate(), Err(HierarchyError::EmptyName));
 
             let serialized = SkeletonAsset::new(skeleton).to_text();
 

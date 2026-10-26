@@ -55,23 +55,39 @@ impl SkeletalAnimEditorPanel {
             return;
         }
         let selection = self.hierarchy_selection();
-        let before_bone = self.selected_bone.as_deref()
+        let before_bone = self
+            .selected_bone
+            .as_deref()
             .filter(|_| self.selected_socket.is_none())
-            .and_then(|id| self.skeleton.bones.iter().enumerate().find(|(_, b)| b.id == id))
+            .and_then(|id| {
+                self.skeleton
+                    .bones
+                    .iter()
+                    .enumerate()
+                    .find(|(_, b)| b.id == id)
+            })
             .map(|(index, bone)| (index, bone.clone()));
-        let before_socket = self.selected_socket.as_deref()
-            .and_then(|id| self.sockets.get(id)).cloned();
+        let before_socket = self
+            .selected_socket
+            .as_deref()
+            .and_then(|id| self.sockets.get(id))
+            .cloned();
         if let Err(error) = self.mutate_hierarchy(HierarchyCommand::Transform(transform)) {
             self.notice = Some(error);
             cx.notify();
             return;
         }
         let edit = if let Some(before) = before_socket {
-            self.sockets.get(&before.id).cloned()
+            self.sockets
+                .get(&before.id)
+                .cloned()
                 .and_then(|after| HierarchyEdit::socket_transform(before, after, selection))
         } else {
-            before_bone.and_then(|(index, before)| self.skeleton.bones.get(index).and_then(|after|
-                HierarchyEdit::bone_transform(index, before, after.clone(), selection)))
+            before_bone.and_then(|(index, before)| {
+                self.skeleton.bones.get(index).and_then(|after| {
+                    HierarchyEdit::bone_transform(index, before, after.clone(), selection)
+                })
+            })
         };
         if let Some(edit) = edit {
             undo::lock(&self.hierarchy_history).push(edit);

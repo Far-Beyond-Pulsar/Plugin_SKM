@@ -95,20 +95,20 @@ impl AnimationAssetEditor {
         cx: &mut App,
     ) -> Result<Entity<Self>, PluginError> {
         let root = crate::core::library::project_root(&path);
-        let (mut data, is_new_file, parsed_existing) =
-            match engine_fs::virtual_fs::read_file(&path) {
-                Ok(bytes) => match String::from_utf8(bytes)
-                    .ok()
-                    .and_then(|text| serde_json::from_str(&text).ok())
-                {
-                    Some(data) => (data, false, true),
-                    None => {
-                        log::warn!("Could not parse animation asset {}", path.display());
-                        (kind.default_json(), false, false)
-                    }
-                },
-                Err(_) => (kind.default_json(), true, false),
-            };
+        let (mut data, is_new_file, parsed_existing) = match engine_fs::virtual_fs::read_file(&path)
+        {
+            Ok(bytes) => match String::from_utf8(bytes)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+            {
+                Some(data) => (data, false, true),
+                None => {
+                    log::warn!("Could not parse animation asset {}", path.display());
+                    (kind.default_json(), false, false)
+                }
+            },
+            Err(_) => (kind.default_json(), true, false),
+        };
         let mut needs_save = is_new_file;
         let valid_id = data
             .get("id")
@@ -136,11 +136,11 @@ impl AnimationAssetEditor {
             )?;
         }
         if valid_id.is_some() || needs_save {
-            if let Some(index) = engine_fs::open_project_file_index(&root).map_err(|error| {
-                PluginError::Other {
+            if let Some(index) =
+                engine_fs::open_project_file_index(&root).map_err(|error| PluginError::Other {
                     message: error.to_string(),
-                }
-            })? {
+                })?
+            {
                 index
                     .refresh_path(&path)
                     .and_then(|_| {
