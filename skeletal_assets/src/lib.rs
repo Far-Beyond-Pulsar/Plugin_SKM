@@ -19,3 +19,8 @@ pub mod skinning;
 pub mod skmesh;
 
 pub mod sockets;
+
+pub mod curves;
+pub mod notifies;
+pub mod root_motion;
+pub mod sequence_features;
