@@ -63,6 +63,12 @@ pub(super) enum DragState {
         clicked: (String, usize),
         delta_frames: i32,
     },
+    Notify {
+        id: String,
+        grab_dt: f32,
+        start_x: f32,
+        moved: bool,
+    },
     Scrollbar {
         grab: f32,
     },
@@ -195,6 +201,8 @@ impl TimelinePanel {
             rows,
             selected_bone: editor.selected_bone.as_deref(),
             selected_keys: &editor.selected_keyframes,
+            notifies: &editor.animation_features.notifies,
+            selected_notify: editor.selected_notify.as_deref(),
             time: editor.playback.time,
             play_range: editor.play_range,
             hover: self.hover,
@@ -326,6 +334,35 @@ impl TimelinePanel {
                     self.begin_key_drag(&editor, anchor, x, cx);
                 }
             }
+            Hit::Notify { index } => {
+                let Some((id, time)) = editor
+                    .read(cx)
+                    .animation_features
+                    .notifies
+                    .get(index)
+                    .map(|n| (n.id.clone(), n.time))
+                else {
+                    return;
+                };
+                editor.update(cx, |e, cx| {
+                    e.select_notify(Some(id.clone()));
+                    e.seek(time, window, cx);
+                });
+                self.drag = DragState::Notify {
+                    id,
+                    grab_dt: self.view.x_to_time(x) - time,
+                    start_x: x,
+                    moved: false,
+                };
+                cx.notify();
+            }
+            Hit::NotifyRow => {
+                let time = self.snapped(&editor.read(cx), self.view.x_to_time(x));
+                editor.update(cx, |e, cx| {
+                    e.add_notify(time);
+                    cx.notify();
+                });
+            }
             Hit::Key { index, .. } => {
                 let Some(bone_id) = bone_for_track else {
                     return;
@@ -403,6 +440,10 @@ impl TimelinePanel {
         cx: &mut Context<Self>,
     ) {
         let (x, y) = self.local(event.position);
+        let snap = self.snap;
+        let Some(editor) = self.editor.upgrade() else {
+            return;
+        };
 
         // The button was released outside the canvas: finish the gesture.
         if !matches!(self.drag, DragState::None) && event.pressed_button.is_none() {
@@ -450,6 +491,33 @@ impl TimelinePanel {
             DragState::Keys { .. } => {
                 self.autoscroll(x);
                 self.drag_keys(x, window, cx);
+            }
+            DragState::Notify {
+                id,
+                grab_dt,
+                start_x,
+                moved,
+            } => {
+                if !*moved && (x - *start_x).abs() < 3.0 {
+                    return;
+                }
+                *moved = true;
+                let id = id.clone();
+                let grab_dt = *grab_dt;
+                self.autoscroll(x);
+                let time = {
+                    let e = editor.read(cx);
+                    let time = (self.view.x_to_time(x) - grab_dt).clamp(0.0, e.animation.duration);
+                    if snap {
+                        e.animation.snap_time(time)
+                    } else {
+                        time
+                    }
+                };
+                editor.update(cx, |e, cx| {
+                    e.set_notify_time(&id, time);
+                    cx.notify();
+                });
             }
             DragState::Scrollbar { .. } => self.drag_scrollbar(x, cx),
         }
@@ -522,6 +590,7 @@ impl TimelinePanel {
                     });
                 }
             }
+            DragState::Notify { .. } => {}
             DragState::Marquee {
                 start,
                 current,
@@ -613,7 +682,14 @@ impl TimelinePanel {
             ("]", false) => editor.update(cx, |e, cx| e.goto_next_keyframe(window, cx)),
             ("k", false) => editor.update(cx, |e, cx| e.insert_keyframe(window, cx)),
             ("delete", false) | ("backspace", false) => {
-                editor.update(cx, |e, cx| e.delete_selected_keyframes(window, cx))
+                if let Some(id) = editor.read(cx).selected_notify.clone() {
+                    editor.update(cx, |e, cx| {
+                        e.delete_notify(&id);
+                        cx.notify();
+                    });
+                } else {
+                    editor.update(cx, |e, cx| e.delete_selected_keyframes(window, cx));
+                }
             }
             ("a", true) => editor.update(cx, |e, cx| e.select_all_keyframes(window, cx)),
             ("c", true) => editor.update(cx, |e, _| e.copy_selected_keyframes()),
@@ -701,6 +777,38 @@ impl TimelinePanel {
                     .text_size(px(10.5))
                     .font_family(MONO)
                     .font_semibold()
+                    .child(label)
+                    .into_any_element(),
+            );
+        }
+
+        if let Some(notify) = editor.selected_notify.as_ref().and_then(|id| {
+            editor
+                .animation_features
+                .notifies
+                .iter()
+                .find(|n| &n.id == id)
+        }) {
+            let label = format!("{}  ·  {:.3}s", notify.name, notify.time);
+            let label_w = (label.chars().count() as f32 * 6.5 + 16.0).min((w - 12.0).max(48.0));
+            out.push(
+                div()
+                    .absolute()
+                    .right(px(6.0))
+                    .top(px(RULER_HEIGHT + SUMMARY_HEIGHT + 3.0))
+                    .w(px(label_w))
+                    .h(px(18.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.0))
+                    .bg(theme.popover)
+                    .border_1()
+                    .border_color(theme.warning)
+                    .text_size(px(10.0))
+                    .font_family(MONO)
+                    .font_semibold()
+                    .text_color(theme.warning)
                     .child(label)
                     .into_any_element(),
             );

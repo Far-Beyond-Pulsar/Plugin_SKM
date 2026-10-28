@@ -1,6 +1,7 @@
 //! Chrome around the timeline canvas: transport toolbar and the status bar (the track gutter is its own
 //! view, see `gutter.rs`). Everything here is stock engine components.
 
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use ui::button::{Button, ButtonVariants};
 use ui::input::NumberInput;
@@ -38,7 +39,7 @@ impl TimelinePanel {
         let Some(editor) = self.editor.upgrade() else {
             return div().into_any_element();
         };
-        let (playing, looping, speed, has_keys, has_bone, can_paste, last_frame) = {
+        let (playing, looping, speed, has_keys, has_bone, can_paste, last_frame, sequence_mode) = {
             let e = editor.read(cx);
             (
                 e.playback.playing,
@@ -48,6 +49,7 @@ impl TimelinePanel {
                 e.selected_bone.is_some(),
                 !e.clipboard.is_empty(),
                 e.animation.last_frame(),
+                e.mode == crate::editor::panel::EditorMode::Sequence,
             )
         };
         let theme = cx.theme().clone();
@@ -202,7 +204,20 @@ impl TimelinePanel {
                     .disabled(!can_paste)
                     .tooltip("Paste keyframes at the playhead (Ctrl+V)")
                     .on_click(self.editor_click(|e, w, cx| e.paste_keyframes(w, cx))),
-            );
+            )
+            .when(sequence_mode, |bar| {
+                bar.child(
+                    Button::new("tl-add-notify")
+                        .icon(IconName::Plus)
+                        .ghost()
+                        .small()
+                        .tooltip("Add notify at the playhead")
+                        .on_click(self.editor_click(|e, _w, cx| {
+                            e.add_notify(e.playback.time);
+                            cx.notify();
+                        })),
+                )
+            });
 
         let view_options = h_flex()
             .gap_0p5()

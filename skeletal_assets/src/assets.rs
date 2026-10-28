@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use super::animation::AnimationClip;
 use super::ids::{AnimSequenceId, SkeletalMeshId, SkeletonId};
+use super::sequence_features::AnimationFeatures;
 use super::skeleton::{Bone, Skeleton};
 
 /// File extension of skeleton assets.
@@ -29,6 +30,8 @@ pub const ANIMSEQ_EXTENSION: &str = "animseq";
 /// Newest format version this build reads and writes. Older files load as is;
 /// newer ones are refused rather than half-read.
 pub const FORMAT_VERSION: u32 = 1;
+/// version 2 protects sequence features; version 3 adds notify targets and fields.
+pub const ANIMSEQ_FORMAT_VERSION: u32 = 3;
 
 fn current_version() -> u32 {
     FORMAT_VERSION
@@ -94,7 +97,7 @@ impl SkeletonAsset {
 }
 
 /// An animation sequence file: the skeleton it animates, by id, plus a clip.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct AnimSeqAsset {
     #[serde(default = "current_version")]
     pub version: u32,
@@ -111,6 +114,50 @@ pub struct AnimSeqAsset {
     pub preview_mesh: Option<SkeletalMeshId>,
     #[serde(flatten)]
     pub clip: AnimationClip,
+    #[serde(flatten)]
+    pub features: AnimationFeatures,
+}
+
+impl Serialize for AnimSeqAsset {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct SequenceRecord<'a> {
+            version: u32,
+            id: &'a AnimSequenceId,
+            skeleton: &'a Option<SkeletonId>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            preview_mesh: Option<&'a SkeletalMeshId>,
+            #[serde(flatten)]
+            clip: &'a AnimationClip,
+            #[serde(flatten)]
+            features: &'a AnimationFeatures,
+        }
+        let version = if self.features.is_empty() {
+            self.version
+        } else {
+            self.version.max(
+                if self
+                    .features
+                    .notifies
+                    .iter()
+                    .any(|n| !n.target.is_self() || !n.fields.is_empty())
+                {
+                    3
+                } else {
+                    2
+                },
+            )
+        };
+        SequenceRecord {
+            version,
+            id: &self.id,
+            skeleton: &self.skeleton,
+            preview_mesh: self.preview_mesh.as_ref(),
+            clip: &self.clip,
+            features: &self.features,
+        }
+        .serialize(serializer)
+    }
 }
 
 impl AnimSeqAsset {
@@ -121,6 +168,7 @@ impl AnimSeqAsset {
             skeleton,
             preview_mesh: None,
             clip,
+            features: AnimationFeatures::default(),
         }
     }
 
@@ -130,7 +178,21 @@ impl AnimSeqAsset {
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
-        parse_versioned(text)
+        let value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        if value
+            .get("version")
+            .and_then(|v| v.as_u64())
+            .is_some_and(|v| v > ANIMSEQ_FORMAT_VERSION as u64)
+        {
+            return Err("Animation sequence format is newer than this editor supports".into());
+        }
+        let mut asset: Self = serde_json::from_value(value).map_err(|e| e.to_string())?;
+        asset.features.validate(asset.clip.duration)?;
+        asset
+            .features
+            .notifies
+            .sort_by(|a, b| a.time.total_cmp(&b.time));
+        Ok(asset)
     }
 
     /// The id stored in `text`, if it has a valid one.
@@ -179,6 +241,10 @@ pub fn load_animseq_asset(path: &Path) -> anyhow::Result<AnimSeqAsset> {
 }
 
 pub fn save_animseq_asset(path: &Path, asset: &AnimSeqAsset) -> anyhow::Result<()> {
+    asset
+        .features
+        .validate(asset.clip.duration)
+        .map_err(anyhow::Error::msg)?;
     write_text(path, &asset.to_text())
 }
 
@@ -355,5 +421,90 @@ mod hierarchy_validation_tests {
         let mut json = serde_json::to_value(&asset).unwrap();
         json["sockets"] = serde_json::json!([{"id":"socket","name":"Weapon","bone_id":"absent","local_transform":Transform::IDENTITY}]);
         assert!(SkeletonAsset::parse(&json.to_string()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod serialization_regressions {
+    use super::*;
+    use crate::{
+        curves::{AnimationCurve, CurveInterpolation, CurveValue},
+        math::Vec3,
+        notifies::AnimationNotify,
+    };
+
+    #[test]
+    fn public_sequence_writers_version_each_feature_and_preserve_flattened_data() {
+        let mut cases = vec![AnimationFeatures::default(); 7];
+        cases[0]
+            .notifies
+            .push(AnimationNotify::new("Step".into(), 0.2));
+        for (index, vector) in [(1, false), (2, true)] {
+            let mut curve = AnimationCurve::new("Channel".into(), vector).unwrap();
+            curve
+                .set_key(
+                    "stable-key".into(),
+                    0.2,
+                    if vector {
+                        CurveValue::Vector(Vec3::ONE)
+                    } else {
+                        CurveValue::Float(3.0)
+                    },
+                    CurveInterpolation::Linear,
+                    1.0,
+                )
+                .unwrap();
+            cases[index].curves.push(curve);
+        }
+        cases[3].root_motion.enabled = true;
+        // disabled settings still carry authored data that an older writer would lose.
+        cases[4].root_motion.source_bone = Some("root".into());
+        cases[5].root_motion.translation = [true, false, true];
+        cases[6].root_motion.rotation = false;
+        for features in cases {
+            let mut asset = AnimSeqAsset::new(
+                None,
+                AnimationClip {
+                    duration: 1.0,
+                    ..AnimationClip::bind_pose()
+                },
+            );
+            asset.features = features;
+            assert_eq!(asset.version, 1);
+            let text = serde_json::to_string(&asset).unwrap();
+            let value = serde_json::to_value(&asset).unwrap();
+            let text_value = serde_json::from_str::<serde_json::Value>(&text).unwrap();
+            // JSON writers encode f32 decimals differently; compare typed round trips below.
+            for record in [&text_value, &value] {
+                assert_eq!(record["version"], 2);
+                assert_eq!(record["name"], asset.clip.name);
+                assert!(record.get("clip").is_none() && record.get("features").is_none());
+                assert!(record.get("preview_mesh").is_none());
+            }
+            // this is the guard used by the original version-1 sequence reader.
+            assert!(parse_versioned::<AnimationClip>(&text)
+                .unwrap_err()
+                .contains("newer"));
+            let direct: AnimSeqAsset = serde_json::from_value(value).unwrap();
+            let parsed = AnimSeqAsset::parse(&text).unwrap();
+            for back in [direct, parsed] {
+                assert_eq!(back.id, asset.id);
+                assert_eq!(back.features, asset.features);
+                assert_eq!(
+                    serde_json::to_value(&back.clip).unwrap(),
+                    serde_json::to_value(&asset.clip).unwrap()
+                );
+            }
+            assert_eq!(asset.version, 1);
+        }
+        let asset = AnimSeqAsset::new(None, AnimationClip::bind_pose());
+        let value = serde_json::to_value(&asset).unwrap();
+        assert_eq!(value["version"], 1);
+        assert!(parse_versioned::<AnimationClip>(&value.to_string()).is_ok());
+        let mut future = asset;
+        future.version = ANIMSEQ_FORMAT_VERSION + 1;
+        future.features.root_motion.enabled = true;
+        let text = serde_json::to_string(&future).unwrap();
+        assert!(AnimSeqAsset::parse(&text).unwrap_err().contains("newer"));
     }
 }
