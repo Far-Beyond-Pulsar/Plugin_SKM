@@ -14,7 +14,7 @@ use super::types::*;
 
 pub const RULER_HEIGHT: f32 = 30.0;
 pub const SUMMARY_HEIGHT: f32 = 26.0;
-pub const NOTIFY_HEIGHT: f32 = 24.0;
+pub const NOTIFY_HEIGHT: f32 = 32.0;
 pub const ROW_HEIGHT: f32 = 26.0;
 /// Ruler plus the pinned summary row; track rows scroll underneath.
 pub const HEADER_HEIGHT: f32 = RULER_HEIGHT + SUMMARY_HEIGHT + NOTIFY_HEIGHT;
@@ -22,7 +22,7 @@ pub const SCROLLBAR_HEIGHT: f32 = 12.0;
 pub const KEY_SIZE: f32 = 12.0;
 pub const SUMMARY_KEY_SIZE: f32 = 10.0;
 pub const KEY_HIT_RADIUS: f32 = 9.0;
-pub const NOTIFY_HIT_RADIUS: f32 = 13.0;
+pub const NOTIFY_HIT_RADIUS: f32 = 16.0;
 pub const BASE_PX_PER_SEC: f32 = 150.0;
 pub const MIN_ZOOM: f32 = 0.05;
 pub const MAX_ZOOM: f32 = 40.0;
@@ -891,11 +891,11 @@ impl<'a> Scene<'a> {
             }
             let selected = self.selected_notify == Some(notify.id.as_str());
             let color = if selected {
-                mix(notify_selected, p.text, 0.18)
+                mix(notify_selected, p.text, 0.24)
             } else {
-                mix(p.success, p.text, 0.28)
+                p.success
             };
-            let marker_size = if selected { 18.0 } else { 15.0 };
+            let marker_size = if selected { 24.0 } else { 20.0 };
             let mut marker = RectInstance::new(
                 [
                     x - marker_size * 0.5,
@@ -906,7 +906,7 @@ impl<'a> Scene<'a> {
             )
             .shape(SHAPE_DIAMOND)
             .radius(1.0)
-            .outline(mix(color, p.background, 0.42), 1.0)
+            .outline(mix(color, p.background, 0.72), 1.5)
             .fixed();
             if selected {
                 marker.glow = 9.0;
@@ -914,9 +914,9 @@ impl<'a> Scene<'a> {
             r.push(marker);
             r.push(
                 RectInstance::new(
-                    [x - if selected { 1.0 } else { 0.5 }, notify_top + 1.0],
-                    [if selected { 2.0 } else { 1.0 }, NOTIFY_HEIGHT - 2.0],
-                    with_alpha(color, if selected { 0.8 } else { 0.58 }),
+                    [x - if selected { 1.5 } else { 1.0 }, notify_top + 1.0],
+                    [if selected { 3.0 } else { 2.0 }, NOTIFY_HEIGHT - 2.0],
+                    with_alpha(color, if selected { 0.95 } else { 0.8 }),
                 )
                 .fixed(),
             );
@@ -1127,6 +1127,11 @@ mod tests {
         let marker_x = scene.view.time_to_x(notifies[0].time);
         let marker_y = RULER_HEIGHT + SUMMARY_HEIGHT + NOTIFY_HEIGHT * 0.5;
         assert_eq!(scene.hit_test(marker_x, marker_y), Hit::Notify { index: 0 });
+        assert_eq!(
+            scene.hit_test(marker_x + NOTIFY_HIT_RADIUS - 1.0, marker_y),
+            Hit::Notify { index: 0 },
+            "notify hit targets include the enlarged marker affordance"
+        );
         assert_eq!(scene.hit_test(700.0, marker_y), Hit::NotifyRow);
     }
 
