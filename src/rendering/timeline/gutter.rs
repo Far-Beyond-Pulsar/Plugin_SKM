@@ -33,6 +33,7 @@ pub struct TimelineGutter {
     panel: Option<WeakEntity<TimelinePanel>>,
     rows: Vec<GutterRow>,
     total_keys: usize,
+    notify_count: usize,
     scroll_y: f32,
     only_selected: bool,
     signature: u64,
@@ -46,6 +47,7 @@ impl TimelineGutter {
             panel: None,
             rows: Vec::new(),
             total_keys: 0,
+            notify_count: 0,
             scroll_y: 0.0,
             only_selected: false,
             signature: 0,
@@ -76,6 +78,8 @@ impl TimelineGutter {
     fn signature_of(&self, e: &SkeletalAnimEditorPanel) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         e.selected_bone.hash(&mut h);
+        e.animation_features.notifies.len().hash(&mut h);
+        e.selected_notify.hash(&mut h);
         self.only_selected.hash(&mut h);
         e.skeleton_revision.hash(&mut h);
         for t in &e.animation.tracks {
@@ -89,6 +93,7 @@ impl TimelineGutter {
     fn capture(&mut self, e: &SkeletalAnimEditorPanel) {
         self.signature = self.signature_of(e);
         self.total_keys = e.animation.key_count();
+        self.notify_count = e.animation_features.notifies.len();
         self.rows = e
             .animation
             .tracks
@@ -195,6 +200,52 @@ impl Render for TimelineGutter {
                     .font_family(MONO)
                     .text_color(theme.muted_foreground)
                     .child(self.total_keys.to_string()),
+            );
+
+        let notify_count = self.notify_count;
+        let editor_add = self.editor.clone();
+        let notifies = h_flex()
+            .h(px(NOTIFY_HEIGHT))
+            .w_full()
+            .flex_shrink_0()
+            .px_2()
+            .gap_2()
+            .items_center()
+            .bg(theme.warning.opacity(0.06))
+            .border_b_1()
+            .border_color(theme.border)
+            .child(
+                Icon::new(IconName::Keyframes)
+                    .size(px(12.0))
+                    .text_color(theme.warning),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(theme.foreground)
+                    .child("Notifies"),
+            )
+            .child(
+                Tag::secondary()
+                    .small()
+                    .rounded_full()
+                    .child(notify_count.to_string()),
+            )
+            .child(
+                Button::new("timeline-add-notify")
+                    .icon(IconName::Plus)
+                    .ghost()
+                    .xsmall()
+                    .tooltip("Add notify at the playhead")
+                    .on_click(move |_, _, cx| {
+                        let editor = editor_add.clone();
+                        let _ = editor.update(cx, |e, cx| {
+                            e.add_notify(e.playback.time);
+                            cx.notify();
+                        });
+                    }),
             );
 
         let mut list = div()
@@ -318,6 +369,7 @@ impl Render for TimelineGutter {
             .border_color(theme.border)
             .child(header)
             .child(summary)
+            .child(notifies)
             .child(
                 div()
                     .id("timeline-gutter-scroll")

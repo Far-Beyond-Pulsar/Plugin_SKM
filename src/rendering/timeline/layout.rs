@@ -8,14 +8,16 @@ use std::collections::HashSet;
 
 use crate::core::{AnimationClip, KeyInterpolation};
 use crate::style::{mix, with_alpha, Palette};
+use skeletal_assets::notifies::AnimationNotify;
 
 use super::types::*;
 
 pub const RULER_HEIGHT: f32 = 30.0;
 pub const SUMMARY_HEIGHT: f32 = 26.0;
+pub const NOTIFY_HEIGHT: f32 = 24.0;
 pub const ROW_HEIGHT: f32 = 26.0;
 /// Ruler plus the pinned summary row; track rows scroll underneath.
-pub const HEADER_HEIGHT: f32 = RULER_HEIGHT + SUMMARY_HEIGHT;
+pub const HEADER_HEIGHT: f32 = RULER_HEIGHT + SUMMARY_HEIGHT + NOTIFY_HEIGHT;
 pub const SCROLLBAR_HEIGHT: f32 = 12.0;
 pub const KEY_SIZE: f32 = 12.0;
 pub const SUMMARY_KEY_SIZE: f32 = 10.0;
@@ -204,6 +206,8 @@ pub enum Hit {
     Key { track: usize, index: usize },
     SummaryKey { time: f32 },
     SummaryRow,
+    Notify { index: usize },
+    NotifyRow,
     Scrollbar,
     Row { track: usize },
     Empty,
@@ -243,6 +247,8 @@ pub struct Scene<'a> {
     pub rows: &'a [usize],
     pub selected_bone: Option<&'a str>,
     pub selected_keys: &'a HashSet<(String, usize)>,
+    pub notifies: &'a [AnimationNotify],
+    pub selected_notify: Option<&'a str>,
     pub time: f32,
     pub play_range: (i32, i32),
     pub hover: Option<HoverTarget>,
@@ -364,6 +370,16 @@ impl<'a> Scene<'a> {
             return Hit::Ruler;
         }
         if y < HEADER_HEIGHT {
+            if y >= RULER_HEIGHT + SUMMARY_HEIGHT {
+                let mut best: Option<(f32, usize)> = None;
+                for (index, notify) in self.notifies.iter().enumerate() {
+                    let dx = (self.view.time_to_x(notify.time) - x).abs();
+                    if dx <= KEY_HIT_RADIUS && best.is_none_or(|(distance, _)| dx < distance) {
+                        best = Some((dx, index));
+                    }
+                }
+                return best.map_or(Hit::NotifyRow, |(_, index)| Hit::Notify { index });
+            }
             let mut best: Option<(f32, f32)> = None;
             for key in self.summary_keys() {
                 let dx = (self.view.time_to_x(key.time) - x).abs();
@@ -847,6 +863,56 @@ impl<'a> Scene<'a> {
             r.push(inst);
         }
 
+        // The pinned notify lane shares the ruler's time scale and remains
+        // visible while bone tracks scroll beneath it.
+        let notify_top = RULER_HEIGHT + SUMMARY_HEIGHT;
+        let notify_selected = p.warning;
+        r.push(
+            RectInstance::new(
+                [0.0, notify_top],
+                [w, NOTIFY_HEIGHT],
+                mix(p.background, p.warning, 0.035),
+            )
+            .fixed(),
+        );
+        r.push(
+            RectInstance::new(
+                [0.0, notify_top + NOTIFY_HEIGHT - 1.0],
+                [w, 1.0],
+                with_alpha(p.border, 0.55),
+            )
+            .fixed(),
+        );
+        for notify in self.notifies {
+            let x = self.view.time_to_x(notify.time);
+            if x < -KEY_SIZE || x > w + KEY_SIZE {
+                continue;
+            }
+            let selected = self.selected_notify == Some(notify.id.as_str());
+            let color = if selected { notify_selected } else { p.success };
+            let mut marker = RectInstance::new(
+                [x - 5.0, notify_top + (NOTIFY_HEIGHT - 11.0) * 0.5],
+                [10.0, 11.0],
+                color,
+            )
+            .shape(SHAPE_DIAMOND)
+            .radius(1.0)
+            .outline(mix(color, p.background, 0.42), 1.0)
+            .fixed();
+            if selected {
+                marker.glow = 4.0;
+            }
+            r.push(marker);
+            r.push(
+                RectInstance::new(
+                    [x - 0.5, notify_top + 2.0],
+                    [1.0, NOTIFY_HEIGHT - 4.0],
+                    with_alpha(color, 0.3),
+                )
+                .fixed(),
+            );
+        }
+
         // ── Drag guide ──
         if let Some(t) = self.drag_guide {
             let gx = self.view.time_to_x(t);
@@ -960,6 +1026,8 @@ mod tests {
             rows,
             selected_bone: None,
             selected_keys: keys,
+            notifies: &[],
+            selected_notify: None,
             time: 0.2,
             play_range: (0, 18),
             hover: None,
@@ -1021,6 +1089,36 @@ mod tests {
             Hit::Row { track: 0 },
             "midway between two keys is just the row"
         );
+    }
+
+    #[test]
+    fn notify_lane_hits_markers_and_empty_space() {
+        let skeleton = sample::humanoid_skeleton();
+        let clip = sample::run_animation(&skeleton);
+        let rows: Vec<usize> = (0..clip.tracks.len()).collect();
+        let keys = HashSet::new();
+        let notifies = vec![AnimationNotify::new("Footstep".into(), 0.5)];
+        let scene = Scene {
+            view: TimelineView::default(),
+            size: (900.0, 320.0),
+            clip: &clip,
+            rows: &rows,
+            selected_bone: None,
+            selected_keys: &keys,
+            notifies: &notifies,
+            selected_notify: Some(notifies[0].id.as_str()),
+            time: 0.0,
+            play_range: (0, 18),
+            hover: None,
+            marquee: None,
+            ruler: RulerMode::Frames,
+            drag_guide: None,
+            palette: Palette::test_dark(),
+        };
+        let marker_x = scene.view.time_to_x(notifies[0].time);
+        let marker_y = RULER_HEIGHT + SUMMARY_HEIGHT + NOTIFY_HEIGHT * 0.5;
+        assert_eq!(scene.hit_test(marker_x, marker_y), Hit::Notify { index: 0 });
+        assert_eq!(scene.hit_test(700.0, marker_y), Hit::NotifyRow);
     }
 
     #[test]
@@ -1122,6 +1220,8 @@ mod render_tests {
             rows: &rows,
             selected_bone: Some(clip.tracks[1].bone_id.as_str()),
             selected_keys: &keys,
+            notifies: &[],
+            selected_notify: None,
             time: 0.27,
             play_range: (1, 16),
             hover: Some(HoverTarget::Key { track: 6, index: 5 }),

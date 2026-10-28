@@ -35,6 +35,9 @@ use crate::core::{
     MeshLibrary, MeshLink, SkeletalMeshId, Skeleton, SkeletonId, SkeletonLink, Transform, Vec3,
 };
 use crate::rendering::{TimelinePanel, ViewportPanel};
+use skeletal_assets::notifies::AnimationNotify;
+use skeletal_assets::notifies::{NotifyField, NotifyTarget, NotifyValue};
+use skeletal_assets::sequence_features::AnimationFeatures;
 
 use super::transform_inputs::{TransformGroup, TransformInputs};
 
@@ -219,6 +222,12 @@ pub struct SkeletalAnimEditorPanel {
     pub(crate) hierarchy_revision: u64,
     /// The sequence being edited; empty in `Skeleton` mode.
     pub animation: AnimationClip,
+    /// Sequence-owned metadata (notifies, curves, and root-motion settings).
+    /// Kept alongside the clip so editing a sequence never drops features the
+    /// timeline does not currently expose.
+    pub animation_features: AnimationFeatures,
+    /// Stable id of the selected notify in the sequence timeline.
+    pub selected_notify: Option<String>,
 
     /// `Skeleton` mode: the edited skeleton's own id.
     pub asset_id: Option<SkeletonId>,
@@ -308,6 +317,7 @@ impl SkeletalAnimEditorPanel {
     /// running animation that refers to it by id. Nothing is on disk.
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (skeleton, sequence) = core::sample::sample_assets();
+        let features = sequence.features.clone();
         let entry = Entry {
             id: skeleton.id.clone(),
             path: PathBuf::new(),
@@ -323,6 +333,7 @@ impl SkeletalAnimEditorPanel {
             window,
             cx,
         );
+        panel.animation_features = features;
         panel.skeleton_ref = Some(entry.id.clone());
         panel.link = SkeletonLink::Resolved(entry);
         panel.refresh_issues();
@@ -430,6 +441,7 @@ impl SkeletalAnimEditorPanel {
             cx,
         );
         panel.animation_id = Some(asset.id.clone());
+        panel.animation_features = asset.features.clone();
         panel.project_root = library::project_root(&path);
         panel.library = Library::empty(panel.project_root.clone());
         panel.link = match &asset.skeleton {
@@ -547,6 +559,8 @@ impl SkeletalAnimEditorPanel {
             skeleton_revision: 0,
             hierarchy_revision: 0,
             animation,
+            animation_features: AnimationFeatures::default(),
+            selected_notify: None,
             asset_id: None,
             animation_id: (mode == EditorMode::Sequence).then(AnimSequenceId::new),
             skeleton_ref: None,
@@ -622,10 +636,209 @@ impl SkeletalAnimEditorPanel {
         }
         plugin_editor_api::undo::lock(&self.hierarchy_history).seal();
         self.selected_socket = None;
+        self.selected_notify = None;
         self.selected_bone = bone_id.filter(|id| self.skeleton.bone(id).is_some());
         self.resync_selected_keyframe();
         self.sync_transform_inputs(window, cx);
         cx.notify();
+    }
+
+    /// Add a notify at the playhead and select it for editing.
+    pub fn add_notify(&mut self, time: f32) -> Option<String> {
+        if self.mode != EditorMode::Sequence {
+            return None;
+        }
+        let time = self
+            .animation
+            .snap_time(time.clamp(0.0, self.animation.duration))
+            .clamp(0.0, self.animation.duration);
+        let notify = AnimationNotify::new("Notify".into(), time);
+        let id = notify.id.clone();
+        self.animation_features.notifies.push(notify);
+        self.animation_features
+            .notifies
+            .sort_by(|a, b| a.time.total_cmp(&b.time));
+        self.selected_notify = Some(id.clone());
+        self.selected_bone = None;
+        self.selected_socket = None;
+        self.selected_keyframe = None;
+        self.selected_keyframes.clear();
+        self.is_dirty = true;
+        Some(id)
+    }
+
+    pub fn select_notify(&mut self, id: Option<String>) {
+        self.selected_notify = id.filter(|id| {
+            self.animation_features
+                .notifies
+                .iter()
+                .any(|notify| &notify.id == id)
+        });
+        if self.selected_notify.is_some() {
+            self.selected_bone = None;
+            self.selected_socket = None;
+            self.selected_keyframe = None;
+            self.selected_keyframes.clear();
+        }
+    }
+
+    pub fn set_notify_name(&mut self, id: &str, name: String) {
+        if let Some(notify) = self
+            .animation_features
+            .notifies
+            .iter_mut()
+            .find(|n| n.id == id)
+        {
+            if notify.name != name {
+                notify.name = name;
+                self.is_dirty = true;
+            }
+        }
+    }
+
+    pub fn set_notify_time(&mut self, id: &str, time: f32) {
+        let time = self
+            .animation
+            .snap_time(time.clamp(0.0, self.animation.duration))
+            .clamp(0.0, self.animation.duration);
+        if let Some(notify) = self
+            .animation_features
+            .notifies
+            .iter_mut()
+            .find(|n| n.id == id)
+        {
+            if (notify.time - time).abs() > f32::EPSILON {
+                notify.time = time;
+                self.is_dirty = true;
+                self.animation_features
+                    .notifies
+                    .sort_by(|a, b| a.time.total_cmp(&b.time));
+            }
+        }
+    }
+
+    pub fn delete_notify(&mut self, id: &str) {
+        let old_len = self.animation_features.notifies.len();
+        self.animation_features
+            .notifies
+            .retain(|notify| notify.id != id);
+        if self.animation_features.notifies.len() != old_len {
+            self.selected_notify = None;
+            self.is_dirty = true;
+        }
+    }
+
+    pub fn toggle_notify_target(&mut self, id: &str) {
+        if let Some(notify) = self
+            .animation_features
+            .notifies
+            .iter_mut()
+            .find(|n| n.id == id)
+        {
+            notify.target = match &notify.target {
+                NotifyTarget::Self_ => NotifyTarget::ClassVariable("Target".into()),
+                NotifyTarget::ClassVariable(_) => NotifyTarget::Self_,
+            };
+            self.is_dirty = true;
+        }
+    }
+
+    pub fn set_notify_target_name(&mut self, id: &str, name: String) {
+        if let Some(notify) = self
+            .animation_features
+            .notifies
+            .iter_mut()
+            .find(|n| n.id == id)
+        {
+            if let NotifyTarget::ClassVariable(current) = &mut notify.target {
+                if *current != name {
+                    *current = name;
+                    self.is_dirty = true;
+                }
+            }
+        }
+    }
+
+    pub fn add_notify_field(&mut self, id: &str) {
+        self.add_notify_field_value(id, NotifyValue::String(String::new()));
+    }
+
+    pub fn add_notify_field_value(&mut self, id: &str, value: NotifyValue) {
+        if let Some(notify) = self
+            .animation_features
+            .notifies
+            .iter_mut()
+            .find(|n| n.id == id)
+        {
+            let mut suffix = 1;
+            let mut name = "payload".to_string();
+            while notify.fields.iter().any(|field| field.name == name) {
+                suffix += 1;
+                name = format!("payload_{suffix}");
+            }
+            notify.fields.push(NotifyField { name, value });
+            self.is_dirty = true;
+        }
+    }
+
+    pub fn delete_notify_field(&mut self, id: &str, index: usize) {
+        if let Some(notify) = self
+            .animation_features
+            .notifies
+            .iter_mut()
+            .find(|n| n.id == id)
+        {
+            if index < notify.fields.len() {
+                notify.fields.remove(index);
+                self.is_dirty = true;
+            }
+        }
+    }
+
+    pub fn set_notify_field_name(&mut self, id: &str, index: usize, name: String) {
+        if let Some(notify) = self
+            .animation_features
+            .notifies
+            .iter_mut()
+            .find(|n| n.id == id)
+        {
+            if index < notify.fields.len()
+                && !notify
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .any(|(i, field)| i != index && field.name == name)
+                && notify.fields[index].name != name
+            {
+                notify.fields[index].name = name;
+                self.is_dirty = true;
+            }
+        }
+    }
+
+    pub fn set_notify_field_value(&mut self, id: &str, index: usize, value: String) {
+        if let Some(notify) = self
+            .animation_features
+            .notifies
+            .iter_mut()
+            .find(|n| n.id == id)
+        {
+            let Some(field) = notify.fields.get_mut(index) else {
+                return;
+            };
+            let parsed = match &field.value {
+                NotifyValue::Bool(_) => value.parse().ok().map(NotifyValue::Bool),
+                NotifyValue::Int(_) => value.parse().ok().map(NotifyValue::Int),
+                NotifyValue::Float(_) => value.parse().ok().map(NotifyValue::Float),
+                NotifyValue::String(_) => Some(NotifyValue::String(value)),
+            };
+            if let Some(parsed) = parsed {
+                if field.value != parsed {
+                    field.value = parsed;
+                    self.is_dirty = true;
+                }
+            }
+        }
     }
 
     /// Select a single keyframe on a bone's track, replacing any existing
@@ -636,6 +849,7 @@ impl SkeletalAnimEditorPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.selected_notify = None;
         self.selected_socket = None;
         self.selected_keyframes.clear();
         if let Some(key) = &keyframe {
@@ -653,6 +867,7 @@ impl SkeletalAnimEditorPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.selected_notify = None;
         self.selected_socket = None;
         if !self.selected_keyframes.remove(&key) {
             self.selected_keyframes.insert(key.clone());
@@ -672,6 +887,7 @@ impl SkeletalAnimEditorPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.selected_notify = None;
         self.selected_socket = None;
         if additive {
             self.selected_keyframes.extend(keys);
@@ -1543,6 +1759,7 @@ impl SkeletalAnimEditorPanel {
                 let mut asset =
                     AnimSeqAsset::new(self.skeleton_ref.clone(), self.animation.clone())
                         .with_preview_mesh(self.preview_mesh_ref.clone());
+                asset.features = self.animation_features.clone();
                 asset.id = self
                     .animation_id
                     .get_or_insert_with(AnimSequenceId::new)

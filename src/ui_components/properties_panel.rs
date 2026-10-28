@@ -1,14 +1,14 @@
 //! Right dock panel: details and transform properties for the selected bone
 //! or keyframe.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use ui::button::{Button, ButtonVariants};
 use ui::dock::PanelEvent;
-use ui::input::{InputState, NumberInput};
+use ui::input::{InputEvent, InputState, NumberInput, TextInput};
 use ui::scroll::ScrollbarAxis;
 use ui::tag::Tag;
 use ui::{h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt};
@@ -17,6 +17,7 @@ use crate::editor::panel::{EditorMode, SkeletalAnimEditorPanel};
 use crate::editor::transform_inputs::TransformGroup;
 use crate::style::{AXIS_X, AXIS_Y, AXIS_Z};
 use crate::ui_components::chrome::{empty_message, panel_header, MONO};
+use skeletal_assets::notifies::{AnimationNotify, NotifyTarget, NotifyValue};
 
 pub struct BonePropertiesPanel {
     editor: WeakEntity<SkeletalAnimEditorPanel>,
@@ -26,6 +27,14 @@ pub struct BonePropertiesPanel {
     /// this: a view that reads an entity while rendering is rebuilt on every
     /// notify of it, and the editor notifies on every playback frame.
     details: Option<Details>,
+    notify: Option<AnimationNotify>,
+    notify_name_input: Option<(String, Entity<InputState>)>,
+    _notify_name_subscription: Option<Subscription>,
+    notify_target_input: Option<(String, Entity<InputState>)>,
+    _notify_target_subscription: Option<Subscription>,
+    notify_field_inputs: HashMap<String, Entity<InputState>>,
+    notify_field_subscriptions: HashMap<String, Subscription>,
+    notify_field_owner: Option<(String, usize)>,
     signature: u64,
     _editor_observer: Option<Subscription>,
 }
@@ -59,6 +68,14 @@ impl BonePropertiesPanel {
             focus_handle: cx.focus_handle(),
             collapsed: HashSet::new(),
             details: None,
+            notify: None,
+            notify_name_input: None,
+            _notify_name_subscription: None,
+            notify_target_input: None,
+            _notify_target_subscription: None,
+            notify_field_inputs: HashMap::new(),
+            notify_field_subscriptions: HashMap::new(),
+            notify_field_owner: None,
             signature: 0,
             _editor_observer: None,
         }
@@ -73,12 +90,14 @@ impl BonePropertiesPanel {
     ) {
         self.signature = Self::signature(state);
         self.details = Self::capture(state);
+        self.notify = Self::capture_notify(state);
         self._editor_observer = Some(cx.observe(editor, |this, editor, cx| {
             let e = editor.read(cx);
             let signature = Self::signature(e);
             if signature != this.signature {
                 this.signature = signature;
                 this.details = Self::capture(e);
+                this.notify = Self::capture_notify(e);
                 cx.notify();
             }
         }));
@@ -91,6 +110,16 @@ impl BonePropertiesPanel {
         e.selected_bone.hash(&mut h);
         e.selected_socket.hash(&mut h);
         e.selected_keyframe.hash(&mut h);
+        e.selected_notify.hash(&mut h);
+        if let Some(notify) = e
+            .selected_notify
+            .as_ref()
+            .and_then(|id| e.animation_features.notifies.iter().find(|n| &n.id == id))
+        {
+            notify.name.hash(&mut h);
+            notify.time.to_bits().hash(&mut h);
+            format!("{:?}{:?}", notify.target, notify.fields).hash(&mut h);
+        }
         e.playback.playing.hash(&mut h);
         e.skeleton_revision.hash(&mut h);
         e.transform_editable().hash(&mut h);
@@ -107,6 +136,15 @@ impl BonePropertiesPanel {
             }
         }
         h.finish()
+    }
+
+    fn capture_notify(e: &SkeletalAnimEditorPanel) -> Option<AnimationNotify> {
+        let id = e.selected_notify.as_ref()?;
+        e.animation_features
+            .notifies
+            .iter()
+            .find(|notify| &notify.id == id)
+            .cloned()
     }
 
     fn capture(e: &SkeletalAnimEditorPanel) -> Option<Details> {
@@ -616,11 +654,76 @@ impl ui::dock::Panel for BonePropertiesPanel {
 }
 
 impl Render for BonePropertiesPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let details = self.details.as_ref();
+        if let Some(notify) = self.notify.as_ref() {
+            if self
+                .notify_name_input
+                .as_ref()
+                .is_none_or(|(id, _)| id != &notify.id)
+            {
+                let input =
+                    cx.new(|cx| InputState::new(window, cx).default_value(notify.name.clone()));
+                let editor = self.editor.clone();
+                let id = notify.id.clone();
+                self._notify_name_subscription = Some(cx.subscribe_in(
+                    &input,
+                    window,
+                    move |_this, input, event: &InputEvent, _window, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            let name = input.read(cx).value().to_string();
+                            if let Some(editor) = editor.upgrade() {
+                                editor.update(cx, |e, cx| {
+                                    e.set_notify_name(&id, name);
+                                    cx.notify();
+                                });
+                            }
+                        }
+                    },
+                ));
+                self.notify_name_input = Some((notify.id.clone(), input));
+            }
+            if let NotifyTarget::ClassVariable(target) = &notify.target {
+                if self
+                    .notify_target_input
+                    .as_ref()
+                    .is_none_or(|(id, _)| id != &notify.id)
+                {
+                    let input =
+                        cx.new(|cx| InputState::new(window, cx).default_value(target.clone()));
+                    let editor = self.editor.clone();
+                    let id = notify.id.clone();
+                    self._notify_target_subscription = Some(cx.subscribe_in(
+                        &input,
+                        window,
+                        move |_this, input, event: &InputEvent, _window, cx| {
+                            if matches!(event, InputEvent::Change) {
+                                let target = input.read(cx).value().to_string();
+                                if let Some(editor) = editor.upgrade() {
+                                    editor.update(cx, |e, cx| {
+                                        e.set_notify_target_name(&id, target);
+                                        cx.notify();
+                                    });
+                                }
+                            }
+                        },
+                    ));
+                    self.notify_target_input = Some((notify.id.clone(), input));
+                }
+            } else {
+                self.notify_target_input = None;
+                self._notify_target_subscription = None;
+            }
+        } else {
+            self.notify_name_input = None;
+            self._notify_name_subscription = None;
+            self.notify_target_input = None;
+            self._notify_target_subscription = None;
+        }
 
         let badge = match &details {
+            _ if self.notify.is_some() => Some(Tag::warning().small().child("Notify")),
             Some(d) if d.socket => Some(Tag::info().small().child("Socket")),
             Some(d) if d.selected_key.is_some() => Some(Tag::warning().small().child("Keyframe")),
             Some(_) => Some(Tag::info().small().child("Bone")),
@@ -633,87 +736,95 @@ impl Render for BonePropertiesPanel {
             cx,
         );
 
-        let body: AnyElement = match details {
-            None => div()
-                .flex_1()
-                .min_h_0()
-                .child(empty_message(
-                    IconName::Component,
-                    "Nothing selected",
-                    "Pick a bone in the hierarchy or click a joint in the viewport",
-                    cx,
-                ))
-                .into_any_element(),
-            Some(d) => v_flex()
-                .id("properties-scroll")
-                .flex_1()
-                .min_h_0()
+        let notify_snapshot = self.notify.clone();
+        let body: AnyElement = if let Some(notify) = notify_snapshot.as_ref() {
+            self.render_notify_card(notify, window, cx)
+                .id("notify-properties-scroll")
                 .scrollable(ScrollbarAxis::Vertical)
-                .child(self.render_bone_card(d, cx))
-                .when(d.sequence, |col| col.child(self.render_key_card(d, cx)))
-                .when(d.locked, |col| {
-                    col.child(
-                        h_flex()
-                            .w_full()
-                            .mx_3()
-                            .mt_2()
-                            .px_2()
-                            .py_1p5()
-                            .gap_1p5()
-                            .items_center()
-                            .rounded(px(6.0))
-                            .bg(theme.warning.opacity(0.10))
-                            .border_1()
-                            .border_color(theme.warning.opacity(0.35))
-                            .child(
-                                Icon::new(IconName::Info)
-                                    .size(px(13.0))
-                                    .text_color(theme.warning),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .text_xs()
-                                    .text_color(theme.foreground.opacity(0.9))
-                                    .child(if d.socket {
-                                        "Open the skeleton asset to edit this socket."
-                                    } else {
-                                        "Add a key at the playhead to edit this pose."
-                                    }),
-                            ),
-                    )
-                })
-                .child(self.render_section(
-                    TransformGroup::Translation,
-                    "Translation",
-                    IconName::Home,
-                    "m",
-                    &d.translation,
-                    d.locked,
-                    cx,
-                ))
-                .child(self.render_section(
-                    TransformGroup::Rotation,
-                    "Rotation",
-                    IconName::RotateCameraLeft,
-                    "°",
-                    &d.rotation,
-                    d.locked,
-                    cx,
-                ))
-                .child(self.render_section(
-                    TransformGroup::Scale,
-                    "Scale",
-                    IconName::Expand,
-                    "×",
-                    &d.scale,
-                    d.locked,
-                    cx,
-                ))
-                .when_some(d.world, |col, world| {
-                    col.child(self.render_world(world, cx))
-                })
-                .into_any_element(),
+                .into_any_element()
+        } else {
+            match details {
+                None => div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(empty_message(
+                        IconName::Component,
+                        "Nothing selected",
+                        "Pick a bone in the hierarchy or click a joint in the viewport",
+                        cx,
+                    ))
+                    .into_any_element(),
+                Some(d) => v_flex()
+                    .id("properties-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .scrollable(ScrollbarAxis::Vertical)
+                    .child(self.render_bone_card(d, cx))
+                    .when(d.sequence, |col| col.child(self.render_key_card(d, cx)))
+                    .when(d.locked, |col| {
+                        col.child(
+                            h_flex()
+                                .w_full()
+                                .mx_3()
+                                .mt_2()
+                                .px_2()
+                                .py_1p5()
+                                .gap_1p5()
+                                .items_center()
+                                .rounded(px(6.0))
+                                .bg(theme.warning.opacity(0.10))
+                                .border_1()
+                                .border_color(theme.warning.opacity(0.35))
+                                .child(
+                                    Icon::new(IconName::Info)
+                                        .size(px(13.0))
+                                        .text_color(theme.warning),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .text_xs()
+                                        .text_color(theme.foreground.opacity(0.9))
+                                        .child(if d.socket {
+                                            "Open the skeleton asset to edit this socket."
+                                        } else {
+                                            "Add a key at the playhead to edit this pose."
+                                        }),
+                                ),
+                        )
+                    })
+                    .child(self.render_section(
+                        TransformGroup::Translation,
+                        "Translation",
+                        IconName::Home,
+                        "m",
+                        &d.translation,
+                        d.locked,
+                        cx,
+                    ))
+                    .child(self.render_section(
+                        TransformGroup::Rotation,
+                        "Rotation",
+                        IconName::RotateCameraLeft,
+                        "°",
+                        &d.rotation,
+                        d.locked,
+                        cx,
+                    ))
+                    .child(self.render_section(
+                        TransformGroup::Scale,
+                        "Scale",
+                        IconName::Expand,
+                        "×",
+                        &d.scale,
+                        d.locked,
+                        cx,
+                    ))
+                    .when_some(d.world, |col, world| {
+                        col.child(self.render_world(world, cx))
+                    })
+                    .into_any_element(),
+            }
         };
 
         v_flex()
@@ -722,6 +833,291 @@ impl Render for BonePropertiesPanel {
             .child(header)
             .child(body)
             .into_any_element()
+    }
+}
+
+impl BonePropertiesPanel {
+    fn render_notify_card(
+        &mut self,
+        notify: &AnimationNotify,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = cx.theme().clone();
+        let field_owner = (notify.id.clone(), notify.fields.len());
+        if self.notify_field_owner.as_ref() != Some(&field_owner) {
+            self.notify_field_inputs.clear();
+            self.notify_field_subscriptions.clear();
+            self.notify_field_owner = Some(field_owner);
+        }
+        let Some((input_id, input)) = self
+            .notify_name_input
+            .as_ref()
+            .filter(|(id, _)| id == &notify.id)
+        else {
+            return v_flex().flex_1().child("Preparing notify details");
+        };
+        let _ = input_id;
+        let input = input.clone();
+        let id = notify.id.clone();
+        let editor_toggle = self.editor.clone();
+        let id_toggle = id.clone();
+        let editor_delete = self.editor.clone();
+        let id_delete = id.clone();
+        let editor_for_add = self.editor.clone();
+        let id_for_add = id.clone();
+        let add_field_button =
+            move |button_id: &'static str, label: &'static str, value: NotifyValue| {
+                let editor = editor_for_add.clone();
+                let id = id_for_add.clone();
+                Button::new(button_id)
+                    .label(label)
+                    .ghost()
+                    .xsmall()
+                    .on_click(move |_, _, cx| {
+                        let id = id.clone();
+                        let value = value.clone();
+                        let _ = editor.update(cx, |e, cx| {
+                            e.add_notify_field_value(&id, value);
+                            cx.notify();
+                        });
+                    })
+            };
+        let target = match &notify.target {
+            NotifyTarget::Self_ => "Self".to_string(),
+            NotifyTarget::ClassVariable(_) => "Class variable".to_string(),
+        };
+        let target_editor = self
+            .notify_target_input
+            .as_ref()
+            .filter(|(target_id, _)| target_id == &notify.id)
+            .map(|(_, input)| input.clone());
+        let mut fields = v_flex().w_full().gap_1();
+        for (index, field) in notify.fields.iter().enumerate() {
+            let kind = match &field.value {
+                NotifyValue::Bool(_) => "bool",
+                NotifyValue::Int(_) => "int",
+                NotifyValue::Float(_) => "float",
+                NotifyValue::String(_) => "string",
+            };
+            let value = match &field.value {
+                NotifyValue::Bool(value) => value.to_string(),
+                NotifyValue::Int(value) => value.to_string(),
+                NotifyValue::Float(value) => value.to_string(),
+                NotifyValue::String(value) => value.clone(),
+            };
+            let name_input =
+                self.notify_field_input(&notify.id, index, false, field.name.clone(), window, cx);
+            let value_input = self.notify_field_input(&notify.id, index, true, value, window, cx);
+            let editor_remove = self.editor.clone();
+            let id_remove = id.clone();
+            fields = fields.child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .items_center()
+                    .child(Tag::secondary().small().child(kind))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(TextInput::new(&name_input).small()),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(TextInput::new(&value_input).small()),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("notify-field-remove-{index}")))
+                            .label("Remove")
+                            .ghost()
+                            .xsmall()
+                            .on_click(move |_, _, cx| {
+                                let id = id_remove.clone();
+                                let _ = editor_remove.update(cx, |e, cx| {
+                                    e.delete_notify_field(&id, index);
+                                    cx.notify();
+                                });
+                            }),
+                    ),
+            );
+        }
+        v_flex()
+            .w_full()
+            .flex_1()
+            .min_h_0()
+            .gap_3()
+            .p_3()
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("Event name"),
+                    )
+                    .child(TextInput::new(&input).small()),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("Time"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_family(MONO)
+                            .text_color(theme.foreground)
+                            .child(format!("{:.3}s", notify.time)),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("Drag its marker in the Notifies lane to move it."),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("Target"),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                Button::new("notify-target-toggle")
+                                    .label(target)
+                                    .ghost()
+                                    .small()
+                                    .tooltip("Toggle between Self and a class variable target")
+                                    .on_click(move |_, _, cx| {
+                                        let id = id_toggle.clone();
+                                        let _ = editor_toggle.update(cx, |e, cx| {
+                                            e.toggle_notify_target(&id);
+                                            cx.notify();
+                                        });
+                                    }),
+                            )
+                            .when_some(target_editor, |row, input| {
+                                row.child(div().flex_1().child(TextInput::new(&input).small()))
+                            }),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(theme.foreground)
+                                    .child("Event fields"),
+                            )
+                            .child(add_field_button(
+                                "notify-field-add-string",
+                                "+str",
+                                NotifyValue::String(String::new()),
+                            ))
+                            .child(add_field_button(
+                                "notify-field-add-bool",
+                                "+bool",
+                                NotifyValue::Bool(false),
+                            ))
+                            .child(add_field_button(
+                                "notify-field-add-int",
+                                "+int",
+                                NotifyValue::Int(0),
+                            ))
+                            .child(add_field_button(
+                                "notify-field-add-float",
+                                "+float",
+                                NotifyValue::Float(0.0),
+                            )),
+                    )
+                    .child(fields),
+            )
+            .child(
+                div()
+                    .mt_2()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(
+                    "These values are serialized with the sequence and sent with the notify event.",
+                ),
+            )
+            .child(
+                Button::new("notify-delete")
+                    .label("Delete notify")
+                    .ghost()
+                    .small()
+                    .on_click(move |_, _, cx| {
+                        let id = id_delete.clone();
+                        let _ = editor_delete.update(cx, |e, cx| {
+                            e.delete_notify(&id);
+                            cx.notify();
+                        });
+                    }),
+            )
+    }
+
+    fn notify_field_input(
+        &mut self,
+        notify_id: &str,
+        index: usize,
+        is_value: bool,
+        initial: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<InputState> {
+        let key = format!(
+            "{notify_id}:{index}:{}",
+            if is_value { "value" } else { "name" }
+        );
+        if let Some(input) = self.notify_field_inputs.get(&key) {
+            return input.clone();
+        }
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
+        let editor = self.editor.clone();
+        let id = notify_id.to_string();
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            move |_this, input, event: &InputEvent, _window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let value = input.read(cx).value().to_string();
+                    if let Some(editor) = editor.upgrade() {
+                        editor.update(cx, |e, cx| {
+                            if is_value {
+                                e.set_notify_field_value(&id, index, value);
+                            } else {
+                                e.set_notify_field_name(&id, index, value);
+                            }
+                            cx.notify();
+                        });
+                    }
+                }
+            },
+        );
+        self.notify_field_inputs.insert(key.clone(), input.clone());
+        self.notify_field_subscriptions.insert(key, subscription);
+        input
     }
 }
 
