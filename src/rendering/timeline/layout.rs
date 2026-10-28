@@ -22,6 +22,7 @@ pub const SCROLLBAR_HEIGHT: f32 = 12.0;
 pub const KEY_SIZE: f32 = 12.0;
 pub const SUMMARY_KEY_SIZE: f32 = 10.0;
 pub const KEY_HIT_RADIUS: f32 = 9.0;
+pub const NOTIFY_HIT_RADIUS: f32 = 13.0;
 pub const BASE_PX_PER_SEC: f32 = 150.0;
 pub const MIN_ZOOM: f32 = 0.05;
 pub const MAX_ZOOM: f32 = 40.0;
@@ -374,7 +375,7 @@ impl<'a> Scene<'a> {
                 let mut best: Option<(f32, usize)> = None;
                 for (index, notify) in self.notifies.iter().enumerate() {
                     let dx = (self.view.time_to_x(notify.time) - x).abs();
-                    if dx <= KEY_HIT_RADIUS && best.is_none_or(|(distance, _)| dx < distance) {
+                    if dx <= NOTIFY_HIT_RADIUS && best.is_none_or(|(distance, _)| dx < distance) {
                         best = Some((dx, index));
                     }
                 }
@@ -889,10 +890,18 @@ impl<'a> Scene<'a> {
                 continue;
             }
             let selected = self.selected_notify == Some(notify.id.as_str());
-            let color = if selected { notify_selected } else { p.success };
+            let color = if selected {
+                mix(notify_selected, p.text, 0.18)
+            } else {
+                mix(p.success, p.text, 0.28)
+            };
+            let marker_size = if selected { 18.0 } else { 15.0 };
             let mut marker = RectInstance::new(
-                [x - 5.0, notify_top + (NOTIFY_HEIGHT - 11.0) * 0.5],
-                [10.0, 11.0],
+                [
+                    x - marker_size * 0.5,
+                    notify_top + (NOTIFY_HEIGHT - marker_size) * 0.5,
+                ],
+                [marker_size, marker_size],
                 color,
             )
             .shape(SHAPE_DIAMOND)
@@ -900,14 +909,14 @@ impl<'a> Scene<'a> {
             .outline(mix(color, p.background, 0.42), 1.0)
             .fixed();
             if selected {
-                marker.glow = 4.0;
+                marker.glow = 9.0;
             }
             r.push(marker);
             r.push(
                 RectInstance::new(
-                    [x - 0.5, notify_top + 2.0],
-                    [1.0, NOTIFY_HEIGHT - 4.0],
-                    with_alpha(color, 0.3),
+                    [x - if selected { 1.0 } else { 0.5 }, notify_top + 1.0],
+                    [if selected { 2.0 } else { 1.0 }, NOTIFY_HEIGHT - 2.0],
+                    with_alpha(color, if selected { 0.8 } else { 0.58 }),
                 )
                 .fixed(),
             );

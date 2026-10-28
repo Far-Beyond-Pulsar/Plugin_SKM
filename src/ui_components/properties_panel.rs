@@ -30,6 +30,8 @@ pub struct BonePropertiesPanel {
     notify: Option<AnimationNotify>,
     notify_name_input: Option<(String, Entity<InputState>)>,
     _notify_name_subscription: Option<Subscription>,
+    notify_time_input: Option<(String, Entity<InputState>)>,
+    _notify_time_subscription: Option<Subscription>,
     notify_target_input: Option<(String, Entity<InputState>)>,
     _notify_target_subscription: Option<Subscription>,
     notify_field_inputs: HashMap<String, Entity<InputState>>,
@@ -71,6 +73,8 @@ impl BonePropertiesPanel {
             notify: None,
             notify_name_input: None,
             _notify_name_subscription: None,
+            notify_time_input: None,
+            _notify_time_subscription: None,
             notify_target_input: None,
             _notify_target_subscription: None,
             notify_field_inputs: HashMap::new(),
@@ -684,6 +688,53 @@ impl Render for BonePropertiesPanel {
                 ));
                 self.notify_name_input = Some((notify.id.clone(), input));
             }
+            if self
+                .notify_time_input
+                .as_ref()
+                .is_none_or(|(id, _)| id != &notify.id)
+            {
+                let input = cx.new(|cx| {
+                    InputState::new(window, cx).default_value(format!("{:.3}", notify.time))
+                });
+                let editor = self.editor.clone();
+                let id = notify.id.clone();
+                self._notify_time_subscription = Some(cx.subscribe_in(
+                    &input,
+                    window,
+                    move |_this, input, event: &InputEvent, window, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            let value = input.read(cx).value().trim().parse::<f32>();
+                            if let (Ok(time), Some(editor)) = (value, editor.upgrade()) {
+                                if time.is_finite() {
+                                    editor.update(cx, |e, cx| {
+                                        e.set_notify_time(&id, time);
+                                        if let Some(snapped) = e
+                                            .animation_features
+                                            .notifies
+                                            .iter()
+                                            .find(|notify| notify.id == id)
+                                            .map(|notify| notify.time)
+                                        {
+                                            e.seek(snapped, window, cx);
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    },
+                ));
+                self.notify_time_input = Some((notify.id.clone(), input));
+            }
+            if let Some((id, input)) = self.notify_time_input.as_ref() {
+                if id == &notify.id && !input.read(cx).focus_handle(cx).is_focused(window) {
+                    let displayed = input.read(cx).value().trim().parse::<f32>().ok();
+                    if displayed.is_none_or(|time| (time - notify.time).abs() > 0.0005) {
+                        input.update(cx, |input, cx| {
+                            input.set_value(format!("{:.3}", notify.time), window, cx)
+                        });
+                    }
+                }
+            }
             if let NotifyTarget::ClassVariable(target) = &notify.target {
                 if self
                     .notify_target_input
@@ -718,6 +769,8 @@ impl Render for BonePropertiesPanel {
         } else {
             self.notify_name_input = None;
             self._notify_name_subscription = None;
+            self.notify_time_input = None;
+            self._notify_time_subscription = None;
             self.notify_target_input = None;
             self._notify_target_subscription = None;
         }
@@ -892,6 +945,11 @@ impl BonePropertiesPanel {
             .as_ref()
             .filter(|(target_id, _)| target_id == &notify.id)
             .map(|(_, input)| input.clone());
+        let time_input = self
+            .notify_time_input
+            .as_ref()
+            .filter(|(time_id, _)| time_id == &notify.id)
+            .map(|(_, input)| input.clone());
         let mut fields = v_flex().w_full().gap_1();
         for (index, field) in notify.fields.iter().enumerate() {
             let kind = match &field.value {
@@ -970,13 +1028,18 @@ impl BonePropertiesPanel {
                             .text_color(theme.muted_foreground)
                             .child("Time"),
                     )
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_family(MONO)
-                            .text_color(theme.foreground)
-                            .child(format!("{:.3}s", notify.time)),
-                    )
+                    .when_some(time_input, |col, input| {
+                        col.child(
+                            NumberInput::new(&input).small().suffix(
+                                div()
+                                    .pr_1()
+                                    .text_xs()
+                                    .font_family(MONO)
+                                    .text_color(theme.muted_foreground)
+                                    .child("s"),
+                            ),
+                        )
+                    })
                     .child(
                         div()
                             .text_xs()

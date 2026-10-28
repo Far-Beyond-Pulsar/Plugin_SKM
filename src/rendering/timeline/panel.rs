@@ -65,6 +65,9 @@ pub(super) enum DragState {
     },
     Notify {
         id: String,
+        grab_dt: f32,
+        start_x: f32,
+        moved: bool,
     },
     Scrollbar {
         grab: f32,
@@ -332,20 +335,25 @@ impl TimelinePanel {
                 }
             }
             Hit::Notify { index } => {
-                let Some(id) = editor
+                let Some((id, time)) = editor
                     .read(cx)
                     .animation_features
                     .notifies
                     .get(index)
-                    .map(|n| n.id.clone())
+                    .map(|n| (n.id.clone(), n.time))
                 else {
                     return;
                 };
                 editor.update(cx, |e, cx| {
                     e.select_notify(Some(id.clone()));
-                    cx.notify();
+                    e.seek(time, window, cx);
                 });
-                self.drag = DragState::Notify { id };
+                self.drag = DragState::Notify {
+                    id,
+                    grab_dt: self.view.x_to_time(x) - time,
+                    start_x: x,
+                    moved: false,
+                };
                 cx.notify();
             }
             Hit::NotifyRow => {
@@ -484,12 +492,22 @@ impl TimelinePanel {
                 self.autoscroll(x);
                 self.drag_keys(x, window, cx);
             }
-            DragState::Notify { id } => {
+            DragState::Notify {
+                id,
+                grab_dt,
+                start_x,
+                moved,
+            } => {
+                if !*moved && (x - *start_x).abs() < 3.0 {
+                    return;
+                }
+                *moved = true;
                 let id = id.clone();
+                let grab_dt = *grab_dt;
                 self.autoscroll(x);
                 let time = {
                     let e = editor.read(cx);
-                    let time = self.view.x_to_time(x).clamp(0.0, e.animation.duration);
+                    let time = (self.view.x_to_time(x) - grab_dt).clamp(0.0, e.animation.duration);
                     if snap {
                         e.animation.snap_time(time)
                     } else {
@@ -759,6 +777,38 @@ impl TimelinePanel {
                     .text_size(px(10.5))
                     .font_family(MONO)
                     .font_semibold()
+                    .child(label)
+                    .into_any_element(),
+            );
+        }
+
+        if let Some(notify) = editor.selected_notify.as_ref().and_then(|id| {
+            editor
+                .animation_features
+                .notifies
+                .iter()
+                .find(|n| &n.id == id)
+        }) {
+            let label = format!("{}  ·  {:.3}s", notify.name, notify.time);
+            let label_w = (label.chars().count() as f32 * 6.5 + 16.0).min((w - 12.0).max(48.0));
+            out.push(
+                div()
+                    .absolute()
+                    .right(px(6.0))
+                    .top(px(RULER_HEIGHT + SUMMARY_HEIGHT + 3.0))
+                    .w(px(label_w))
+                    .h(px(18.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.0))
+                    .bg(theme.popover)
+                    .border_1()
+                    .border_color(theme.warning)
+                    .text_size(px(10.0))
+                    .font_family(MONO)
+                    .font_semibold()
+                    .text_color(theme.warning)
                     .child(label)
                     .into_any_element(),
             );
