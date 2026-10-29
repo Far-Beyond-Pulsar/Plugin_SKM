@@ -1052,3 +1052,40 @@ fn sequence_notifies_and_states_are_edited_selected_and_saved(cx: &mut TestAppCo
     let saved = assets::load_animseq_asset(&path).unwrap().features;
     assert!(saved.notifies.is_empty() && saved.notify_states.is_empty());
 }
+
+#[gpui::test]
+fn phase5_sequence_notify_and_state_survive_edit_save_and_reopen(cx: &mut TestAppContext) {
+    use skeletal_assets::notifies::NotifyValue;
+    cx.update(ui::init);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("Pulsar.toml"), "").unwrap();
+    let (skeleton, sequence) = sample::sample_assets();
+    assets::save_skeleton_asset(&dir.path().join("rig.skeleton"), &skeleton).unwrap();
+    let path = dir.path().join("walk.animseq");
+    assets::save_animseq_asset(&path, &sequence).unwrap();
+
+    let (editor, cx) = editor_window(cx, |window, cx| SkeletalAnimEditorPanel::new_with_path(path.clone(), window, cx).unwrap());
+    let (notify, state) = editor.update(cx, |e, _| {
+        assert_eq!(e.mode, EditorMode::Sequence);
+        let n = e.add_notify(0.2).unwrap();
+        let s = e.add_notify_state(0.3).unwrap();
+        e.set_notify_name(&n, "Footstep".into());
+        e.set_notify_name(&s, "Window".into());
+        e.add_notify_field_value(&s, NotifyValue::Int(7));
+        e.save().unwrap();
+        (n, s)
+    });
+    let ids_before = editor.read_with(cx, |e, _| (e.animation_features.notifies[0].id.clone(), e.animation_features.notify_states[0].id.clone()));
+    assert_eq!(ids_before, (notify, state));
+    drop(editor);
+
+    // a fresh editor on the same file shows the same notify and state with the same ids and payload
+    let (reopened, cx) = editor_window(cx, |window, cx| SkeletalAnimEditorPanel::new_with_path(path.clone(), window, cx).unwrap());
+    reopened.read_with(cx, |e, _| {
+        assert_eq!((e.animation_features.notifies[0].id.clone(), e.animation_features.notify_states[0].id.clone()), ids_before);
+        assert_eq!(e.animation_features.notifies[0].name, "Footstep");
+        let s = &e.animation_features.notify_states[0];
+        assert_eq!((s.name.as_str(), s.fields[0].value.clone()), ("Window", NotifyValue::Int(7)));
+        assert!(!e.is_dirty);
+    });
+}
