@@ -41,6 +41,19 @@ impl AnimationAssetEditorKind {
         Self::PoseDb,
     ];
 
+    /// The kind whose extension names `path`, if any.
+    pub fn for_path(path: &std::path::Path) -> Option<Self> {
+        let ext = path.extension()?.to_str()?;
+        Self::for_extension(&ext)
+    }
+
+    /// The kind for a file extension (without the dot), case-insensitive.
+    pub fn for_extension(ext: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.extension().eq_ignore_ascii_case(&ext))
+    }
+
     pub fn editor_id(self) -> &'static str {
         match self {
             Self::BlendSpace => "blend-space-editor",

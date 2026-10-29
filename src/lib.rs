@@ -288,13 +288,35 @@ impl EditorPluginSubsystems for SkeletalAnimationPlugin {
 impl SkeletalAnimationPlugin {
     /// Open `file_path` in a new editor panel (for hosts that link this crate).
     /// A `.skeleton` opens the Skeleton editor, an `.animseq` or an old
-    /// `.skelanim` folder the Animation Sequence editor.
+    /// `.skelanim` folder the Animation Sequence editor, and every higher-level
+    /// animation asset (blend space, montage, animation graph, retarget
+    /// profile, IK rig, IK retargeter, pose database) its own editor.
     pub fn create_editor(
         file_path: PathBuf,
         window: &mut Window,
         cx: &mut App,
     ) -> Result<Arc<dyn PanelView>, PluginError> {
         Self::create_editor_with_undo(file_path, None, window, cx)
+    }
+
+    /// Open the editor named `editor_id` for `file_path` (the built-in
+    /// registration path resolves the id from the file type first). Each
+    /// higher-level animation asset has its own editor id; the older editors
+    /// share the one panel.
+    pub fn create_editor_for(
+        editor_id: &str,
+        file_path: PathBuf,
+        undo: Option<&UndoService>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<Arc<dyn PanelView>, PluginError> {
+        let kind = anim_editors::kinds::AnimationAssetEditorKind::ALL
+            .into_iter()
+            .find(|kind| kind.editor_id() == editor_id);
+        match kind {
+            Some(kind) => kind.open(file_path, undo, window, cx),
+            None => Self::create_editor_with_undo(file_path, undo, window, cx),
+        }
     }
 
     /// open an editor with the host's per-document undo service.
@@ -304,6 +326,13 @@ impl SkeletalAnimationPlugin {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<Arc<dyn PanelView>, PluginError> {
+        // The new animation assets have purpose-built editors, shared with the
+        // DLL registration; the panel below only knows the older three files.
+        if let Some(kind) =
+            anim_editors::kinds::AnimationAssetEditorKind::for_path(&file_path)
+        {
+            return kind.open(file_path, undo, window, cx);
+        }
         let mut load_error = None;
         let panel = cx.new(|cx| {
             SkeletalAnimEditorPanel::new_with_path(file_path.clone(), window, cx).unwrap_or_else(
