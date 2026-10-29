@@ -27,5 +27,6 @@ pub mod retarget_model;
 pub mod retarget_preview;
 pub mod refs;
 pub mod selection;
+pub mod skin_preview;
 pub mod skeleton_proj;
 pub mod store;

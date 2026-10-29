@@ -19,7 +19,9 @@ use ui::{h_flex, v_flex, ActiveTheme, Icon, IconName, Selectable, Sizable, Style
 
 use crate::anim_editors::blend_space_model::{BlendSpaceModel, PlotTransform};
 use crate::anim_editors::refs::{self, RefStatus, SnapshotIndex};
+use crate::anim_editors::graph_preview::ProjectAssets;
 use crate::anim_editors::selection::AnimSelection;
+use crate::anim_editors::skin_preview::{BlendSpacePreview, OverlaySource};
 use crate::anim_editors::store::FsStore;
 use crate::core::asset_index;
 
@@ -40,6 +42,13 @@ pub struct BlendSpaceEditor {
     statuses: HashMap<String, RefStatus>,
     /// Sample names for the list and plot labels, by sequence id.
     names: HashMap<String, String>,
+    /// The skinned preview: the rig and the last frame.
+    skin: super::skin_pane::SkinPane,
+    /// The space on a transient runtime instance, with the document generation it was built from.
+    preview: Option<(u64, Result<BlendSpacePreview, String>)>,
+    /// The preview clock runs (the poses animate under the probe point).
+    playing: bool,
+    frame: u64,
 }
 
 impl BlendSpaceEditor {
@@ -48,7 +57,7 @@ impl BlendSpaceEditor {
         let model = BlendSpaceModel::open(Arc::new(FsStore), &path, &text).map_err(|message| PluginError::Other { message })?;
         let chrome = Chrome::new(&path, cx);
         asset_index::record_asset(&chrome.root, &path);
-        let mut this = Self { model, chrome, widgets: Widgets::default(), plot_bounds: Rc::new(Cell::new(Bounds::default())), drag: None, scrubbing: false, statuses: HashMap::new(), names: HashMap::new() };
+        let mut this = Self { model, chrome, widgets: Widgets::default(), plot_bounds: Rc::new(Cell::new(Bounds::default())), drag: None, scrubbing: false, statuses: HashMap::new(), names: HashMap::new(), skin: super::skin_pane::SkinPane::default(), preview: None, playing: false, frame: 0 };
         this.refresh_refs();
         Ok(cx.new(|_| this))
     }
@@ -464,6 +473,77 @@ impl EditorBody for BlendSpaceEditor {
     }
 
     fn inspector(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let preview = self.skin_section(cx);
+        let inner = self.selection_inspector(window, cx);
+        v_flex().w_full().gap_2().child(preview).child(inner).into_any_element()
+    }
+}
+
+impl BlendSpaceEditor {
+    /// Run or pause the preview clock; while it runs the poses animate.
+    fn toggle_play(&mut self, cx: &mut Context<Self>) {
+        self.playing = !self.playing;
+        if self.playing {
+            let weak = cx.weak_entity();
+            cx.spawn(async move |_, cx| {
+                loop {
+                    smol::Timer::after(std::time::Duration::from_millis(33)).await;
+                    let keep = weak.update(cx, |this, cx| {
+                        if !this.playing {
+                            return false;
+                        }
+                        if let Some((_, Ok(preview))) = &mut this.preview {
+                            preview.advance(0.033);
+                            this.frame += 1;
+                        }
+                        cx.notify();
+                        true
+                    });
+                    if !matches!(keep, Ok(true)) {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+        cx.notify();
+    }
+
+    /// The skinned preview at the probe point, driven by the runtime.
+    fn skin_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let root = self.chrome.root.clone();
+        let skeleton = self.model.asset().skeleton.as_ref().map(|s| s.as_str().to_string());
+        let mut problem = self.skin.rig(&root, skeleton.as_deref()).err();
+        let generation = self.model.generation();
+        if problem.is_none() && self.preview.as_ref().is_none_or(|(g, _)| *g != generation) {
+            let assets = ProjectAssets::new(&root);
+            let source = OverlaySource { base: &assets, blend_space: Some(Arc::new(self.model.asset().clone())), montage: None };
+            let built = match self.skin.rig(&root, skeleton.as_deref()) {
+                Ok(rig) => BlendSpacePreview::build(self.model.asset(), rig, &source).map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default()),
+                Err(e) => Err(e),
+            };
+            self.preview = Some((generation, built));
+        }
+        let input = self.model.preview().clamped_input;
+        if problem.is_none() {
+            let palette = crate::style::Palette::from_theme(cx.theme());
+            match &mut self.preview {
+                Some((_, Ok(preview))) => {
+                    preview.set_input(input.0, input.1);
+                    let pose = preview.pose();
+                    let key = generation.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(input.0.to_bits()) ^ (u64::from(input.1.to_bits()) << 21) ^ self.frame.wrapping_mul(0xA24B_AED4_963E_E407);
+                    self.skin.draw(&pose, key, &palette);
+                }
+                Some((_, Err(e))) => problem = Some(e.clone()),
+                None => {}
+            }
+        }
+        let label = if self.playing { "Pause" } else { "Play" };
+        let toggle = Button::new("blend-space-preview-play").label(label).ghost().xsmall().on_click(cx.listener(|this, _, _, cx| this.toggle_play(cx))).into_any_element();
+        section("Skinned preview (runtime, no events)", vec![toggle, self.skin.element(problem.as_deref(), cx)], cx)
+    }
+
+    fn selection_inspector(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         let selection = self.model.selection.clone();
         let root = self.chrome.root.clone();

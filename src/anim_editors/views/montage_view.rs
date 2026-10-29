@@ -22,7 +22,9 @@ use ui::{h_flex, v_flex, ActiveTheme, Icon, IconName, Selectable, Sizable, Style
 use crate::anim_editors::montage_model::MontageModel;
 use crate::anim_editors::notify_edit::{LaneMetrics, NotifyKind};
 use crate::anim_editors::refs::{self, ProjectRefIndex, RefStatus, SnapshotIndex};
+use crate::anim_editors::graph_preview::ProjectAssets;
 use crate::anim_editors::selection::AnimSelection;
+use crate::anim_editors::skin_preview::{MontagePreview, OverlaySource};
 use crate::anim_editors::store::FsStore;
 use crate::core::asset_index;
 
@@ -60,6 +62,10 @@ pub struct MontageEditor {
     names: HashMap<String, String>,
     /// Notify markers the playhead crossed during playback, for a brief flash.
     flash: Vec<(String, f32)>,
+    /// The skinned preview: the rig and the last frame.
+    skin: super::skin_pane::SkinPane,
+    /// The Montage on a transient runtime instance, with the document generation it was built from.
+    preview: Option<(u64, Result<MontagePreview, String>)>,
 }
 
 pub fn sequence_duration(root: &std::path::Path, id: &str) -> Option<f32> {
@@ -86,6 +92,8 @@ impl MontageEditor {
             statuses: HashMap::new(),
             names: HashMap::new(),
             flash: Vec::new(),
+            skin: super::skin_pane::SkinPane::default(),
+            preview: None,
         };
         this.refresh_refs();
         Ok(cx.new(|_| this))
@@ -994,6 +1002,44 @@ impl EditorBody for MontageEditor {
     }
 
     fn inspector(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let preview = self.skin_section(cx);
+        let inner = self.selection_inspector(window, cx);
+        v_flex().w_full().gap_2().child(preview).child(inner).into_any_element()
+    }
+}
+
+impl MontageEditor {
+    /// The skinned preview at the playhead, driven by the runtime.
+    fn skin_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let root = self.chrome.root.clone();
+        let skeleton = self.model.asset().skeleton.as_ref().map(|s| s.as_str().to_string());
+        let mut problem = self.skin.rig(&root, skeleton.as_deref()).err();
+        let generation = self.model.generation();
+        if problem.is_none() && self.preview.as_ref().is_none_or(|(g, _)| *g != generation) {
+            let assets = ProjectAssets::new(&root);
+            let source = OverlaySource { base: &assets, blend_space: None, montage: Some(Arc::new(self.model.asset().clone())) };
+            let built = match self.skin.rig(&root, skeleton.as_deref()) {
+                Ok(rig) => MontagePreview::build(self.model.asset(), rig, &source).map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default()),
+                Err(e) => Err(e),
+            };
+            self.preview = Some((generation, built));
+        }
+        if problem.is_none() {
+            let palette = crate::style::Palette::from_theme(cx.theme());
+            match &mut self.preview {
+                Some((_, Ok(preview))) => {
+                    let pose = preview.pose_at(self.time);
+                    let key = generation.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(self.time.to_bits());
+                    self.skin.draw(&pose, key, &palette);
+                }
+                Some((_, Err(e))) => problem = Some(e.clone()),
+                None => {}
+            }
+        }
+        section("Skinned preview (runtime, no events)", vec![self.skin.element(problem.as_deref(), cx)], cx)
+    }
+
+    fn selection_inspector(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         match self.model.selection.clone() {
             AnimSelection::MontageSegment { track, id } => self.segment_inspector(&track, &id, window, cx),
             AnimSelection::MontageSlot { track } => self.slot_inspector(&track, window, cx),

@@ -54,6 +54,9 @@ pub struct SceneInput<'a> {
     pub physics: Option<&'a SkeletalPhysicsAsset>,
     /// Renderer-owned transform handle geometry for the selected skeleton item.
     pub transform_gizmo: Option<(Vec3, TransformGizmoMode)>,
+    /// World matrices per bone id to pose with instead of sampling `clip`: a
+    /// pose computed elsewhere (the animation runtime) shown on the same mesh.
+    pub world_override: Option<&'a HashMap<String, Mat4>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,7 +212,14 @@ pub fn build_scene(input: &SceneInput) -> SceneGeometry {
     let skeleton = input.skeleton;
     let mut geo = SceneGeometry::default();
 
-    let world = evaluate_world_transforms(skeleton, input.clip, input.time);
+    let sampled;
+    let world = match input.world_override {
+        Some(world) => world,
+        None => {
+            sampled = evaluate_world_transforms(skeleton, input.clip, input.time);
+            &sampled
+        }
+    };
     let position = |id: &str| world.get(id).map(|m| m.transform_point(Vec3::ZERO));
 
     if input.view.physics {
@@ -1096,6 +1106,7 @@ mod tests {
             physics: None,
             sockets: None,
             transform_gizmo: None,
+            world_override: None,
         }
     }
 
@@ -1277,6 +1288,7 @@ mod socket_geometry_tests {
             physics: None,
             sockets: Some((&sockets, Some("weapon"))),
             transform_gizmo: None,
+            world_override: None,
         };
         let with_socket = build_scene(&input);
         let without = build_scene(&SceneInput {
