@@ -485,6 +485,45 @@ impl MontageModel {
         self.asset().section_walk(from).into_iter().filter_map(|id| self.asset().sections.iter().find(|s| s.id == id).map(|s| s.name.clone())).collect()
     }
 
+    /// Trim one edge of a segment on the timeline. Dragging the left edge to
+    /// `time` moves the segment start and the clip start together, so the
+    /// remaining frames stay where they are; the right edge moves the clip end.
+    pub fn trim_edge(&mut self, segment: &str, left: bool, time: f32) -> Result<(), String> {
+        let (t, s) = self.locate_segment(segment).ok_or("no such segment")?;
+        let seg = self.asset().tracks[t].segments[s].clone();
+        let duration = seg.sequence.as_ref().and_then(|q| self.duration_of(q));
+        let (start, end) = self.segment_span(&seg);
+        let min = 0.02;
+        if seg.loop_count != 1 {
+            return Err("a looping segment is trimmed by its loop count; set loops to 1 first".into());
+        }
+        if left {
+            let time = time.clamp(0.0, end - min);
+            let clip_start = (seg.clip_start + (time - start) * seg.play_rate).max(0.0);
+            if duration.is_some_and(|d| clip_start >= d) {
+                return Err("the trim starts after the clip ends".into());
+            }
+            self.doc.edit("Trim segment", Some(&format!("trimedge:{segment}:l")), |a| {
+                let g = &mut a.tracks[t].segments[s];
+                g.start = time;
+                g.clip_start = clip_start;
+                (true, ())
+            });
+        } else {
+            let time = time.max(start + min);
+            let clip_end = seg.clip_start + (time - start) * seg.play_rate;
+            let clip_end = match duration {
+                Some(d) if clip_end >= d => None,
+                _ => Some(clip_end),
+            };
+            self.doc.edit("Trim segment", Some(&format!("trimedge:{segment}:r")), |a| {
+                a.tracks[t].segments[s].clip_end = clip_end;
+                (true, ())
+            });
+        }
+        Ok(())
+    }
+
     // ---- blend, policy ---------------------------------------------------
 
     pub fn set_blend(&mut self, blend_in: bool, duration: f32, curve: BlendCurve) -> Result<(), String> {
@@ -565,7 +604,7 @@ impl MontageModel {
     // ---- notifies ---------------------------------------------------------
 
     /// Run a notify command inside one undo step; selection follows `id`.
-    fn notify_edit<R>(&mut self, label: &str, key: Option<&str>, f: impl FnOnce(&mut NotifyView<'_>, f32) -> (bool, R)) -> R {
+    pub fn notify_edit<R>(&mut self, label: &str, key: Option<&str>, f: impl FnOnce(&mut NotifyView<'_>, f32) -> (bool, R)) -> R {
         let limit = self.timeline_limit();
         self.doc.edit(label, key, |a| {
             let mut view = NotifyView { notifies: &mut a.notifies, states: &mut a.notify_states, schemas: &mut a.notify_schemas };
@@ -778,6 +817,25 @@ mod tests {
         let s = m.move_segment(&s2, 0.5, None, false);
         assert!(s);
         assert_eq!(m.asset().tracks[0].segments[1].start, 0.5);
+    }
+
+    #[test]
+    fn trimming_an_edge_keeps_the_remaining_frames_in_place() {
+        let (mut m, _) = model();
+        let t = m.add_track("UpperBody", "DefaultGroup").unwrap();
+        let a = seq(&mut m, 2.0);
+        let s = m.add_segment(&t, Some(a)).unwrap();
+        m.move_segment(&s, 1.0, None, false);
+        m.trim_edge(&s, true, 1.5).unwrap();
+        let g = m.asset().tracks[0].segments[0].clone();
+        assert_eq!((g.start, g.clip_start), (1.5, 0.5), "clip frame 0.5 still plays at 1.5 s");
+        m.trim_edge(&s, false, 2.5).unwrap();
+        assert_eq!(m.asset().tracks[0].segments[0].clip_end, Some(1.5));
+        m.trim_edge(&s, false, 9.0).unwrap();
+        assert_eq!(m.asset().tracks[0].segments[0].clip_end, None, "dragging past the clip end means the clip end");
+        assert!(m.trim_edge(&s, true, 99.0).is_ok(), "clamped below the end edge");
+        m.set_segment_loops(&s, 2).unwrap();
+        assert!(m.trim_edge(&s, true, 1.0).is_err(), "looping segments are trimmed by loops");
     }
 
     #[test]

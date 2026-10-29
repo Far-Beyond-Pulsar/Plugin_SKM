@@ -48,6 +48,7 @@ pub trait EditorModel {
     fn generation(&self) -> u64;
     fn validation(&self) -> Vec<Diagnostic>;
     fn selection(&self) -> &AnimSelection;
+    fn clear_selection(&mut self);
 }
 
 /// Implements [`EditorModel`] for a model with `doc` and `selection` fields
@@ -112,6 +113,9 @@ macro_rules! editor_model {
             }
             fn selection(&self) -> &$crate::anim_editors::selection::AnimSelection {
                 &self.selection
+            }
+            fn clear_selection(&mut self) {
+                self.selection = $crate::anim_editors::selection::AnimSelection::None;
             }
         }
     };

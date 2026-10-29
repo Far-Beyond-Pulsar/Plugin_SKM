@@ -4,4 +4,6 @@
 
 pub mod chrome;
 pub mod blend_space_view;
+pub mod montage_view;
+pub mod notify_inspector;
 pub mod paint;
