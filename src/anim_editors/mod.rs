@@ -13,7 +13,9 @@
 //! selection the inspector renders), [`store::DocStore`] and
 //! [`history::History`].
 
+pub mod blend_space_model;
 pub mod document;
 pub mod history;
+pub mod refs;
 pub mod selection;
 pub mod store;
