@@ -11,11 +11,10 @@
 //! Shared pieces: [`document::AnimDocument`] (typed value, undo/redo, dirty,
 //! conflict-checked atomic save), [`selection::AnimSelection`] (the typed
 //! selection the inspector renders), [`store::DocStore`] and
-//! [`history::History`].
+//! the host undo history (`plugin_editor_api::undo`).
 
 pub mod blend_space_model;
 pub mod document;
-pub mod history;
 pub mod ik_rig_model;
 pub mod montage_model;
 pub mod notify_edit;

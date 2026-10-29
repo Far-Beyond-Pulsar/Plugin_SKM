@@ -20,11 +20,11 @@ use skeletal_assets::montage::AnimationMontageAsset;
 use skeletal_assets::pose_db::PoseDbAsset;
 use skeletal_assets::retarget::RetargetProfileAsset;
 
-use super::history::History;
+use plugin_editor_api::undo::{lock, History, SharedHistory, UndoEntry};
 use super::store::DocStore;
 
 /// What every animation asset kind offers the editor.
-pub trait AnimAsset: Clone {
+pub trait AnimAsset: Clone + Send + 'static {
     /// `AssetKind::KIND` of the asset, as recorded in the file index.
     const KIND: &'static str;
     /// Parse and migrate. The flag is true when an id had to be assigned and
@@ -34,6 +34,24 @@ pub trait AnimAsset: Clone {
     fn asset_id(&self) -> String;
     fn asset_name(&self) -> String;
     fn set_asset_name(&mut self, name: String);
+}
+
+/// One undoable change: the document on the other side of it. Edits that share
+/// a key and are not separated by [AnimDocument::end_gesture] are one step.
+pub struct AnimEdit<A> {
+    other: A,
+    label: String,
+    key: Option<String>,
+}
+
+impl<A: Send + 'static> UndoEntry for AnimEdit<A> {
+    fn label(&self) -> String {
+        self.label.clone()
+    }
+    /// The earliest entry of a run keeps the state before the whole run.
+    fn merge(&mut self, next: &Self) -> bool {
+        self.key.is_some() && self.key == next.key
+    }
 }
 
 /// FNV-1a: stable across runs, which a revision stamp should be.
@@ -56,7 +74,7 @@ pub enum SaveOutcome {
 pub struct AnimDocument<A: AnimAsset> {
     path: PathBuf,
     value: A,
-    history: History<A>,
+    history: SharedHistory<AnimEdit<A>>,
     store: Arc<dyn DocStore>,
     /// Hash of the bytes last read or written; `None` for a file that does not
     /// exist yet.
@@ -78,7 +96,7 @@ impl<A: AnimAsset> AnimDocument<A> {
         let mut doc = Self {
             path: path.to_path_buf(),
             value,
-            history: History::default(),
+            history: SharedHistory::default(),
             store,
             base_hash: if is_new { None } else { Some(content_hash(&bytes)) },
             generation: 0,
@@ -99,19 +117,25 @@ impl<A: AnimAsset> AnimDocument<A> {
         self.generation
     }
     pub fn is_dirty(&self) -> bool {
-        self.history.is_dirty()
+        lock(&self.history).is_dirty()
     }
     pub fn can_undo(&self) -> bool {
-        self.history.can_undo()
+        lock(&self.history).can_undo()
     }
     pub fn can_redo(&self) -> bool {
-        self.history.can_redo()
+        lock(&self.history).can_redo()
     }
-    pub fn undo_label(&self) -> Option<&str> {
-        self.history.undo_label()
+    pub fn undo_label(&self) -> Option<String> {
+        lock(&self.history).undo_label()
     }
-    pub fn redo_label(&self) -> Option<&str> {
-        self.history.redo_label()
+    pub fn redo_label(&self) -> Option<String> {
+        lock(&self.history).redo_label()
+    }
+
+    /// The history the host registers under this document's id so the Edit
+    /// menu and Undo/Redo keys reach it.
+    pub fn history(&self) -> SharedHistory<AnimEdit<A>> {
+        self.history.clone()
     }
 
     /// Apply an edit. `change` returns whether it changed anything plus a
@@ -121,7 +145,7 @@ impl<A: AnimAsset> AnimDocument<A> {
         let before = self.value.clone();
         let (changed, result) = change(&mut self.value);
         if changed {
-            self.history.push(label, key, &before);
+            lock(&self.history).push(AnimEdit { other: before, label: label.to_string(), key: key.map(str::to_string) });
             self.generation += 1;
         } else {
             self.value = before;
@@ -139,36 +163,40 @@ impl<A: AnimAsset> AnimDocument<A> {
 
     /// The mouse or key driving a keyed edit was released.
     pub fn end_gesture(&mut self) {
-        self.history.seal();
+        lock(&self.history).seal();
     }
 
     pub fn undo(&mut self) -> bool {
-        match self.history.undo(&self.value) {
-            Some(state) => {
-                self.value = state;
-                self.generation += 1;
-                true
-            }
-            None => false,
+        let history = self.history.clone();
+        let value = &mut self.value;
+        let done = lock(&history).undo(|edit| {
+            std::mem::swap(value, &mut edit.other);
+            true
+        });
+        if done.is_some() {
+            self.generation += 1;
         }
+        done.is_some()
     }
 
     pub fn redo(&mut self) -> bool {
-        match self.history.redo(&self.value) {
-            Some(state) => {
-                self.value = state;
-                self.generation += 1;
-                true
-            }
-            None => false,
+        let history = self.history.clone();
+        let value = &mut self.value;
+        let done = lock(&history).redo(|edit| {
+            std::mem::swap(value, &mut edit.other);
+            true
+        });
+        if done.is_some() {
+            self.generation += 1;
         }
+        done.is_some()
     }
 
     fn write_current(&mut self) -> anyhow::Result<()> {
         let text = self.value.to_text()?;
         self.store.write_atomic(&self.path, text.as_bytes())?;
         self.base_hash = Some(content_hash(text.as_bytes()));
-        self.history.mark_saved();
+        lock(&self.history).mark_saved();
         Ok(())
     }
 
@@ -205,7 +233,11 @@ impl<A: AnimAsset> AnimDocument<A> {
         let (value, _) = A::parse_text(&text)?;
         self.value = value;
         self.base_hash = Some(content_hash(&bytes));
-        self.history.reset();
+        {
+            let mut history = lock(&self.history);
+            history.clear();
+            history.mark_saved();
+        }
         self.generation += 1;
         Ok(())
     }
@@ -296,6 +328,44 @@ mod tests {
         let reopened = open(&store);
         assert_eq!(reopened.value().name, "Locomotion");
         assert_eq!(reopened.value().asset_id(), doc.value().asset_id());
+    }
+
+    #[test]
+    fn keyed_edits_are_one_undo_step_until_the_gesture_ends() {
+        let store = MemStore::default();
+        let mut doc = open(&store);
+        for i in 1..=4 {
+            doc.edit("drag", Some("drag"), |a| {
+                a.name = format!("v{i}");
+                (true, ())
+            });
+        }
+        doc.end_gesture();
+        doc.edit("drag", Some("drag"), |a| {
+            a.name = "after".into();
+            (true, ())
+        });
+        assert!(doc.undo());
+        assert_eq!(doc.value().name, "v4", "the sealed gesture is a separate step");
+        assert!(doc.undo());
+        assert_eq!(doc.value().name, "New Blend Space", "four drags undo at once");
+        assert!(!doc.can_undo() && doc.can_redo());
+    }
+
+    #[test]
+    fn the_host_undo_service_can_adopt_the_documents_history() {
+        use plugin_editor_api::undo::{DocumentId, UndoService};
+        let store = MemStore::default();
+        let mut doc = open(&store);
+        let service = UndoService::new();
+        let id = DocumentId::for_path(doc.path());
+        assert!(service.adopt(&id, &doc.history()));
+        doc.apply("rename", |a| a.name = "X".into());
+        let view = service.view(&id).expect("registered");
+        assert!(view.can_undo() && view.is_dirty());
+        assert_eq!(view.undo_label().as_deref(), Some("rename"));
+        doc.save().unwrap();
+        assert!(!view.is_dirty(), "a save is visible to the host");
     }
 
     #[test]
