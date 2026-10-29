@@ -13,9 +13,11 @@
 //! selection the inspector renders), [`store::DocStore`] and
 //! the host undo history (`plugin_editor_api::undo`).
 
+pub mod anim_graph_model;
 pub mod blend_space_model;
 pub mod views;
 pub mod document;
+pub mod graph_preview;
 pub mod ik_rig_model;
 pub mod montage_model;
 pub mod notify_edit;

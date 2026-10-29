@@ -38,6 +38,10 @@ pub enum Value {
 }
 
 impl Value {
+    /// A vector value from plain numbers.
+    pub fn vector(v: [f32; 3]) -> Self {
+        Self::Vector(Vec3::from_array(v))
+    }
     pub fn as_f32(&self) -> f32 {
         match self {
             Self::Float(v) => *v,

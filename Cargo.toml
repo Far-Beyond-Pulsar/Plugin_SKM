@@ -24,6 +24,12 @@ engine_fs         = { workspace = true }
 pulsar_reflection = { workspace = true }
 pulsar_physics = { workspace = true }
 
+# The animation graph editor draws and edits on the shared Graphy canvas.
+graphy-blueprint = { workspace = true }
+graphy = { workspace = true }
+graphy-render = { path = "../../../crates/third-party/graphy/crates/graphy-render" }
+graphy-gpui = { path = "../../../crates/third-party/graphy/crates/graphy-gpui", features = ["gpui"] }
+
 uuid       = { workspace = true }
 smol       = { workspace = true }
 log        = { workspace = true }
