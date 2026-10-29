@@ -3,6 +3,8 @@
 //! state of its own.
 
 pub mod chrome;
+pub mod anim_graph_canvas;
+pub mod anim_graph_view;
 pub mod blend_space_view;
 pub mod ik_rig_view;
 pub mod montage_view;
