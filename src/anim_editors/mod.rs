@@ -21,6 +21,7 @@ pub mod montage_model;
 pub mod notify_edit;
 pub mod pose_db_model;
 pub mod retarget_model;
+pub mod retarget_preview;
 pub mod refs;
 pub mod selection;
 pub mod skeleton_proj;

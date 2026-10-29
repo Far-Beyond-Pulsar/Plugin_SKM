@@ -52,6 +52,18 @@ impl SkeletonProjection {
         Self { bones, min, max }
     }
 
+    /// The same bones posed by `local` (a runtime pose). The fitting box is the
+    /// bind pose's, so an animation does not rescale the view.
+    pub fn with_pose(&self, runtime: &RuntimeSkeleton, local: &[skeletal_assets::runtime::pose::BoneTransform]) -> Self {
+        let mesh = runtime.to_mesh_space(local);
+        let mut out = self.clone();
+        for (bone, m) in out.bones.iter_mut().zip(mesh) {
+            let p = m.w_axis;
+            bone.position = [p.x, p.y, p.z];
+        }
+        out
+    }
+
     pub fn is_empty(&self) -> bool {
         self.bones.is_empty()
     }
@@ -86,12 +98,12 @@ impl SkeletonProjection {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::ik_rig_model::tests::skeleton;
     use super::*;
     use skeletal_assets::math::{Transform, Vec3};
 
-    fn leg() -> Skeleton {
+    pub fn leg() -> Skeleton {
         let mut s = skeleton();
         // pelvis up 1, thigh down 0.5, shin down 0.5, foot down 0.4; spine up 0.5
         for (id, t) in [("pelvis", [0.0, 1.0, 0.0]), ("thigh", [0.1, -0.1, 0.0]), ("shin", [0.0, -0.5, 0.0]), ("foot", [0.0, -0.4, 0.0]), ("spine", [0.0, 0.8, 0.0])] {
