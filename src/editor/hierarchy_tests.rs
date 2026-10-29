@@ -996,3 +996,59 @@ fn workspace_shortcuts_route_document_history_and_leave_text_undo_in_the_field(
         asset.bones.len() + 1
     );
 }
+
+#[gpui::test]
+fn sequence_notifies_and_states_are_edited_selected_and_saved(cx: &mut TestAppContext) {
+    use skeletal_assets::notifies::NotifyValue;
+    cx.update(ui::init);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("Pulsar.toml"), "").unwrap();
+    let path = dir.path().join("walk.animseq");
+    let (editor, cx) = editor_window(cx, SkeletalAnimEditorPanel::new);
+    editor.update(cx, |e, _| {
+        e.mode = EditorMode::Sequence;
+        e.current_asset_path = Some(path.clone());
+    });
+
+    let (notify, state) = editor.update(cx, |e, _| {
+        let n = e.add_notify(0.2).unwrap();
+        let s = e.add_notify_state(0.3).unwrap();
+        (n, s)
+    });
+    editor.read_with(cx, |e, _| {
+        assert_eq!(e.selected_notify.as_deref(), Some(state.as_str()), "a new state is selected");
+        assert_eq!(e.animation_features.notify_states.len(), 1);
+    });
+    editor.update(cx, |e, _| {
+        e.select_notify(Some(notify.clone()));
+        assert_eq!(e.selected_notify.as_deref(), Some(notify.as_str()));
+        e.select_notify(Some("missing".into()));
+        assert!(e.selected_notify.is_none(), "unknown ids deselect");
+        e.set_notify_name(&state, "Trail".into());
+        e.set_notify_time(&state, 0.2);
+        e.resize_notify_state(&state, None, Some(0.5));
+        e.set_notify_state_tick(&state, Some(0.05)).unwrap();
+        assert!(e.set_notify_state_tick(&state, Some(-1.0)).is_err());
+        e.set_notify_state_disabled(&state, true);
+        e.add_notify_field_value(&state, NotifyValue::Float(0.5));
+        e.set_notify_field_value(&state, 0, "0.75".into());
+    });
+    editor.update(cx, |e, _| e.save().unwrap());
+
+    let saved = assets::load_animseq_asset(&path).unwrap().features;
+    assert_eq!(saved.notifies.len(), 1);
+    let s = &saved.notify_states[0];
+    assert_eq!((s.name.as_str(), s.disabled, s.tick_interval), ("Trail", true, Some(0.05)));
+    assert!((s.start - 0.2).abs() < 0.05 && (s.end - 0.5).abs() < 0.05, "{s:?}");
+    assert_eq!(s.fields[0].value, NotifyValue::Float(0.75));
+    editor.read_with(cx, |e, _| assert!(!e.is_dirty, "saving clears dirty"));
+
+    // delete both; ids are gone and stay gone after saving again
+    editor.update(cx, |e, _| {
+        e.delete_notify(&state);
+        e.delete_notify(&notify);
+        e.save().unwrap();
+    });
+    let saved = assets::load_animseq_asset(&path).unwrap().features;
+    assert!(saved.notifies.is_empty() && saved.notify_states.is_empty());
+}
