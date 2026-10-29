@@ -153,12 +153,14 @@ pub struct Pose {
     pub bones: Vec<BoneTransform>,
     pub curves: Curves,
     pub root_motion: RootMotion,
+    /// The part of `root_motion` that came from Montages playing in `Montage` root-motion mode.
+    pub montage_root_motion: RootMotion,
     pub kind: PoseKind,
 }
 
 impl Pose {
     pub fn from_bones(bones: Vec<BoneTransform>) -> Self {
-        Self { bones, curves: Curves::new(), root_motion: RootMotion::IDENTITY, kind: PoseKind::Full }
+        Self { bones, curves: Curves::new(), root_motion: RootMotion::IDENTITY, montage_root_motion: RootMotion::IDENTITY, kind: PoseKind::Full }
     }
 
     pub fn blend(&self, other: &Self, w: f32) -> Self {
@@ -167,6 +169,7 @@ impl Pose {
             bones: self.bones.iter().zip(&other.bones).map(|(a, b)| a.blend(b, w)).collect(),
             curves: blend_curves(&self.curves, &other.curves, w),
             root_motion: self.root_motion.blend(&other.root_motion, w),
+            montage_root_motion: self.montage_root_motion.blend(&other.montage_root_motion, w),
             kind: self.kind,
         }
     }
@@ -383,6 +386,7 @@ pub fn make_additive(skel: &RuntimeSkeleton, source: &Pose, reference: &Pose, me
         bones,
         curves,
         root_motion: RootMotion::IDENTITY,
+        montage_root_motion: RootMotion::IDENTITY,
         kind: if mesh_space { PoseKind::AdditiveMesh } else { PoseKind::AdditiveLocal },
     }
 }
@@ -426,7 +430,7 @@ pub fn apply_additive(skel: &RuntimeSkeleton, base: &Pose, additive: &Pose, alph
             })
             .collect(),
     };
-    Pose { bones, curves, root_motion: base.root_motion, kind: PoseKind::Full }
+    Pose { bones, curves, root_motion: base.root_motion, montage_root_motion: base.montage_root_motion, kind: PoseKind::Full }
 }
 
 #[cfg(test)]

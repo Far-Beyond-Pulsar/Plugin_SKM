@@ -16,3 +16,5 @@ pub mod montage;
 pub mod graph;
 pub mod memory;
 pub mod anim_instance;
+pub mod playback;
+pub mod rootmotion;

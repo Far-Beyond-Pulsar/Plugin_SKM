@@ -360,7 +360,7 @@ impl GraphInstance {
         let dt = env.dt;
         match &node.kind {
             NodeKind::SequencePlayer(cfg) => {
-                let rate = self.in_f32(env, n, 0, cfg.rate).max(0.0);
+                let rate = self.in_f32(env, n, 0, cfg.rate);
                 let start = self.in_f32(env, n, 1, cfg.start).max(0.0);
                 let tick = self.tick;
                 let uid = self.uid;
@@ -374,16 +374,17 @@ impl GraphInstance {
                 st.weight = w;
                 st.prev = st.position;
                 let dur = cfg.clip.duration;
-                if let Some(sync) = &cfg.sync {
+                if let Some(sync) = cfg.sync.as_ref().filter(|_| rate >= 0.0) {
+                    // a negative rate plays the clip backwards and leaves its sync group
                     st.synced = true;
                     env.sync.register(SyncMember { key: (uid, n), group: sync.group.clone(), role: sync.role, weight: w, duration: dur / rate.max(1e-6), rate: rate, position: st.position, looping: cfg.looping });
                 } else {
                     st.synced = false;
                     st.position += dt as f64 * rate as f64;
                     if !cfg.looping {
-                        st.position = st.position.min(dur as f64);
+                        st.position = st.position.clamp(0.0, dur as f64);
                     }
-                    record_span(env, cfg.clip.clone(), st.prev, st.position, cfg.looping, w, SpanOrigin::SequencePlayer { node: node.id.clone() });
+                    record_span(env, uid, cfg.clip.clone(), st.prev, st.position, cfg.looping, w, SpanOrigin::SequencePlayer { node: node.id.clone() });
                 }
             }
             NodeKind::BlendSpacePlayer(cfg) => {
@@ -411,7 +412,7 @@ impl GraphInstance {
                 st.prev_clocks.clone_from(&st.clocks);
                 st.prev_phase = st.phase;
                 let sp = &cfg.space;
-                let rate = cfg.rate.max(0.0);
+                let rate = cfg.rate;
                 let phase_sync = |i: usize| match sp.sync_mode {
                     crate::blend_space::SyncMode::None => false,
                     crate::blend_space::SyncMode::Phase => true,
@@ -420,7 +421,7 @@ impl GraphInstance {
                 // the cycle length of the synced samples: weighted, or the leader's
                 let synced: Vec<&SampleWeight> = st.weights.iter().filter(|s| phase_sync(s.sample)).collect();
                 let leader = sp.leader.as_ref().and_then(|id| synced.iter().find(|s| &sp.samples[s.sample].id == id));
-                let cycle = |i: usize| (sp.samples[i].clip.duration / (sp.samples[i].rate.abs().max(1e-3) * rate.max(1e-3))).max(1e-6);
+                let cycle = |i: usize| (sp.samples[i].clip.duration / (sp.samples[i].rate.abs().max(1e-3) * rate.abs().max(1e-3))).max(1e-6);
                 st.length = match leader {
                     Some(l) => cycle(l.sample),
                     None if !synced.is_empty() => {
@@ -436,7 +437,7 @@ impl GraphInstance {
                         st.clocks[s.sample] += dt as f64 * rate as f64 * sp.samples[s.sample].rate as f64;
                     }
                 }
-                if let (Some(sync), true) = (&cfg.sync, any_synced) {
+                if let (Some(sync), true, true) = (&cfg.sync, any_synced, rate >= 0.0) {
                     st.synced = true;
                     env.sync.register(SyncMember {
                         key: (uid, n),
@@ -451,7 +452,7 @@ impl GraphInstance {
                 } else {
                     st.synced = false;
                     if any_synced {
-                        st.phase += dt as f64 / st.length as f64;
+                        st.phase += dt as f64 / st.length as f64 * if rate < 0.0 { -1.0 } else { 1.0 };
                     }
                 }
                 if !st.synced {
@@ -464,7 +465,7 @@ impl GraphInstance {
                         } else {
                             (prev_clocks[s.sample], clocks[s.sample])
                         };
-                        record_span(env, sample.clip.clone(), from, to, sample_loops(cfg, sample), w * s.weight, SpanOrigin::BlendSpaceSample { node: node.id.clone(), sample: sample.id.clone() });
+                        record_span(env, uid, sample.clip.clone(), from, to, sample_loops(cfg, sample), w * s.weight, SpanOrigin::BlendSpaceSample { node: node.id.clone(), sample: sample.id.clone() });
                     }
                 }
             }
@@ -608,6 +609,7 @@ impl GraphInstance {
                         trace: &mut *env.trace,
                         next_uid: &mut *env.next_uid,
                         quiet: env.quiet,
+                        root_motion_in_pose: env.root_motion_in_pose,
                     };
                     inst.update(&mut child_env, w);
                     st.inst = Some(inst);
@@ -626,6 +628,7 @@ impl GraphInstance {
         // trajectory inputs: fallback(0), speed(1), direction(2)
         let speed_in = self.in_f32(env, n, 1, speed).max(0.0);
         let dir_in = self.link(n, 2).map(|u| self.value(env, u).as_vec3());
+        let uid = self.uid;
         let tick = self.tick;
         let skeleton = node.skeleton.clone();
         let fallback_linked = self.link(n, 0).is_some();
@@ -711,7 +714,7 @@ impl GraphInstance {
                 let clip = &db.clips[c.clip as usize];
                 let from = st.prev_time as f64;
                 let to = if c.time < st.prev_time && clip.looping { c.time as f64 + clip.clip.duration as f64 } else { c.time as f64 };
-                record_span(env, clip.clip.clone(), from, to, clip.looping, w, SpanOrigin::PoseSearch { node: node.id.clone() });
+                record_span(env, uid, clip.clip.clone(), from, to, clip.looping, w, SpanOrigin::PoseSearch { node: node.id.clone() });
             }
         } else if fallback_linked {
             self.update_input(env, n, 0, w);
@@ -745,7 +748,7 @@ impl GraphInstance {
                             (group.phase * dur).min(dur)
                         };
                         if !quiet {
-                            span_push(env_spans, cfg.clip.clone(), st.prev, st.position, cfg.looping, st.weight, SpanOrigin::SequencePlayer { node: node.id.clone() });
+                            span_push(env_spans, uid, cfg.clip.clone(), st.prev, st.position, cfg.looping, st.weight, SpanOrigin::SequencePlayer { node: node.id.clone() });
                         }
                     }
                     NodeState::Seq(st)
@@ -766,7 +769,7 @@ impl GraphInstance {
                                     continue;
                                 }
                                 let d = sample.clip.duration as f64;
-                                span_push(env_spans, sample.clip.clone(), (st.prev_phase + sample.phase_offset as f64) * d, (st.phase + sample.phase_offset as f64) * d, sample_loops(cfg, sample), st.weight * s.weight, SpanOrigin::BlendSpaceSample { node: node.id.clone(), sample: sample.id.clone() });
+                                span_push(env_spans, uid, sample.clip.clone(), (st.prev_phase + sample.phase_offset as f64) * d, (st.phase + sample.phase_offset as f64) * d, sample_loops(cfg, sample), st.weight * s.weight, SpanOrigin::BlendSpaceSample { node: node.id.clone(), sample: sample.id.clone() });
                             }
                         }
                     }
@@ -848,11 +851,12 @@ impl GraphInstance {
         match &node.kind {
             NodeKind::SequencePlayer(cfg) => {
                 let NodeState::Seq(st) = &self.states[n] else { return skel.bind_pose() };
-                sample_clip(&skel, &cfg.clip, st.prev, st.position, cfg.looping)
+                sample_clip(&skel, &cfg.clip, st.prev, st.position, cfg.looping, env.root_motion_in_pose)
             }
             NodeKind::BlendSpacePlayer(cfg) => {
                 let NodeState::Space(st) = &self.states[n] else { return skel.bind_pose() };
                 let sp = &cfg.space;
+                let in_pose = env.root_motion_in_pose;
                 let poses: Vec<(Pose, f32)> = st
                     .weights
                     .iter()
@@ -869,7 +873,7 @@ impl GraphInstance {
                         } else {
                             (st.prev_clocks[s.sample] + sample.phase_offset as f64 * d, st.clocks[s.sample] + sample.phase_offset as f64 * d)
                         };
-                        (sample_clip(&skel, &sample.clip, from, to, sample_loops(cfg, sample)), s.weight)
+                        (sample_clip(&skel, &sample.clip, from, to, sample_loops(cfg, sample), in_pose), s.weight)
                     })
                     .collect();
                 let refs: Vec<(&Pose, f32)> = poses.iter().map(|(p, w)| (p, *w)).collect();
@@ -1065,6 +1069,7 @@ impl GraphInstance {
                             trace: &mut *env.trace,
                             next_uid: &mut *env.next_uid,
                             quiet: env.quiet,
+                        root_motion_in_pose: env.root_motion_in_pose,
                         };
                         let out = inst.evaluate(&mut child_env);
                         st.inst = Some(inst);
@@ -1093,10 +1098,11 @@ impl GraphInstance {
         };
         let pose = match (&cfg.db, current) {
             (Some(db), Some(cur)) if !used_fallback => {
+                let in_pose = env.root_motion_in_pose;
                 let sample = |c: Cursor| -> Pose {
                     let clip = &db.clips[c.clip as usize].clip;
                     let mut p = clip.sample(&skel, c.time);
-                    if clip.root_motion.enabled {
+                    if clip.root_motion.enabled && !in_pose {
                         clip.remove_root_motion(&skel, &mut p.bones, c.time);
                     }
                     if c.mirrored {
@@ -1115,7 +1121,7 @@ impl GraphInstance {
                     let clip = &db.clips[cur.clip as usize].clip;
                     let from = s.prev_time as f64;
                     let to = if cur.time < s.prev_time && db.clips[cur.clip as usize].looping { cur.time as f64 + clip.duration as f64 } else { cur.time as f64 };
-                    let rm = clip.root_motion_between(&skel, from, to, false);
+                    let rm = if in_pose { RootMotion::IDENTITY } else { clip.root_motion_between(&skel, from, to, false) };
                     out.root_motion = if cur.mirrored {
                         RootMotion { translation: Vec3::new(-rm.translation.x, rm.translation.y, rm.translation.z), rotation: Quat::from_xyzw(rm.rotation.x, -rm.rotation.y, -rm.rotation.z, rm.rotation.w) }
                     } else {
@@ -1373,26 +1379,24 @@ fn sample_loops(cfg: &SpaceCfg, sample: &super::super::blendspace::CompiledSampl
     }
 }
 
-fn record_span(env: &mut Env, clip: Arc<CompiledClip>, from: f64, to: f64, looping: bool, weight: f32, origin: SpanOrigin) {
-    if env.quiet || from == to {
+fn record_span(env: &mut Env, scope: u64, clip: Arc<CompiledClip>, from: f64, to: f64, looping: bool, weight: f32, origin: SpanOrigin) {
+    if env.quiet {
         return;
     }
-    span_push(env.spans, clip, from, to, looping, weight, origin);
+    span_push(env.spans, scope, clip, from, to, looping, weight, origin);
 }
 
-fn span_push(spans: &mut Vec<PlaybackSpan>, clip: Arc<CompiledClip>, from: f64, to: f64, looping: bool, weight: f32, origin: SpanOrigin) {
-    if from == to {
-        return;
-    }
-    spans.push(PlaybackSpan { clip, from, to, looping, weight, origin });
+/// An empty span (`from == to`) is kept: it says the playback is still live.
+fn span_push(spans: &mut Vec<PlaybackSpan>, scope: u64, clip: Arc<CompiledClip>, from: f64, to: f64, looping: bool, weight: f32, origin: SpanOrigin) {
+    spans.push(PlaybackSpan { scope, clip, from, to, looping, weight, origin });
 }
 
 /// A clip sampled at an unbounded position, with its root motion for the move
 /// from `prev` to `position` and that motion removed from the pose.
-fn sample_clip(skel: &RuntimeSkeleton, clip: &CompiledClip, prev: f64, position: f64, looping: bool) -> Pose {
+fn sample_clip(skel: &RuntimeSkeleton, clip: &CompiledClip, prev: f64, position: f64, looping: bool, in_pose: bool) -> Pose {
     let (t, _) = wrap_position(position, clip.duration, looping);
     let mut pose = clip.sample(skel, t);
-    if clip.root_motion.enabled {
+    if clip.root_motion.enabled && !in_pose {
         pose.root_motion = clip.root_motion_between(skel, prev, position, looping);
         clip.remove_root_motion(skel, &mut pose.bones, t);
     }

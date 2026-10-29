@@ -97,7 +97,7 @@ impl MirrorTable {
             Mat4::from_scale_rotation_translation(s, Quat::from_xyzw(r.x, -r.y, -r.z, r.w), Vec3::new(-t.x, t.y, t.z))
         };
         let mirrored: Vec<Mat4> = (0..skel.len()).map(|i| reflect(&mesh[self.counterpart[i]])).collect();
-        let mut out = Pose { bones: skel.from_mesh_space(&mirrored), curves: pose.curves.clone(), root_motion: pose.root_motion, kind: pose.kind };
+        let mut out = Pose { bones: skel.from_mesh_space(&mirrored), curves: pose.curves.clone(), root_motion: pose.root_motion, montage_root_motion: pose.montage_root_motion, kind: pose.kind };
         out.root_motion = RootMotion {
             translation: Vec3::new(-pose.root_motion.translation.x, pose.root_motion.translation.y, pose.root_motion.translation.z),
             rotation: Quat::from_xyzw(pose.root_motion.rotation.x, -pose.root_motion.rotation.y, -pose.root_motion.rotation.z, pose.root_motion.rotation.w),

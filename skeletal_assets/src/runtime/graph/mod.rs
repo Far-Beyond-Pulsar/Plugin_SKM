@@ -343,9 +343,14 @@ impl CompiledGraph {
     }
 }
 
-/// One advance of a sequence clock, reported for notify and event consumers.
+/// One advance of a sequence clock, reported for notify and event consumers. A span with
+/// `from == to` means the playback is live but did not move.
+
 #[derive(Clone, Debug)]
 pub struct PlaybackSpan {
+    /// The graph instance (or Montage instance) the playing node belongs to: two
+    /// instances of the same graph node never share a playback.
+    pub scope: u64,
     pub clip: Arc<CompiledClip>,
     /// Play positions in unbounded clip seconds.
     pub from: f64,
@@ -356,7 +361,7 @@ pub struct PlaybackSpan {
     pub origin: SpanOrigin,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SpanOrigin {
     SequencePlayer { node: String },
     BlendSpaceSample { node: String, sample: String },
@@ -394,6 +399,8 @@ pub struct Env<'a> {
     pub next_uid: &'a mut u64,
     /// When set, no playback spans are recorded (scrubbing never raises events).
     pub quiet: bool,
+    /// `NoRootMotionExtraction`: the root bone's motion stays in the pose.
+    pub root_motion_in_pose: bool,
 }
 
 #[cfg(test)]

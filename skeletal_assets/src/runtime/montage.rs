@@ -67,6 +67,10 @@ pub struct CompiledMontage {
     pub interrupt: InterruptPolicy,
     pub priority: i32,
     pub root_motion: MontageRootMotion,
+    /// Notifies and notify states the Montage itself owns, on the Montage timeline.
+    pub notifies: Vec<crate::notifies::AnimationNotify>,
+    pub notify_states: Vec<crate::notify_schema::AnimationNotifyState>,
+    pub notify_schemas: Vec<crate::notify_schema::NotifyPayloadSchema>,
 }
 
 impl CompiledMontage {
@@ -126,6 +130,9 @@ impl CompiledMontage {
             interrupt: asset.interrupt,
             priority: asset.priority,
             root_motion: asset.root_motion,
+            notifies: asset.notifies.clone(),
+            notify_states: asset.notify_states.clone(),
+            notify_schemas: asset.notify_schemas.clone(),
         })
     }
 
@@ -173,6 +180,8 @@ pub enum MontageResult {
 pub enum MontageEventKind {
     Started,
     SectionChanged { from: Option<String>, to: String },
+    /// The blend-in finished: the Montage is at full weight.
+    BlendedIn,
     BlendingOut,
     Ended(MontageResult),
 }
@@ -220,8 +229,12 @@ pub struct MontageInstance {
     pub section: Option<usize>,
     /// `(section, next)` overrides set at runtime.
     overrides: Vec<(usize, usize)>,
-    /// Timeline interval advanced by the latest update, for root motion and notifies.
+    /// Timeline interval advanced by the latest update: first run start to last run end.
     pub last_span: (f64, f64),
+    /// Continuous stretches of the playhead in the latest update. A section link
+    /// (or a jump) starts a new run, so root motion and notifies never read the
+    /// skipped time. A paused instance reports one empty run (it is still live).
+    pub runs: Vec<(f64, f64)>,
     started_serial: u64,
     pending_result: Option<MontageResult>,
 }
@@ -233,6 +246,16 @@ impl MontageInstance {
 
     fn next_of(&self, section: usize) -> Option<usize> {
         self.overrides.iter().rev().find(|(s, _)| *s == section).map(|(_, n)| *n).or(self.montage.sections[section].next)
+    }
+
+    /// The section reverse playback continues into from the start of `section`:
+    /// the section itself if it links to itself (a loop plays back as a loop),
+    /// else the first section (in asset order) whose link leads here.
+    fn previous_of(&self, section: usize) -> Option<usize> {
+        if self.next_of(section) == Some(section) {
+            return Some(section);
+        }
+        (0..self.montage.sections.len()).find(|&s| s != section && self.next_of(s) == Some(section))
     }
 
     fn begin_blend_out(&mut self, settings: BlendSettings, scale: f32) {
@@ -250,15 +273,25 @@ impl MontageInstance {
 /// Everything running on one component.
 #[derive(Clone, Debug, Default)]
 pub struct MontageSet {
+    /// `NoRootMotionExtraction`: root bone motion stays in the pose instead of being
+    /// extracted (set by the owner of the set).
+    pub root_motion_in_pose: bool,
     instances: Vec<MontageInstance>,
     next_handle: u64,
     serial: u64,
     events: Vec<MontageEvent>,
+    finished: Vec<MontageInstance>,
 }
 
 impl MontageSet {
     pub fn instances(&self) -> &[MontageInstance] {
         &self.instances
+    }
+
+    /// Instances that ended in the latest update, as they were when they ended (their
+    /// final stretch of playback still counts for notifies).
+    pub fn finished(&self) -> &[MontageInstance] {
+        &self.finished
     }
 
     pub fn get(&self, handle: MontageHandle) -> Option<&MontageInstance> {
@@ -328,11 +361,15 @@ impl MontageSet {
             section,
             overrides: Vec::new(),
             last_span: (start, start),
+            runs: vec![(start, start)],
             started_serial: self.serial,
             pending_result: None,
             montage: montage.clone(),
         };
         self.events.push(MontageEvent { handle, montage: montage.id.clone(), kind: MontageEventKind::Started });
+        if blend_in.duration <= 0.0 {
+            self.events.push(MontageEvent { handle, montage: montage.id.clone(), kind: MontageEventKind::BlendedIn });
+        }
         if let Some(s) = section {
             self.events.push(MontageEvent {
                 handle,
@@ -421,6 +458,7 @@ impl MontageSet {
         let from = inst.section_name().map(str::to_string);
         inst.position = inst.montage.sections[idx].start as f64;
         inst.last_span = (inst.position, inst.position);
+        inst.runs = vec![(inst.position, inst.position)];
         inst.section = Some(idx);
         let (montage, to) = (inst.montage.id.clone(), inst.montage.sections[idx].name.clone());
         self.events.push(MontageEvent { handle, montage, kind: MontageEventKind::SectionChanged { from, to } });
@@ -441,6 +479,7 @@ impl MontageSet {
         let Some(inst) = self.get_mut(handle) else { return false };
         inst.position = position.clamp(0.0, inst.montage.length as f64);
         inst.last_span = (inst.position, inst.position);
+        inst.runs = vec![(inst.position, inst.position)];
         inst.section = section_at(&inst.montage, inst.position);
         true
     }
@@ -448,6 +487,7 @@ impl MontageSet {
     /// Advance every instance by `dt` seconds.
     pub fn update(&mut self, dt: f32) {
         let dt = dt.max(0.0);
+        self.finished.clear();
         let mut ended = Vec::new();
         for inst in &mut self.instances {
             // blend weight
@@ -456,6 +496,7 @@ impl MontageSet {
                     Phase::BlendingIn => {
                         inst.phase = Phase::Playing;
                         inst.weight = 1.0;
+                        self.events.push(MontageEvent { handle: inst.handle, montage: inst.montage.id.clone(), kind: MontageEventKind::BlendedIn });
                     }
                     Phase::BlendingOut => inst.weight = 0.0,
                     Phase::Playing => {}
@@ -469,17 +510,21 @@ impl MontageSet {
                     if t >= 1.0 {
                         inst.phase = Phase::Playing;
                         inst.weight = 1.0;
+                        self.events.push(MontageEvent { handle: inst.handle, montage: inst.montage.id.clone(), kind: MontageEventKind::BlendedIn });
                     }
                 } else {
                     inst.weight = inst.blend_from * (1.0 - shaped);
                 }
             }
             if inst.phase == Phase::BlendingOut && (inst.weight <= 1e-6 || inst.blend_elapsed >= inst.blend_total) {
+                inst.runs = vec![(inst.position, inst.position)];
                 ended.push(inst.handle);
                 continue;
             }
             // playback
             let from = inst.position;
+            let mut runs: Vec<(f64, f64)> = Vec::new();
+            let mut run_start = inst.position;
             if !inst.paused {
                 let mut remaining = dt as f64 * inst.rate as f64;
                 let mut guard = 0;
@@ -502,8 +547,10 @@ impl MontageSet {
                             match inst.section.and_then(|s| inst.next_of(s)) {
                                 Some(next) => {
                                     let from_name = inst.section_name().map(str::to_string);
+                                    runs.push((run_start, hi));
                                     inst.section = Some(next);
                                     inst.position = inst.montage.sections[next].start as f64;
+                                    run_start = inst.position;
                                     let (montage, to) = (inst.montage.id.clone(), inst.montage.sections[next].name.clone());
                                     self.events.push(MontageEvent { handle: inst.handle, montage, kind: MontageEventKind::SectionChanged { from: from_name, to } });
                                     if remaining <= 0.0 || inst.montage.sections[next].end <= inst.montage.sections[next].start {
@@ -523,13 +570,40 @@ impl MontageSet {
                             }
                         }
                     } else {
+                        // reverse: play back to the section start, then follow the
+                        // links backwards (a section that links to this one); with
+                        // none, the Montage has been played back to its start
                         let room = (inst.position - lo).max(0.0);
-                        if -remaining <= room {
+                        if -remaining < room {
                             inst.position += remaining;
+                            remaining = 0.0;
                         } else {
+                            remaining += room;
                             inst.position = lo;
+                            match inst.section.and_then(|s| inst.previous_of(s)) {
+                                Some(prev) => {
+                                    let from_name = inst.section_name().map(str::to_string);
+                                    runs.push((run_start, lo));
+                                    inst.section = Some(prev);
+                                    inst.position = inst.montage.sections[prev].end as f64;
+                                    run_start = inst.position;
+                                    let (montage, to) = (inst.montage.id.clone(), inst.montage.sections[prev].name.clone());
+                                    self.events.push(MontageEvent { handle: inst.handle, montage, kind: MontageEventKind::SectionChanged { from: from_name, to } });
+                                    if remaining >= 0.0 || inst.montage.sections[prev].end <= inst.montage.sections[prev].start {
+                                        break;
+                                    }
+                                }
+                                None => {
+                                    remaining = 0.0;
+                                    if inst.phase != Phase::BlendingOut {
+                                        let settings = inst.montage.blend_out;
+                                        inst.begin_blend_out(settings, 1.0);
+                                        inst.pending_result = Some(MontageResult::Completed);
+                                        self.events.push(MontageEvent { handle: inst.handle, montage: inst.montage.id.clone(), kind: MontageEventKind::BlendingOut });
+                                    }
+                                }
+                            }
                         }
-                        remaining = 0.0;
                     }
                 }
                 // blend out early when configured
@@ -547,7 +621,9 @@ impl MontageSet {
                 inst.weight = 0.0;
                 ended.push(inst.handle);
             }
-            inst.last_span = (from, inst.position);
+            runs.push((run_start, inst.position));
+            inst.last_span = (runs.first().map_or(from, |r| r.0), inst.position);
+            inst.runs = runs;
             if inst.section.is_none() {
                 inst.section = section_at(&inst.montage, inst.position);
             }
@@ -555,6 +631,7 @@ impl MontageSet {
         for handle in ended {
             if let Some(i) = self.instances.iter().position(|i| i.handle == handle) {
                 let inst = self.instances.remove(i);
+                self.finished.push(inst.clone());
                 self.events.push(MontageEvent {
                     handle,
                     montage: inst.montage.id.clone(),
@@ -585,7 +662,7 @@ impl MontageSet {
             for track in inst.montage.tracks.iter().filter(|t| t.slot == slot && t.group == group) {
                 let Some((seg, clip_time)) = segment_at(track, inst.position) else { continue };
                 let mut sample = seg.clip.sample(skel, clip_time);
-                let supplies_motion = inst.montage.root_motion == MontageRootMotion::Montage;
+                let supplies_motion = inst.montage.root_motion == MontageRootMotion::Montage && !self.root_motion_in_pose;
                 if supplies_motion {
                     seg.clip.remove_root_motion(skel, &mut sample.bones, clip_time);
                 }
@@ -602,9 +679,11 @@ impl MontageSet {
                     *e += (*v - *e) * w;
                 }
                 match inst.montage.root_motion {
+                    MontageRootMotion::Montage if self.root_motion_in_pose => {}
                     MontageRootMotion::Montage => {
                         let delta = montage_root_motion(inst, track, skel);
                         pose.root_motion = pose.root_motion.blend(&delta, w);
+                        pose.montage_root_motion = pose.montage_root_motion.then(&delta.scaled(w));
                     }
                     MontageRootMotion::Graph => {}
                     MontageRootMotion::Ignore => pose.root_motion = pose.root_motion.blend(&RootMotion::IDENTITY, w),
@@ -617,7 +696,12 @@ impl MontageSet {
 
 /// Root motion of a track over the instance's latest advance.
 fn montage_root_motion(inst: &MontageInstance, track: &CompiledTrack, skel: &RuntimeSkeleton) -> RootMotion {
-    let (a, b) = inst.last_span;
+    // each continuous run on its own: the time skipped by a section link or a
+    // jump contributes nothing
+    inst.runs.iter().fold(RootMotion::IDENTITY, |acc, &(a, b)| acc.then(&run_root_motion(track, skel, a, b)))
+}
+
+fn run_root_motion(track: &CompiledTrack, skel: &RuntimeSkeleton, a: f64, b: f64) -> RootMotion {
     let mut total = RootMotion::IDENTITY;
     if a == b {
         return total;
@@ -914,5 +998,96 @@ pub(crate) mod tests {
         set.cancel_all();
         assert_eq!(results(&mut set), [(h, MontageResult::Cancelled)]);
         assert!(set.instances().is_empty());
+    }
+
+    #[test]
+    fn blend_in_completion_is_reported_once() {
+        let skel = skel();
+        let m = with(&montage(&skel, "a", "DefaultSlot", "b2", None), |m| m.blend_in = BlendSettings { duration: 0.5, curve: BlendCurve::Linear });
+        let mut set = MontageSet::default();
+        let h = set.play(m, 1.0, None).unwrap();
+        let kinds = |set: &mut MontageSet| set.drain_events().into_iter().map(|e| e.kind).collect::<Vec<_>>();
+        assert_eq!(kinds(&mut set), [MontageEventKind::Started]);
+        set.update(0.25);
+        assert!(kinds(&mut set).is_empty());
+        set.update(0.25);
+        assert_eq!(kinds(&mut set), [MontageEventKind::BlendedIn]);
+        set.update(0.25);
+        assert!(kinds(&mut set).is_empty());
+        let instant = with(&montage(&skel, "b", "DefaultSlot", "b2", None), |m| m.group = "Other".into());
+        set.play(instant, 1.0, None).unwrap();
+        assert_eq!(kinds(&mut set), [MontageEventKind::Started, MontageEventKind::BlendedIn], "no blend: full weight at once");
+        assert!(set.get(h).is_none() || set.get(h).is_some());
+    }
+
+    #[test]
+    fn section_links_start_a_new_run_and_contiguous_ones_do_not_skip_time() {
+        let skel = skel();
+        let mut set = MontageSet::default();
+        let h = set.play(sectioned(&skel), 1.0, None).unwrap();
+        set.update(0.6);
+        // Start (0..0.5) links to Loop (starting at 0.5): one stretch of time, two runs
+        let runs = set.get(h).unwrap().runs.clone();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0], (0.0, 0.5));
+        assert!((runs[1].0 - 0.5).abs() < 1e-9 && (runs[1].1 - 0.6).abs() < 1e-6, "{runs:?}");
+        set.update(2.0);
+        let runs = &set.get(h).unwrap().runs;
+        assert!(runs.len() > 1, "the loop link restarts the playhead: {runs:?}");
+        let covered: f64 = runs.iter().map(|(a, b)| b - a).sum();
+        assert!((covered - 2.0).abs() < 1e-6, "every run together plays exactly the elapsed time: {covered}");
+    }
+
+    #[test]
+    fn reverse_playback_follows_section_links_backwards_and_completes_at_the_start() {
+        let skel = skel();
+        let m = sectioned(&skel);
+        let mut set = MontageSet::default();
+        let h = set.play(m.clone(), -1.0, Some("End")).unwrap();
+        assert!(set.get(h).is_some());
+        // End has no predecessor yet: Loop links to itself
+        set.update(0.25);
+        assert_eq!(results(&mut set), [(h, MontageResult::Completed)]);
+
+        let h = set.play(m, -1.0, Some("End")).unwrap();
+        set.set_next_section(h, "Loop", "End").unwrap();
+        set.update(0.25);
+        assert_eq!(set.get(h).unwrap().section_name(), Some("Loop"), "End is entered from Loop");
+        assert!((set.get(h).unwrap().position - 1.25).abs() < 1e-6);
+        set.update(1.0);
+        assert_eq!(set.get(h).unwrap().section_name(), Some("Start"), "Start links to Loop");
+        assert!((set.get(h).unwrap().position - 0.25).abs() < 1e-6, "{}", set.get(h).unwrap().position);
+        assert_eq!(set.get(h).unwrap().runs.len(), 2);
+        set.update(1.0);
+        assert!(set.get(h).is_none() || set.get(h).unwrap().phase == Phase::BlendingOut);
+        assert_eq!(results(&mut set).last().map(|r| r.1), Some(MontageResult::Completed));
+    }
+
+    #[test]
+    fn a_jump_leaves_the_skipped_time_out_of_root_motion_and_spans() {
+        let skel = skel();
+        let mut moving = (*sectioned(&skel)).clone();
+        let mut asset = clip_asset("rm", 2.0, vec![translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 2.0)]);
+        asset.features.root_motion.enabled = true;
+        let clip = Arc::new(CompiledClip::compile(&asset, &skel));
+        for t in &mut moving.tracks {
+            t.slot = "R".into();
+            for s in &mut t.segments {
+                s.clip = clip.clone();
+            }
+        }
+        moving.root_motion = MontageRootMotion::Montage;
+        let m = Arc::new(moving);
+        let mut set = MontageSet::default();
+        let h = set.play(m, 1.0, Some("End")).unwrap();
+        set.jump_to_section(h, "Start").unwrap();
+        set.update(0.5);
+        let out = set.apply_to_slot(&skel, "R", "DefaultGroup", skel.bind_pose());
+        assert!((out.root_motion.translation.z - 1.0).abs() < 1e-3, "only the half second played: {:?}", out.root_motion.translation);
+        assert!((out.montage_root_motion.translation.z - 1.0).abs() < 1e-3);
+        // extraction off: the motion stays in the pose and nothing is extracted
+        set.root_motion_in_pose = true;
+        let out = set.apply_to_slot(&skel, "R", "DefaultGroup", skel.bind_pose());
+        assert!(out.root_motion.is_identity() && out.montage_root_motion.is_identity());
     }
 }

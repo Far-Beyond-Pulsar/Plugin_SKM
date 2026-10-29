@@ -40,17 +40,37 @@ pub enum UpdateMode {
     Scrub,
 }
 
+/// A running Montage's own timeline moved from `from` to `to` (its authored notifies
+/// and notify states live on this timeline). `from == to` means live but paused.
+#[derive(Clone, Debug)]
+pub struct TimelineSpan {
+    pub handle: MontageHandle,
+    pub montage: Arc<CompiledMontage>,
+    pub from: f64,
+    pub to: f64,
+    pub weight: f32,
+}
+
 /// Everything the latest advance produced besides the pose.
 #[derive(Clone, Debug, Default)]
 pub struct UpdateReport {
     /// Sequence clock advances, for notify consumers (empty when scrubbing).
     pub spans: Vec<PlaybackSpan>,
     pub montage_events: Vec<MontageEvent>,
+    /// Playhead moves of each running Montage's own timeline (its authored notifies).
+    pub montage_timelines: Vec<TimelineSpan>,
+    /// Montage instances that ended during the advance (their last spans are still
+    /// reported above; their playbacks end now).
+    pub finished_montages: Vec<MontageHandle>,
     pub searches: Vec<SearchRecord>,
     /// State machine and IK debug lines of the latest update.
     pub trace: Vec<String>,
     /// Accumulated root motion of the advance, in the actor's space.
     pub root_motion: RootMotion,
+    /// The part of `root_motion` that came from Montages in `Montage` mode.
+    pub montage_root_motion: RootMotion,
+    /// Seconds of animation time the advance ran (the sum of its updates).
+    pub advanced: f32,
     /// Number of updates the advance ran (fixed stepping can run several or none).
     pub substeps: u32,
 }
@@ -67,6 +87,8 @@ pub struct AnimInstance {
     pose: Arc<Pose>,
     previous: Arc<Pose>,
     accumulator: f32,
+    /// `false` keeps the root bone's motion in the pose (`NoRootMotionExtraction`).
+    extract_root_motion: bool,
     pub report: UpdateReport,
 }
 
@@ -92,6 +114,7 @@ impl AnimInstance {
             pose: bind.clone(),
             previous: bind,
             accumulator: 0.0,
+            extract_root_motion: true,
             report: UpdateReport::default(),
         }
     }
@@ -210,6 +233,16 @@ impl AnimInstance {
         self.montages.play(montage, rate, section)
     }
 
+    /// Whether root bone motion is extracted from clips (the default). When `false`
+    /// (`NoRootMotionExtraction`) it stays in the pose and the report carries none.
+    pub fn set_root_motion_extraction(&mut self, extract: bool) {
+        self.extract_root_motion = extract;
+    }
+
+    pub fn root_motion_extraction(&self) -> bool {
+        self.extract_root_motion
+    }
+
     // ---- time ---------------------------------------------------------------------
 
     /// Advance by `dt` seconds of animation time (the caller applies pause and
@@ -238,17 +271,40 @@ impl AnimInstance {
             }
         }
         let mut root_motion = RootMotion::IDENTITY;
+        let mut montage_root_motion = RootMotion::IDENTITY;
+        let mut advanced = 0.0;
+        let mut spans = Vec::new();
+        let mut timelines = Vec::new();
+        let mut montage_events = Vec::new();
+        let mut finished = Vec::new();
+        let mut searches = Vec::new();
         for d in deltas {
             self.report.substeps += 1;
+            advanced += d;
             let out = self.update_once(d, mode);
             root_motion = root_motion.then(&out.root_motion);
+            montage_root_motion = montage_root_motion.then(&out.montage_root_motion);
+            // one advance can run several updates (fixed stepping): keep them all, in order
+            spans.append(&mut self.report.spans);
+            timelines.append(&mut self.report.montage_timelines);
+            montage_events.append(&mut self.report.montage_events);
+            finished.append(&mut self.report.finished_montages);
+            searches.append(&mut self.report.searches);
         }
+        self.report.spans = spans;
+        self.report.montage_timelines = timelines;
+        self.report.montage_events = montage_events;
+        self.report.finished_montages = finished;
+        self.report.searches = searches;
+        self.report.advanced = advanced;
         self.report.root_motion = root_motion;
+        self.report.montage_root_motion = montage_root_motion;
         self.pose.clone()
     }
 
     fn update_once(&mut self, dt: f32, mode: UpdateMode) -> Arc<Pose> {
         let quiet = mode == UpdateMode::Scrub;
+        self.montages.root_motion_in_pose = !self.extract_root_motion;
         self.montages.update(dt);
         if !quiet {
             self.report.montage_events.extend(self.montages.drain_events());
@@ -272,6 +328,7 @@ impl AnimInstance {
                 trace: &mut trace,
                 next_uid: &mut self.next_uid,
                 quiet,
+                root_motion_in_pose: !self.extract_root_motion,
             };
             root.update(&mut env, 1.0);
             if !env.sync.is_empty() {
@@ -290,11 +347,10 @@ impl AnimInstance {
             self.report.trace = trace;
         }
         if !quiet {
-            let mut montage_spans = Vec::new();
-            for inst in self.montages.instances() {
-                montage_spans.extend(montage_playback(inst));
+            for inst in self.montages.instances().iter().chain(self.montages.finished()) {
+                montage_playback(inst, &mut self.report.spans, &mut self.report.montage_timelines);
             }
-            self.report.spans.extend(montage_spans);
+            self.report.finished_montages.extend(self.montages.finished().iter().map(|i| i.handle));
         }
         // a pose with a non-finite bone (a degenerate clip or solver input) never
         // reaches the palette: the previous pose is kept and the problem is traced
@@ -354,35 +410,74 @@ impl AnimInstance {
     }
 }
 
-/// Spans for the clips a montage instance advanced through in its last update.
-fn montage_playback(inst: &super::montage::MontageInstance) -> Vec<PlaybackSpan> {
+/// Most loop cycles of one segment reported for a single run. A run that crosses
+/// more keeps the latest ones; nothing is lost in the pose, only old cycles' notifies.
+const MAX_SEGMENT_CYCLES: i64 = 4096;
+
+/// What a Montage instance played through in its last update: one span per
+/// segment clip per loop cycle (the Montage may have crossed several runs), and
+/// the instance's own timeline for the notifies the Montage owns.
+///
+/// Clip positions are in clip seconds. A looping segment restarts every cycle
+/// from the segment's `clip_start`; each cycle is reported as its own span (the
+/// restart is a discontinuity the notify tracker ends states on), so trimmed and
+/// looping segments follow their authored range exactly.
+fn montage_playback(inst: &super::montage::MontageInstance, spans: &mut Vec<PlaybackSpan>, timelines: &mut Vec<TimelineSpan>) {
     use super::graph::SpanOrigin;
-    let (a, b) = inst.last_span;
-    if a == b {
-        return Vec::new();
-    }
-    let (lo, hi) = (a.min(b), a.max(b));
-    let mut out = Vec::new();
-    for track in &inst.montage.tracks {
-        for seg in &track.segments {
-            let (s, e) = (lo.max(seg.start as f64), hi.min((seg.start + seg.length) as f64));
-            if e <= s {
-                continue;
+    for &(a, b) in &inst.runs {
+        timelines.push(TimelineSpan { handle: inst.handle, montage: inst.montage.clone(), from: a, to: b, weight: inst.weight });
+        let (lo, hi) = (a.min(b), a.max(b));
+        for track in &inst.montage.tracks {
+            let last = track.segments.len().saturating_sub(1);
+            for (si, seg) in track.segments.iter().enumerate() {
+                let (seg_start, seg_end) = (seg.start as f64, (seg.start + seg.length) as f64);
+                let origin = || SpanOrigin::Montage { montage: inst.montage.id.clone(), segment: seg.id.clone() };
+                let clip_len = (seg.clip_end - seg.clip_start).max(1e-6) as f64;
+                let total = clip_len * seg.loop_count as f64;
+                let rate = seg.rate as f64;
+                let push = |spans: &mut Vec<PlaybackSpan>, from: f64, to: f64| {
+                    spans.push(PlaybackSpan { scope: inst.handle.0, clip: seg.clip.clone(), from, to, looping: false, weight: inst.weight, origin: origin() });
+                };
+                if a == b {
+                    // paused (or just jumped to): live at one point of this segment
+                    let inside = a >= seg_start && (a < seg_end || (a == seg_end && si == last));
+                    if inside {
+                        let local = ((a - seg_start) * rate).max(0.0);
+                        let t = if local >= total { seg.clip_end as f64 } else { seg.clip_start as f64 + local % clip_len };
+                        push(spans, t, t);
+                    }
+                    continue;
+                }
+                let (s, e) = (lo.max(seg_start), hi.min(seg_end));
+                if e <= s {
+                    continue;
+                }
+                let (ls, le) = (((s - seg_start) * rate).min(total), ((e - seg_start) * rate).min(total));
+                if le <= ls {
+                    continue;
+                }
+                let first = (ls / clip_len).floor() as i64;
+                let last_cycle = (((le / clip_len).ceil() as i64) - 1).max(first);
+                let first = first.max(last_cycle - MAX_SEGMENT_CYCLES + 1);
+                let mut cycles: Vec<(f64, f64)> = (first..=last_cycle)
+                    .map(|c| {
+                        let base = c as f64 * clip_len;
+                        let (x0, x1) = (ls.max(base), le.min(base + clip_len));
+                        (seg.clip_start as f64 + (x0 - base), seg.clip_start as f64 + (x1 - base))
+                    })
+                    .collect();
+                if b < a {
+                    cycles.reverse();
+                    for c in &mut cycles {
+                        *c = (c.1, c.0);
+                    }
+                }
+                for (from, to) in cycles {
+                    push(spans, from, to);
+                }
             }
-            let rate = seg.rate as f64;
-            let (cs, ce) = ((s - seg.start as f64) * rate + seg.clip_start as f64, (e - seg.start as f64) * rate + seg.clip_start as f64);
-            let (from, to) = if b >= a { (cs, ce) } else { (ce, cs) };
-            out.push(PlaybackSpan {
-                clip: seg.clip.clone(),
-                from,
-                to,
-                looping: seg.loop_count > 1,
-                weight: inst.weight,
-                origin: SpanOrigin::Montage { montage: inst.montage.id.clone(), segment: seg.id.clone() },
-            });
         }
     }
-    out
 }
 
 pub const SINGLE_SEQUENCE_NAME: &str = "single sequence";

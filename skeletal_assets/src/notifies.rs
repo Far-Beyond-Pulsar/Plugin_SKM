@@ -58,6 +58,12 @@ pub(crate) const RESERVED_NOTIFY_FIELDS: &[&str] = &[
     "playback_time",
     "cycle",
     "generation",
+    "playback_instance",
+    "notify_phase",
+    "tick_delta",
+    "end_reason",
+    "source_kind",
+    "source_id",
     "target",
     "class",
     "exec",
@@ -104,6 +110,8 @@ pub enum PlaybackInterval {
 #[derive(Clone, Copy, Debug)]
 pub struct CrossedNotify<'a> {
     pub notify: &'a AnimationNotify,
+    /// Position of the notify in the asset's own list.
+    pub index: usize,
     pub playback_time: f64,
     pub cycle: i64,
 }
@@ -128,7 +136,7 @@ fn occurrence_time(cycle: i64, duration: f64, offset: f64) -> f64 {
 /// Division at a rounded arrival can land in a neighboring cycle. Include
 /// that neighbor on both sides, plus the preceding cycle's clip-end event;
 /// inclusion is decided only from occurrence_time, never inverse arithmetic.
-fn candidate_cycles(from: f64, to: f64, duration: f64) -> Result<(i64, i64), String> {
+pub(crate) fn candidate_cycles(from: f64, to: f64, duration: f64) -> Result<(i64, i64), String> {
     let first = (from.min(to) / duration).floor();
     let last = (from.max(to) / duration).floor();
     // f64 no longer distinguishes adjacent cycles past this range.
@@ -194,6 +202,7 @@ pub fn collect_crossed_notifies(
                     index,
                     CrossedNotify {
                         notify,
+                        index,
                         playback_time: time,
                         cycle,
                     },
@@ -312,6 +321,7 @@ impl NotifyIndex {
                 };
                 let hit = |index: usize| CrossedNotify {
                     notify: &self.notifies[index],
+                    index: self.asset_order[index],
                     playback_time: time_of(index),
                     cycle,
                 };

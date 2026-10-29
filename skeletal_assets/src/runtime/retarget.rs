@@ -382,7 +382,7 @@ impl RetargetPlan {
         if let Some(root) = &self.root {
             root_motion = RootMotion::IDENTITY.blend(&root_motion, root.rotation_alpha.max(root.translation_alpha));
         }
-        let mut out = Pose { bones, curves: src.curves.clone(), root_motion, kind: src.kind };
+        let mut out = Pose { bones, curves: src.curves.clone(), root_motion, montage_root_motion: src.montage_root_motion, kind: src.kind };
         self.apply_ik(src, &src_mesh, &mut out);
         out
     }

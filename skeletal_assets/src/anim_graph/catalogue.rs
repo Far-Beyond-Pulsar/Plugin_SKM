@@ -364,7 +364,7 @@ pub static CATALOGUE: &[NodeDef] = &[
         POSE_OUT,
         &[
             need("sequence", P::Asset(SEQUENCE_KIND), "The sequence to play"),
-            prop("play_rate", P::Float { min: 0.0, max: 16.0 }, "1.0", "Rate multiplier; the sign of reverse play is not supported"),
+            prop("play_rate", P::Float { min: -16.0, max: 16.0 }, "1.0", "Rate multiplier; a negative rate plays the clip backwards (and leaves its sync group)"),
             prop("start_position", P::Float { min: 0.0, max: 1.0e6 }, "0.0", "Start time in seconds"),
             prop("looping", P::Enum(LOOP_MODES), "\"inherit\"", "Loop behaviour"),
             prop("sync_group", P::SyncGroup, "", "Sync group name, empty for none"),
@@ -381,7 +381,7 @@ pub static CATALOGUE: &[NodeDef] = &[
             need("blend_space", P::Asset(BLEND_SPACE_KIND), "The blend space to play"),
             prop("x", P::Float { min: -1.0e6, max: 1.0e6 }, "0.0", "Default x input"),
             prop("y", P::Float { min: -1.0e6, max: 1.0e6 }, "0.0", "Default y input"),
-            prop("play_rate", P::Float { min: 0.0, max: 16.0 }, "1.0", "Rate multiplier"),
+            prop("play_rate", P::Float { min: -16.0, max: 16.0 }, "1.0", "Rate multiplier; negative plays the samples backwards (and leaves the sync group)"),
             prop("looping", P::Enum(LOOP_MODES), "\"inherit\"", "Loop behaviour"),
             prop("sync_group", P::SyncGroup, "", "Sync group name, empty for none"),
             prop("sync_role", P::Enum(SYNC_ROLES), "\"auto\"", "Leader or follower inside the sync group"),

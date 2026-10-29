@@ -984,12 +984,12 @@ fn pausing_scrubbing_and_the_single_sequence_player_never_raise_gameplay_data() 
     // pause: a zero delta keeps the pose
     step(&mut inst, 0.0);
     assert!(near(x1(&inst), 1.0));
-    assert!(inst.report.spans.is_empty());
+    assert!(inst.report.spans.iter().all(|s| s.from == s.to), "a paused player is live but does not move");
     // seek + refresh: the pose moves, nothing is reported
     assert!(inst.seek_single_sequence(2.5));
     inst.refresh();
     assert!(near(x1(&inst), 2.5));
-    assert!(inst.report.spans.is_empty());
+    assert!(inst.report.spans.iter().all(|s| s.from == s.to), "refresh reports nothing new");
     assert_eq!(inst.single_sequence_position(), Some(2.5));
     // the previous pose is the one before the latest advance
     step(&mut inst, 0.5);
@@ -1306,4 +1306,119 @@ fn a_whole_graph_is_deterministic_update_by_update() {
         assert_eq!(pa.1, pb.1, "update {i}");
         assert!(pa.0.is_finite(), "update {i}");
     }
+}
+
+// ---- Phase 3: reverse playback, notifies of graph players, root motion modes -----------------
+
+fn reverse_player_graph(f: &Fixture, seq: &str, looping: &str, start: f32) -> AnimationGraphAsset {
+    f.graph(&[], |b| {
+        b.node("p", "anim.sequence_player", &[("sequence", js(seq)), ("play_rate", json!(-1.0)), ("looping", js(looping)), ("start_position", json!(start))]);
+        b.wire("p", "out", "pose");
+    })
+}
+
+#[test]
+fn a_sequence_player_with_a_negative_rate_plays_backwards_loops_and_holds_at_the_start() {
+    let mut f = Fixture::new();
+    let a = f.slide("A", 4.0, 0.0, 4.0);
+    let mut inst = f.instance(&reverse_player_graph(&f, &a, "loop", 3.0));
+    step(&mut inst, 1.0);
+    assert!(near(x1(&inst), 2.0), "{}", x1(&inst));
+    step(&mut inst, 1.5);
+    assert!(near(x1(&inst), 0.5), "{}", x1(&inst));
+    step(&mut inst, 1.0);
+    assert!(near(x1(&inst), 3.5), "wrapped below zero: {}", x1(&inst));
+
+    let mut once = f.instance(&reverse_player_graph(&f, &a, "once", 3.0));
+    step(&mut once, 10.0);
+    assert!(near(x1(&once), 0.0), "a one-shot holds its first frame going backwards: {}", x1(&once));
+}
+
+#[test]
+fn reverse_root_motion_is_the_inverse_of_forward_across_loop_seams() {
+    let mut f = Fixture::new();
+    let mut walk = clip_asset("walk", 1.0, vec![translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 1.0)]);
+    walk.skeleton = Some(crate::ids::SkeletonId::parse(&f.skeleton_id).unwrap());
+    walk.features.root_motion.enabled = true;
+    let id = walk.id.as_str().to_string();
+    f.src.sequences.insert(id.clone(), Arc::new(walk));
+    let mut inst = f.instance(&reverse_player_graph(&f, &id, "loop", 0.5));
+    let mut total = crate::runtime::pose::RootMotion::IDENTITY;
+    for _ in 0..3 {
+        step(&mut inst, 0.75);
+        total = total.then(&inst.report.root_motion);
+    }
+    assert!(near(total.translation.z, -4.0 * 2.25), "2.25 s backwards over two seams: {:?}", total.translation);
+}
+
+#[test]
+fn a_blend_space_with_a_negative_rate_plays_its_samples_backwards() {
+    let mut f = Fixture::new();
+    let space = blend_space_asset(&mut f, false, SyncMode::None, &[(0.0, 0.0, 0.0, 4.0), (10.0, 0.0, 100.0, 4.0)]);
+    let asset = f.graph(&[], |b| {
+        b.node("bs", "anim.blend_space_player", &[("blend_space", js(&space)), ("play_rate", json!(-1.0)), ("looping", js("loop"))]);
+        b.wire("bs", "out", "pose");
+    });
+    let mut inst = f.instance(&asset);
+    step(&mut inst, 1.0);
+    // x defaults to 0: only the first sample, 1 s before its start wraps to 3 s
+    assert!(near(x1(&inst), 3.0), "{}", x1(&inst));
+}
+
+#[test]
+fn graph_players_raise_notifies_and_states_in_either_direction_once() {
+    use crate::notifies::{AnimationNotify, NotifyTarget};
+    use crate::notify_schema::AnimationNotifyState;
+    use crate::runtime::playback::{NotifyPhase, NotifyTracker};
+    let mut f = Fixture::new();
+    let mut asset = clip_asset("A", 4.0, vec![translate_track("b1", [0.0, 1.0, 0.0], [4.0, 1.0, 0.0], 4.0)]);
+    asset.skeleton = Some(crate::ids::SkeletonId::parse(&f.skeleton_id).unwrap());
+    asset.features.notifies.push(AnimationNotify { id: "n".into(), name: "n".into(), time: 3.0, target: NotifyTarget::Self_, fields: vec![], schema: None });
+    asset.features.notify_states.push(AnimationNotifyState {
+        id: "s".into(),
+        name: "s".into(),
+        start: 1.0,
+        end: 2.0,
+        target: NotifyTarget::Self_,
+        schema: None,
+        fields: vec![],
+        tick_interval: None,
+        disabled: false,
+    });
+    let id = asset.id.as_str().to_string();
+    f.src.sequences.insert(id.clone(), Arc::new(asset));
+    let mut inst = f.instance(&reverse_player_graph(&f, &id, "once", 3.5));
+    let mut tracker = NotifyTracker::new();
+    let mut out = Vec::new();
+    for _ in 0..8 {
+        inst.advance(0.5, TimeStep::Variable, UpdateMode::Play);
+        tracker.observe_report(&inst.report, &mut out).unwrap();
+    }
+    let order: Vec<String> = out.iter().filter(|e| e.phase != NotifyPhase::Tick).map(|e| format!("{}:{}", e.id(), e.phase.name())).collect();
+    assert_eq!(order, ["n:notify", "s:begin", "s:end"]);
+    assert_eq!(tracker.active_states(), 0);
+    assert_eq!(out[0].owner.kind(), "animseq");
+}
+
+#[test]
+fn no_root_motion_extraction_leaves_the_travel_in_the_pose() {
+    let mut f = Fixture::new();
+    let mut walk = clip_asset("walk", 1.0, vec![translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 1.0)]);
+    walk.skeleton = Some(crate::ids::SkeletonId::parse(&f.skeleton_id).unwrap());
+    walk.features.root_motion.enabled = true;
+    let id = walk.id.as_str().to_string();
+    f.src.sequences.insert(id.clone(), Arc::new(walk));
+    let asset = f.graph(&[], |b| {
+        b.node("p", "anim.sequence_player", &[("sequence", js(&id))]);
+        b.wire("p", "out", "pose");
+    });
+    let mut extracting = f.instance(&asset);
+    step(&mut extracting, 0.5);
+    assert!(near(extracting.report.root_motion.translation.z, 2.0));
+    assert!(extracting.pose().bones[0].translation.z.abs() < 1e-3);
+    let mut in_pose = f.instance(&asset);
+    in_pose.set_root_motion_extraction(false);
+    step(&mut in_pose, 0.5);
+    assert!(in_pose.report.root_motion.is_identity(), "nothing extracted");
+    assert!(near(in_pose.pose().bones[0].translation.z, 2.0), "the root bone carries the travel itself: {}", in_pose.pose().bones[0].translation.z);
 }
