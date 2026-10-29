@@ -49,6 +49,8 @@ pub trait EditorModel {
     fn validation(&self) -> Vec<Diagnostic>;
     fn selection(&self) -> &AnimSelection;
     fn clear_selection(&mut self);
+    /// Register this document's history with the host so Undo/Redo and the Edit menu reach it.
+    fn adopt_undo(&self, service: &plugin_editor_api::UndoService);
 }
 
 /// Implements [`EditorModel`] for a model with `doc` and `selection` fields
@@ -113,6 +115,9 @@ macro_rules! editor_model {
             }
             fn selection(&self) -> &$crate::anim_editors::selection::AnimSelection {
                 &self.selection
+            }
+            fn adopt_undo(&self, service: &plugin_editor_api::UndoService) {
+                service.adopt(&plugin_editor_api::DocumentId::for_path(self.doc.path()), &self.doc.history());
             }
             fn clear_selection(&mut self) {
                 self.selection = $crate::anim_editors::selection::AnimSelection::None;
@@ -904,6 +909,12 @@ pub fn frame<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Context<
 #[macro_export]
 macro_rules! anim_panel {
     ($view:ty, $id:expr) => {
+        impl $view {
+            /// Register the document's undo history with the host.
+            pub fn adopt_undo(&self, service: &plugin_editor_api::UndoService) {
+                $crate::anim_editors::views::chrome::EditorModel::adopt_undo($crate::anim_editors::views::chrome::EditorBody::model(self), service);
+            }
+        }
         impl gpui::EventEmitter<ui::dock::PanelEvent> for $view {}
         impl gpui::Focusable for $view {
             fn focus_handle(&self, _cx: &gpui::App) -> gpui::FocusHandle {

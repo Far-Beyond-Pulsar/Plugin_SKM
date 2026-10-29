@@ -38,7 +38,6 @@ use serde_json::json;
 use ui::dock::PanelView;
 
 mod anim_editors;
-mod animation_assets_editor;
 mod core;
 mod editor;
 mod rendering;
@@ -94,8 +93,8 @@ pub const POSE_DATABASE_FILE_TYPE: &str = "pose_database";
 /// The create-menu entry of one high-level animation asset. Its default
 /// content is a valid empty document written by the real codec, so a new file
 /// opens without repair.
-fn animation_asset_file_type(kind: animation_assets_editor::AnimationAssetEditorKind) -> FileTypeDefinition {
-    use animation_assets_editor::AnimationAssetEditorKind as K;
+fn animation_asset_file_type(kind: anim_editors::kinds::AnimationAssetEditorKind) -> FileTypeDefinition {
+    use anim_editors::kinds::AnimationAssetEditorKind as K;
     let color = match kind {
         K::BlendSpace => 0x7E57C2,
         K::Montage => 0x26A69A,
@@ -209,7 +208,7 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 creation_directory: None,
             },
         ];
-        types.extend(animation_assets_editor::AnimationAssetEditorKind::ALL.map(animation_asset_file_type));
+        types.extend(anim_editors::kinds::AnimationAssetEditorKind::ALL.map(animation_asset_file_type));
         types
     }
 
@@ -234,7 +233,7 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 supported_file_types: vec![FileTypeId::new(SKELETAL_MESH_FILE_TYPE)],
             },
         ];
-        editors.extend(animation_assets_editor::AnimationAssetEditorKind::ALL.map(|kind| EditorMetadata {
+        editors.extend(anim_editors::kinds::AnimationAssetEditorKind::ALL.map(|kind| EditorMetadata {
             id: EditorId::new(kind.editor_id()),
             display_name: format!("{} Editor", kind.title()).into(),
             supported_file_types: vec![FileTypeId::new(kind.file_type())],
@@ -267,11 +266,8 @@ impl EditorPluginEditor for SkeletalAnimationPlugin {
                 },
             );
         }
-        for kind in animation_assets_editor::AnimationAssetEditorKind::ALL {
-            registry.register_fn(EditorId::new(kind.editor_id()), move |file_path, window, cx| {
-                let panel = animation_assets_editor::AnimationAssetEditor::open(file_path, kind, window, cx)?;
-                Ok(Arc::new(panel) as Arc<dyn PanelView>)
-            });
+        for kind in anim_editors::kinds::AnimationAssetEditorKind::ALL {
+            registry.register_fn_with_settings(EditorId::new(kind.editor_id()), move |file_path, settings, window, cx| kind.open(file_path, Some(&settings.services().undo), window, cx));
         }
     }
 }
@@ -387,7 +383,7 @@ mod tests {
 
     #[test]
     fn every_high_level_asset_is_registered_end_to_end_with_a_valid_default() {
-        use crate::animation_assets_editor::AnimationAssetEditorKind as K;
+        use crate::anim_editors::kinds::AnimationAssetEditorKind as K;
         use pulsar_reflection::AssetKind;
         let plugin = SkeletalAnimationPlugin::default();
         let file_types = plugin.file_types();
@@ -407,9 +403,8 @@ mod tests {
                 && e.supported_file_types.iter().any(|t| t.as_str() == kind.file_type())));
             // the menu writes this content as the new file; the real codec must accept it
             let text = definition.default_content.to_string();
-            let (document, _) = crate::animation_assets_editor::parse_for_test(kind, &text)
-                .unwrap_or_else(|e| panic!("{} default content does not load: {e}", kind.title()));
-            assert!(!document.is_empty());
+            let id = kind.parses(&text).unwrap_or_else(|e| panic!("{} default content does not load: {e}", kind.title()));
+            assert!(!id.is_empty());
             // and it indexes under the kind the picker and Reflection use
             assert_eq!(skeletal_assets::dependencies::kind_of_extension(kind.extension()), Some(kind.asset_kind()));
         }
