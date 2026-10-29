@@ -205,6 +205,13 @@ pub struct DesiredTrajectory {
     pub velocity: Vec3,
 }
 
+impl DesiredTrajectory {
+    /// A constant desired velocity in the actor frame, from plain numbers.
+    pub fn from_array(velocity: [f32; 3]) -> Self {
+        Self { velocity: Vec3::from_array(velocity) }
+    }
+}
+
 fn push_trajectory(out: &mut Vec<f32>, position: bool, facing: bool, velocity: bool, p: Vec3, f: Vec3, v: Vec3) {
     if position {
         out.extend_from_slice(&p.to_array());
