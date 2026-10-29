@@ -324,6 +324,28 @@ impl RuntimeSkeleton {
         out
     }
 
+    /// Mesh-space transforms where some bones are owned by something else (a
+    /// physics body): an overridden bone takes its given mesh-space matrix and
+    /// every other bone keeps its animated local transform, so descendants of an
+    /// overridden bone follow it unless they are overridden themselves.
+    pub fn to_mesh_space_with_overrides(&self, local: &[BoneTransform], overrides: &[(usize, Mat4)]) -> Vec<Mat4> {
+        let mut owned: Vec<Option<Mat4>> = vec![None; self.len()];
+        for &(bone, matrix) in overrides {
+            if let Some(slot) = owned.get_mut(bone) {
+                *slot = Some(matrix);
+            }
+        }
+        let mut out = vec![Mat4::IDENTITY; self.len()];
+        for &i in &self.order {
+            out[i] = match (owned[i], self.parents[i]) {
+                (Some(m), _) => m,
+                (None, Some(p)) => out[p] * local[i].to_mat4(),
+                (None, None) => local[i].to_mat4(),
+            };
+        }
+        out
+    }
+
     /// Local transforms that produce `mesh` (the inverse of [`Self::to_mesh_space`]).
     pub fn from_mesh_space(&self, mesh: &[Mat4]) -> Vec<BoneTransform> {
         let mut out = vec![BoneTransform::IDENTITY; self.len()];
@@ -510,5 +532,23 @@ pub(crate) mod tests {
         b.insert("y".into(), 1.0);
         let c = blend_curves(&a, &b, 0.25);
         assert!((c["x"] - 0.75).abs() < 1e-6 && (c["y"] - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn an_overridden_bone_takes_its_matrix_and_its_children_follow_it() {
+        let skel = RuntimeSkeleton::new("s", &chain_skeleton(4)).unwrap();
+        let pose = skel.bind_pose();
+        let plain = skel.to_mesh_space(&pose.bones);
+        assert_eq!(skel.to_mesh_space_with_overrides(&pose.bones, &[]), plain, "no overrides: the animated pose");
+        // bone 1 is owned by a body that sits 5 up; bones 2 and 3 keep their local offsets under it
+        let owned = Mat4::from_translation(Vec3::new(0.0, 5.0, 0.0));
+        let out = skel.to_mesh_space_with_overrides(&pose.bones, &[(1, owned)]);
+        assert_eq!(out[0], plain[0], "the parent is untouched");
+        assert_eq!(out[1], owned);
+        assert!((out[2].w_axis.y - 6.0).abs() < 1e-5 && (out[3].w_axis.y - 7.0).abs() < 1e-5, "children follow: {:?} {:?}", out[2].w_axis, out[3].w_axis);
+        // a descendant that is itself owned does not follow
+        let both = skel.to_mesh_space_with_overrides(&pose.bones, &[(1, owned), (3, Mat4::from_translation(Vec3::new(9.0, 0.0, 0.0)))]);
+        assert!((both[2].w_axis.y - 6.0).abs() < 1e-5 && both[3].w_axis.x == 9.0);
+        assert_eq!(skel.to_mesh_space_with_overrides(&pose.bones, &[(99, owned)]), plain, "unknown bones are ignored");
     }
 }

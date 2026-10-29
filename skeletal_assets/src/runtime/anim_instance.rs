@@ -485,11 +485,11 @@ pub const SINGLE_SEQUENCE_NAME: &str = "single sequence";
 /// The compiled form of "just play this sequence": a Sequence Player feeding an
 /// Output Pose. Components migrate a plain animation reference to this so there
 /// is one runtime, not a second player.
-pub fn single_sequence_graph(skeleton: Arc<RuntimeSkeleton>, clip: Arc<CompiledClip>, looping: bool) -> Arc<CompiledGraph> {
+pub fn single_sequence_graph(skeleton: Arc<RuntimeSkeleton>, clip: Arc<CompiledClip>, looping: bool, reverse: bool) -> Arc<CompiledGraph> {
     let nodes = vec![
         CNode {
             id: "player".into(),
-            kind: NodeKind::SequencePlayer(SeqCfg { clip: clip.clone(), rate: 1.0, start: 0.0, looping, sync: None }),
+            kind: NodeKind::SequencePlayer(SeqCfg { clip: clip.clone(), rate: if reverse { -1.0 } else { 1.0 }, start: 0.0, looping, sync: None }),
             inputs: vec![None, None],
             skeleton: skeleton.clone(),
         },

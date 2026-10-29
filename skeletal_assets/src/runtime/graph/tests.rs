@@ -977,7 +977,7 @@ fn pausing_scrubbing_and_the_single_sequence_player_never_raise_gameplay_data() 
     let a = f.slide("A", 4.0, 0.0, 4.0);
     let clip = Arc::new(crate::runtime::clip::CompiledClip::compile(&f.src.sequences[&a], &f.skel));
     let mut inst = AnimInstance::new(f.skel.clone());
-    inst.set_graph(crate::runtime::anim_instance::single_sequence_graph(f.skel.clone(), clip, true)).unwrap();
+    inst.set_graph(crate::runtime::anim_instance::single_sequence_graph(f.skel.clone(), clip, true, false)).unwrap();
     step(&mut inst, 1.0);
     assert!(near(x1(&inst), 1.0));
     assert_eq!(inst.report.spans.len(), 1, "playback is reported as a span");
