@@ -42,6 +42,23 @@ pub struct CompiledClip {
 }
 
 impl CompiledClip {
+    /// A clip with no tracks, for code that only needs a sample's place in a
+    /// blend space (editor layout and weight preview), never its motion.
+    pub fn placeholder(id: &str, duration: f32) -> Self {
+        Self {
+            id: id.to_string(),
+            name: id.to_string(),
+            duration: duration.max(0.0),
+            fps: 30.0,
+            tracks: Vec::new(),
+            curves: Vec::new(),
+            root_motion: RootMotionSettings::default(),
+            root_bone: None,
+            orphan_tracks: Vec::new(),
+            source: None,
+        }
+    }
+
     pub fn compile(asset: &AnimSeqAsset, skel: &RuntimeSkeleton) -> Self {
         let mut tracks: Vec<Option<Vec<Key>>> = vec![None; skel.len()];
         let mut orphan_tracks = Vec::new();

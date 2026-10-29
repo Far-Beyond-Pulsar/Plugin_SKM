@@ -85,6 +85,14 @@ impl CompiledBlendSpace {
         Ok(space)
     }
 
+    /// The triangulation and weight solve of `asset` without any clip data.
+    /// This is the same solver the runtime uses, so the editor previews exactly
+    /// what will play. `None` when the asset has no samples.
+    pub fn layout(asset: &BlendSpaceAsset) -> Option<Self> {
+        let clip = Arc::new(CompiledClip::placeholder("layout", 1.0));
+        Self::compile(asset, asset.samples.iter().map(|_| clip.clone()).collect()).ok()
+    }
+
     fn normalised(&self, s: &CompiledSample) -> [f32; 2] {
         let nx = norm(s.x, &self.x_axis);
         let ny = self.y_axis.as_ref().map_or(0.0, |a| norm(s.y, a));

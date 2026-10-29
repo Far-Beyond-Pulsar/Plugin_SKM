@@ -37,6 +37,7 @@ use plugin_editor_api::*;
 use serde_json::json;
 use ui::dock::PanelView;
 
+mod anim_editors;
 mod animation_assets_editor;
 mod core;
 mod editor;
