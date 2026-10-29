@@ -608,7 +608,7 @@ pub static CATALOGUE: &[NodeDef] = &[
     once(node(
         "anim.layer_input", "Layer Input", "Structure",
         "The pose passed in by the node that runs this layer.",
-        &[GraphKind::Layer], NO_PINS, POSE_OUT, &[],
+        &[GraphKind::Layer, GraphKind::Main], NO_PINS, POSE_OUT, &[],
         eval("Outputs the caller's input pose, or the reference pose when the caller connected none.", RM::FromFirstInput, CF::Passthrough),
     )),
     once(node(
@@ -635,6 +635,39 @@ pub static CATALOGUE: &[NodeDef] = &[
         "math.constant_float", "Float", "Values", "A constant number.",
         VALUE, NO_PINS, &[req("value", T::Float, "")], &[prop("value", P::Float { min: -1.0e9, max: 1.0e9 }, "0.0", "The number")],
         eval("Outputs the property value.", RM::None, CF::None),
+    ),
+    node(
+        "math.constant_vector", "Vector", "Values", "A constant vector.",
+        VALUE, NO_PINS, &[req("value", T::Vector, "")], &[prop("value", P::Vector, "[0.0,0.0,0.0]", "The vector")],
+        eval("Outputs the property value.", RM::None, CF::None),
+    ),
+    node(
+        "math.make_vector", "Make Vector", "Values", "Builds a vector from three numbers.",
+        VALUE, &[opt("x", T::Float, "Falls back to the x property"), opt("y", T::Float, "Falls back to the y property"), opt("z", T::Float, "Falls back to the z property")], &[req("result", T::Vector, "")],
+        &[
+            prop("x", P::Float { min: -1.0e9, max: 1.0e9 }, "0.0", "Default x"),
+            prop("y", P::Float { min: -1.0e9, max: 1.0e9 }, "0.0", "Default y"),
+            prop("z", P::Float { min: -1.0e9, max: 1.0e9 }, "0.0", "Default z"),
+        ],
+        eval("Outputs (x, y, z).", RM::None, CF::None),
+    ),
+    node(
+        "anim.make_transform", "Make Transform", "Values", "Builds an IK target from a location and an Euler rotation.",
+        VALUE, &[opt("location", T::Vector, "Falls back to the location property"), opt("rotation", T::Vector, "Euler degrees XYZ; falls back to the rotation property")], &[req("result", T::Transform, "")],
+        &[
+            prop("location", P::Vector, "[0.0,0.0,0.0]", "Default location, mesh space"),
+            prop("rotation", P::Vector, "[0.0,0.0,0.0]", "Default Euler rotation in degrees"),
+        ],
+        eval("Outputs a translation + rotation target; rotation is Euler degrees applied X, then Y, then Z.", RM::None, CF::None),
+    ),
+    node(
+        "anim.get_bone_transform", "Get Bone Transform", "Values", "Reads a bone's transform from a pose.",
+        VALUE, &[req("pose", T::Pose, "The pose to read")], &[req("result", T::Transform, "")],
+        &[
+            need("bone", P::Bone, "The bone to read"),
+            prop("space", P::Enum(&["mesh", "local"]), "\"mesh\"", "Mesh space or relative to the parent"),
+        ],
+        needs_skel(eval("Returns the bone's transform in the chosen space from the evaluated input pose (the previous update's value while weights are decided).", RM::None, CF::Modifies)),
     ),
     node(
         "math.constant_bool", "Bool", "Values", "A constant boolean.",

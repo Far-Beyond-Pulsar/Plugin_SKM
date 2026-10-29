@@ -649,3 +649,38 @@ pub fn validate_against_skeleton(asset: &AnimationGraphAsset, skeleton: &Skeleto
     }
     out
 }
+
+/// Nodes (as `(graph label, node id)`) whose poses are over a Retarget node's
+/// *source* skeleton: everything upstream of a Retarget `source` input. Their
+/// sequences belong to the profile's source skeleton, not the graph's, so
+/// dependency checks must not hold them to the graph's skeleton.
+pub fn retarget_source_nodes(asset: &AnimationGraphAsset) -> HashSet<(String, String)> {
+    let mut out = HashSet::new();
+    for (sub, _, graph) in asset.graphs() {
+        let graph_label = label(sub);
+        let mut stack: Vec<String> = graph
+            .connections
+            .iter()
+            .filter(|c| c.target_pin == "source" && graph.nodes.get(&c.target_node).is_some_and(|n| n.node_type == "anim.retarget"))
+            .map(|c| c.source_node.clone())
+            .collect();
+        while let Some(node) = stack.pop() {
+            if !out.insert((graph_label.clone(), node.clone())) {
+                continue;
+            }
+            stack.extend(graph.connections.iter().filter(|c| c.target_node == node).map(|c| c.source_node.clone()));
+            let Some(n) = graph.nodes.get(&node) else { continue };
+            if n.node_type == "anim.use_cached_pose" {
+                let name = n.properties.get("name").and_then(Value::as_str);
+                stack.extend(
+                    graph
+                        .nodes
+                        .values()
+                        .filter(|s| s.node_type == "anim.save_cached_pose" && s.properties.get("name").and_then(Value::as_str) == name)
+                        .map(|s| s.id.clone()),
+                );
+            }
+        }
+    }
+    out
+}

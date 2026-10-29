@@ -12,3 +12,7 @@ pub mod ik;
 pub mod ikrig;
 pub mod retarget;
 pub mod posesearch;
+pub mod montage;
+pub mod graph;
+pub mod memory;
+pub mod anim_instance;

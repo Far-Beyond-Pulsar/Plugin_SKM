@@ -221,9 +221,14 @@ pub fn extract(kind: &str, bytes: &[u8]) -> Result<Extracted, String> {
             if let Some(s) = &a.skeleton {
                 edges.push(edge(SkeletonAssetKind::KIND, s.as_str(), "skeleton", Unconstrained));
             }
+            let source_domain = crate::anim_graph::validate::retarget_source_nodes(&a);
             for r in asset_references(&a) {
                 // The retarget node's profile maps *onto* this graph's skeleton.
-                let rule = if r.kind == RetargetProfileAssetKind::KIND || r.kind == IkRetargeterAssetKind::KIND {
+                let in_source_domain = source_domain.contains(&(r.graph.clone(), r.node.clone()));
+                let rule = if in_source_domain {
+                    // the compiler checks these against the Retarget node's profile
+                    Unconstrained
+                } else if r.kind == RetargetProfileAssetKind::KIND || r.kind == IkRetargeterAssetKind::KIND {
                     OwnerTarget
                 } else {
                     SameAsOwner

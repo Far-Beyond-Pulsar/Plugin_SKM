@@ -10,6 +10,7 @@
 //! Camera, selection, active-state highlighting and preview inputs are editor
 //! state and never stored here.
 
+pub mod builder;
 pub mod catalogue;
 pub mod migrate;
 pub mod validate;
