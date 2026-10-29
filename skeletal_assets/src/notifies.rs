@@ -11,6 +11,9 @@ pub struct AnimationNotify {
     pub target: NotifyTarget,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<NotifyField>,
+    /// Id of the [`crate::notify_schema::NotifyPayloadSchema`] this notify's fields follow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
 }
 
 /// reusable assets name a class variable; they never store a live Entity handle.
@@ -45,7 +48,7 @@ pub enum NotifyValue {
     String(String),
 }
 
-const RESERVED_NOTIFY_FIELDS: &[&str] = &[
+pub(crate) const RESERVED_NOTIFY_FIELDS: &[&str] = &[
     "entity",
     "source",
     "sequence_id",
@@ -62,7 +65,7 @@ const RESERVED_NOTIFY_FIELDS: &[&str] = &[
     "Body",
 ];
 
-fn identifier(name: &str) -> bool {
+pub(crate) fn identifier(name: &str) -> bool {
     let mut chars = name.chars();
     chars
         .next()
@@ -84,6 +87,7 @@ impl AnimationNotify {
             time,
             target: NotifyTarget::Self_,
             fields: Vec::new(),
+            schema: None,
         }
     }
 }
@@ -332,13 +336,21 @@ pub(crate) fn validate_notify(notify: &AnimationNotify, duration: f32) -> Result
     if !notify.time.is_finite() || notify.time < 0.0 || notify.time > duration {
         return Err("Notify time must be within the clip".into());
     }
-    if let NotifyTarget::ClassVariable(variable) = &notify.target {
+    validate_target_and_fields(&notify.target, &notify.fields)
+}
+
+/// The target and free-form payload rules shared by notifies and notify states.
+pub(crate) fn validate_target_and_fields(
+    target: &NotifyTarget,
+    fields: &[NotifyField],
+) -> Result<(), String> {
+    if let NotifyTarget::ClassVariable(variable) = target {
         if !identifier(variable) {
             return Err("Target must name a class object-reference variable".into());
         }
     }
     let mut names = std::collections::HashSet::new();
-    for field in &notify.fields {
+    for field in fields {
         if !identifier(&field.name) || RESERVED_NOTIFY_FIELDS.contains(&field.name.as_str()) {
             return Err("Payload field needs a unique, nonreserved identifier".into());
         }

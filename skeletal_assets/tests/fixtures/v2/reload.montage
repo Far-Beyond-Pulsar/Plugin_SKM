@@ -1,0 +1,66 @@
+{
+  "version": 2,
+  "id": "c0a7a600-0000-4000-8000-0000000000c1",
+  "name": "Rifle Reload",
+  "skeleton": "11111111-1111-4111-8111-111111111111",
+  "tracks": [
+    {
+      "id": "track-lower",
+      "slot": "LowerBody",
+      "group": "DefaultGroup",
+      "segments": [
+        {
+          "id": "seg-0",
+          "sequence": "aaaaaaaa-0000-4000-8000-000000000001",
+          "start": 0.0,
+          "clip_start": 0.0,
+          "play_rate": 1.0,
+          "loop_count": 1
+        }
+      ]
+    },
+    {
+      "id": "track-upper",
+      "slot": "UpperBody",
+      "group": "DefaultGroup",
+      "segments": [
+        {
+          "id": "seg-1",
+          "sequence": "aaaaaaaa-0000-4000-8000-000000000002",
+          "start": 0.5,
+          "clip_start": 0.0,
+          "play_rate": 1.0,
+          "loop_count": 1
+        }
+      ],
+      "mask": {
+        "branches": [
+          {
+            "bone": "spine",
+            "weight": 1.0
+          }
+        ],
+        "default_weight": 0.0
+      }
+    }
+  ],
+  "sections": [
+    {
+      "id": "s1",
+      "name": "Intro",
+      "start": 0.0
+    }
+  ],
+  "blend_in": {
+    "duration": 0.2,
+    "curve": "ease_in_out"
+  },
+  "blend_out": {
+    "duration": 0.2,
+    "curve": "ease_in_out"
+  },
+  "group": "DefaultGroup",
+  "interrupt": "replace_group",
+  "priority": 0,
+  "root_motion": "montage"
+}

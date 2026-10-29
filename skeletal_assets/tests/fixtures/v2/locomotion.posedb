@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "id": "0d000000-0000-4000-8000-0000000000c1",
+  "name": "Locomotion DB",
+  "skeleton": "11111111-1111-4111-8111-111111111111",
+  "sources": [
+    {
+      "id": "src-walk",
+      "type": "sequence",
+      "sequence": "aaaaaaaa-0000-4000-8000-000000000001",
+      "enabled": true,
+      "mirrored": false,
+      "looping": true,
+      "cost_bias": 0.0
+    },
+    {
+      "id": "src-loco",
+      "type": "blend_space",
+      "blend_space": "b1e4d500-0000-4000-8000-000000000001",
+      "enabled": false,
+      "mirrored": true,
+      "looping": false,
+      "cost_bias": 0.5
+    }
+  ],
+  "channels": [
+    {
+      "id": "ch-foot",
+      "name": "FootPos",
+      "weight": 1.0,
+      "normalization": "standardize",
+      "type": "bone_position",
+      "bone": "foot_l"
+    },
+    {
+      "id": "ch-traj",
+      "name": "Trajectory",
+      "weight": 2.0,
+      "normalization": "standardize",
+      "type": "trajectory",
+      "offsets": [
+        -0.2,
+        0.2,
+        0.5
+      ],
+      "position": true,
+      "facing": true,
+      "velocity": false
+    }
+  ],
+  "sampling": {
+    "interval": 0.033333335,
+    "end_margin": 0.1
+  },
+  "search": {
+    "candidate_count": 1,
+    "continuing_pose_bias": 0.0,
+    "blend_time": 0.2,
+    "query_history": 64
+  }
+}

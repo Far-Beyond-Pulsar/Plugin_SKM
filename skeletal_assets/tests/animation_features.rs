@@ -15,6 +15,7 @@ fn advance(from: f64, to: f64, looping: bool) -> PlaybackInterval {
 fn notify(id: &str, time: f32) -> AnimationNotify {
     AnimationNotify {
         target: Default::default(),
+        schema: None,
         fields: Vec::new(),
         id: id.into(),
         name: id.into(),
@@ -639,7 +640,7 @@ fn extended_notify_schema_versions_round_trips_and_rejects_invalid_saves() {
         asset.features
     );
     let mut future = value.clone();
-    future["version"] = 4.into();
+    future["version"] = 5.into();
     assert!(AnimSeqAsset::parse(&future.to_string()).is_err());
     let old = r#"{"version":2,"duration":1.0,"fps":30.0,"tracks":[],"name":"old","notifies":[{"id":"old","name":"Old","time":0.5}]}"#;
     let old = AnimSeqAsset::parse(old).unwrap();

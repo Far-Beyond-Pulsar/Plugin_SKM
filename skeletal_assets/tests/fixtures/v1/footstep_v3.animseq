@@ -1,0 +1,1 @@
+{"version":3,"id":"aaaaaaaa-0000-4000-8000-000000000002","skeleton":"11111111-1111-4111-8111-111111111111","name":"Run","duration":2.0,"fps":30.0,"tracks":[],"notifies":[{"id":"n-step","name":"Footstep","time":0.5,"target":{"kind":"class_variable","variable":"Sound"},"fields":[{"name":"volume","type":"float","value":0.8}]}]}

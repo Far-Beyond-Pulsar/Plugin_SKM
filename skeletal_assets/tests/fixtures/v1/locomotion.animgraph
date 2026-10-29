@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "id": "d0a4b100-0000-4000-8000-000000000001",
+  "name": "Locomotion",
+  "skeleton": "11111111-1111-4111-8111-111111111111",
+  "future_note": { "keep": true },
+  "nodes": [
+    { "id": "sequence_walk", "name": "Walk", "type": "sequence", "sequence": "aaaaaaaa-0000-4000-8000-000000000001" },
+    { "id": "blend_loco", "name": "Locomotion", "type": "blend_space", "blend_space": "b1e4d500-0000-4000-8000-000000000001" },
+    { "id": "sequence_idle", "name": "Idle", "type": "sequence", "sequence": "aaaaaaaa-0000-4000-8000-000000000002" },
+    { "id": "output", "name": "Output", "type": "output" }
+  ],
+  "connections": [
+    { "from": "blend_loco", "to": "output" },
+    { "from": "sequence_walk", "to": "output" },
+    { "from": "sequence_walk", "to": "sequence_idle" },
+    { "from": "output", "to": "blend_loco" },
+    { "from": "ghost", "to": "output" }
+  ]
+}

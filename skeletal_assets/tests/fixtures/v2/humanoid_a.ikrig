@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "id": "1c000000-0000-4000-8000-0000000000c1",
+  "name": "Humanoid",
+  "skeleton": "11111111-1111-4111-8111-111111111111",
+  "retarget_root": "pelvis",
+  "chains": [
+    {
+      "id": "c-leg",
+      "name": "LeftLeg",
+      "start_bone": "thigh_l",
+      "end_bone": "foot_l",
+      "goal": "g-foot"
+    },
+    {
+      "id": "c-spine",
+      "name": "Spine",
+      "start_bone": "spine",
+      "end_bone": "head"
+    }
+  ],
+  "goals": [
+    {
+      "id": "g-foot",
+      "name": "LeftFoot",
+      "bone": "foot_l",
+      "position_alpha": 1.0,
+      "rotation_alpha": 1.0,
+      "default_offset": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "solvers": [
+    {
+      "id": "s-leg",
+      "name": "Leg",
+      "enabled": true,
+      "type": "two_bone",
+      "chain": "c-leg",
+      "goal": "g-foot",
+      "allow_stretch": false,
+      "max_stretch": 1.25,
+      "take_goal_rotation": false
+    }
+  ]
+}

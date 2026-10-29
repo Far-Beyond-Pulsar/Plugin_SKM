@@ -31,7 +31,7 @@ pub const ANIMSEQ_EXTENSION: &str = "animseq";
 /// newer ones are refused rather than half-read.
 pub const FORMAT_VERSION: u32 = 1;
 /// version 2 protects sequence features; version 3 adds notify targets and fields.
-pub const ANIMSEQ_FORMAT_VERSION: u32 = 3;
+pub const ANIMSEQ_FORMAT_VERSION: u32 = 4;
 
 fn current_version() -> u32 {
     FORMAT_VERSION
@@ -116,6 +116,9 @@ pub struct AnimSeqAsset {
     pub clip: AnimationClip,
     #[serde(flatten)]
     pub features: AnimationFeatures,
+    /// Fields this build does not know, written back unchanged.
+    #[serde(flatten)]
+    pub extra: crate::codec::Extra,
 }
 
 impl Serialize for AnimSeqAsset {
@@ -131,12 +134,16 @@ impl Serialize for AnimSeqAsset {
             clip: &'a AnimationClip,
             #[serde(flatten)]
             features: &'a AnimationFeatures,
+            #[serde(flatten)]
+            extra: &'a crate::codec::Extra,
         }
         let version = if self.features.is_empty() {
             self.version
         } else {
             self.version.max(
-                if self
+                if self.features.needs_v4() {
+                    4
+                } else if self
                     .features
                     .notifies
                     .iter()
@@ -155,6 +162,7 @@ impl Serialize for AnimSeqAsset {
             preview_mesh: self.preview_mesh.as_ref(),
             clip: &self.clip,
             features: &self.features,
+            extra: &self.extra,
         }
         .serialize(serializer)
     }
@@ -169,6 +177,7 @@ impl AnimSeqAsset {
             preview_mesh: None,
             clip,
             features: AnimationFeatures::default(),
+            extra: Default::default(),
         }
     }
 
