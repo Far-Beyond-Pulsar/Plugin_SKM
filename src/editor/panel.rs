@@ -1860,5 +1860,6 @@ fn remember_asset_id(root: &Path, id: &str, path: &Path) {
         {
             log::debug!("could not cache asset id for {}: {error:#}", path.display());
         }
+        crate::core::asset_index::record_asset(root, path);
     }
 }

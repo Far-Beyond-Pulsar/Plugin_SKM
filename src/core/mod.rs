@@ -2,6 +2,7 @@
 //! asset formats, ids, math and skinning live in the `skeletal_assets` crate
 //! (shared with the importer) and are re-exported here under their old paths.
 
+pub mod asset_index;
 pub mod library;
 pub mod material_ids;
 pub mod mesh_library;
