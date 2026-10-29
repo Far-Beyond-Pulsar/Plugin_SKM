@@ -12,6 +12,7 @@
 //! - [`ids`]: the stable ids assets are linked by
 //! - [`math`], [`skeleton`], [`animation`]: the data model and pose evaluation
 //! - [`skinning`]: CPU skinning of a skeletal mesh by a pose
+//! - [`runtime`]: compiled graphs, pose evaluation, Montage, IK, retarget and Pose Search execution
 //! - [`codec`], [`diagnostics`], [`issue`]: shared codec helpers and what checks report
 
 pub mod animation;
@@ -44,3 +45,5 @@ pub mod picker;
 pub mod pose_db;
 pub mod report;
 pub mod retarget;
+
+pub mod runtime;

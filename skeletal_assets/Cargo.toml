@@ -16,6 +16,7 @@ pulsar_reflection = { workspace = true }
 anyhow     = { workspace = true }
 sha2       = { workspace = true }
 graphy-blueprint = { workspace = true }
+glam       = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
