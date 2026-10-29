@@ -16,6 +16,8 @@
 pub mod blend_space_model;
 pub mod document;
 pub mod history;
+pub mod montage_model;
+pub mod notify_edit;
 pub mod refs;
 pub mod selection;
 pub mod store;
