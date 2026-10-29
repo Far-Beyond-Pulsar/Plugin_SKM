@@ -78,6 +78,24 @@ pub fn to_canvas(graph: &authored::GraphDescription) -> GraphDescription {
             out
         })
         .collect();
+    doc.zip_ties = graph
+        .zip_ties
+        .iter()
+        .map(|tie| graphy::GraphZipTie {
+            position: Position::new(f64::from(tie.position.0), f64::from(tie.position.1)),
+            straight_length: f64::from(tie.straight_length),
+            wires: tie
+                .wires
+                .iter()
+                .map(|edge| graphy::ZipTieEdge {
+                    source_node: edge.source_node.clone(),
+                    source_pin: edge.source_pin.clone(),
+                    target_node: edge.target_node.clone(),
+                    target_pin: edge.target_pin.clone(),
+                })
+                .collect(),
+        })
+        .collect();
     doc
 }
 
@@ -142,6 +160,24 @@ pub fn to_authored(doc: &GraphDescription) -> authored::GraphDescription {
             size: (c.size.0 as f32, c.size.1 as f32),
             color: c.color,
             contained_node_ids: c.contained_node_ids.clone(),
+        })
+        .collect();
+    out.zip_ties = doc
+        .zip_ties
+        .iter()
+        .map(|tie| authored::BlueprintZipTie {
+            position: (tie.position.x as f32, tie.position.y as f32),
+            straight_length: tie.straight_length as f32,
+            wires: tie
+                .wires
+                .iter()
+                .map(|edge| authored::BlueprintZipTieEdge {
+                    source_node: edge.source_node.clone(),
+                    source_pin: edge.source_pin.clone(),
+                    target_node: edge.target_node.clone(),
+                    target_pin: edge.target_pin.clone(),
+                })
+                .collect(),
         })
         .collect();
     out
