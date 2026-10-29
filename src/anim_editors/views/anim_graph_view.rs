@@ -31,6 +31,8 @@ use super::anim_graph_canvas::{to_authored, to_canvas, AnimProfile, ParamTypes};
 use super::chrome::{edit, empty_inspector, fmt_f32, frame, labelled, parse_f32, section, value_row, Chrome, EditorBody, EditorHost, EditorModel, Widgets};
 use super::skeleton_canvas;
 
+mod bone_mask_panel;
+
 fn graph_theme(cx: &App) -> graphy_render::Theme {
     let t = cx.theme();
     let opaque = |c: Hsla| {
@@ -426,7 +428,7 @@ impl AnimGraphEditor {
                         let _ = window;
                     })).into_any_element());
                 }
-                PropKind::BoneMask => rows.push(value_row(&label, "bone mask (set in the mask editor)", cx)),
+                PropKind::BoneMask => rows.extend(bone_mask_panel::rows(self, &node, &label, window, cx)),
                 _ => {
                     let text = match &current {
                         Value::Null => String::new(),
@@ -512,6 +514,10 @@ impl EditorHost for AnimGraphEditor {
                 _ => self.chrome.status = Some(format!("Could not set {name}: enter a value of its type.")),
             }
             cx.notify();
+            return;
+        }
+        if let Some(rest) = key.strip_prefix("mask.") {
+            bone_mask_panel::commit(self, rest, text, window, cx);
             return;
         }
         let sel = self.model.selection.clone();

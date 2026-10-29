@@ -371,9 +371,29 @@ impl AnimGraphModel {
                     return Err("enter text".into());
                 }
             }
-            PropKind::BoneMask | PropKind::BoneList | PropKind::NameList => {}
+            PropKind::BoneMask => super::bone_mask_edit::validate(value, None)?,
+            PropKind::BoneList | PropKind::NameList => {}
         }
         Ok(())
+    }
+
+    /// Edit one layer's bone mask of a node as a single undoable property edit.
+    /// The result is checked against `skeleton` (the graph's), so a mask never
+    /// names a bone the skeleton lacks.
+    pub fn edit_mask(&mut self, node: &str, layer: usize, skeleton: Option<&skeletal_assets::skeleton::Skeleton>, change: impl FnOnce(&mut skeletal_assets::bone_mask::BoneMaskSpec) -> Result<(), String>) -> Result<(), String> {
+        let n = self.graph().nodes.get(node).ok_or("no such node")?.clone();
+        if n.node_type != "anim.layered_blend_per_bone" {
+            return Err("only a Layered Blend per Bone node has bone masks".into());
+        }
+        let layers = n.properties.get("count").and_then(Value::as_u64).unwrap_or(1) as usize;
+        if layer >= layers.max(1) {
+            return Err("no such layer".into());
+        }
+        let mut specs = super::bone_mask_edit::read(n.properties.get("masks").unwrap_or(&Value::Null), layers);
+        change(&mut specs[layer])?;
+        let value = super::bone_mask_edit::write(&specs);
+        super::bone_mask_edit::validate(&value, skeleton)?;
+        self.set_property(node, "masks", value)
     }
 
     /// Set a node property. Pins that depend on it are refreshed; wires on pins
@@ -688,6 +708,37 @@ mod tests {
     fn model() -> AnimGraphModel {
         let store = MemStore::default();
         AnimGraphModel::open(Arc::new(store), Path::new("g.animgraph"), &AnimationGraphAsset::default().to_text().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn bone_masks_are_edited_per_layer_as_undoable_validated_property_edits() {
+        use skeletal_assets::bone_mask::BoneMaskSpec;
+        let skeleton = crate::core::sample::humanoid_skeleton();
+        let spine = skeleton.bones.iter().find(|b| b.name.to_lowercase().contains("spine")).unwrap().id.clone();
+        let mut m = model();
+        let plain = m.add_node("anim.sequence_player", (0.0, 0.0)).unwrap();
+        assert!(m.edit_mask(&plain, 0, None, |_| Ok(())).is_err(), "only a layered blend has masks");
+        let node = m.add_node("anim.layered_blend_per_bone", (0.0, 100.0)).unwrap();
+        m.set_property(&node, "count", json!(2)).unwrap();
+        m.edit_mask(&node, 1, Some(&skeleton), |s| {
+            crate::anim_editors::bone_mask_edit::apply_preset(s, &crate::anim_editors::bone_mask_edit::Preset::Subtree(spine.clone()));
+            Ok(())
+        })
+        .unwrap();
+        let stored = m.graph().nodes[&node].properties["masks"].clone();
+        let specs: Vec<BoneMaskSpec> = serde_json::from_value(stored).unwrap();
+        assert_eq!(specs.len(), 2, "one mask per layer");
+        assert_eq!(specs[1].branches[0].bone, spine);
+        assert!(m.edit_mask(&node, 5, None, |_| Ok(())).is_err(), "no such layer");
+        let before = m.graph().nodes[&node].properties["masks"].clone();
+        let refused = m.edit_mask(&node, 1, Some(&skeleton), |s| {
+            s.branches[0].bone = "ghost".into();
+            Ok(())
+        });
+        assert!(refused.unwrap_err().contains("ghost"));
+        assert_eq!(m.graph().nodes[&node].properties["masks"], before, "a refused edit changes nothing");
+        assert!(m.set_property(&node, "masks", json!([{ "branches": [], "default_weight": 9.0 }])).is_err(), "a raw property write is validated too");
+        assert!(m.doc.undo(), "the mask edit is one undo step");
     }
 
     #[test]

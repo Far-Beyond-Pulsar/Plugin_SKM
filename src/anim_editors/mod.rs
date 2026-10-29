@@ -15,6 +15,7 @@
 
 pub mod anim_graph_model;
 pub mod blend_space_model;
+pub mod bone_mask_edit;
 pub mod views;
 pub mod document;
 pub mod graph_preview;
