@@ -21,7 +21,6 @@ use super::pose::{slerp_short, BoneTransform, Pose, RootMotion, RuntimeSkeleton}
 
 #[derive(Clone, Debug)]
 struct ChainPair {
-    name: String,
     src: Vec<usize>,
     tgt: Vec<usize>,
     rotation: RotationMode,
@@ -139,7 +138,6 @@ impl RetargetPlan {
                             continue;
                         }
                         plan.pairs.push(ChainPair {
-                            name: target_rig.chains[t].name.clone(),
                             src: sb,
                             tgt: tb,
                             rotation: m.rotation,
@@ -161,7 +159,6 @@ impl RetargetPlan {
                     continue;
                 };
                 plan.pairs.push(ChainPair {
-                    name: plan.target.names[t].clone(),
                     src: vec![s],
                     tgt: vec![t],
                     rotation: m.rotation,
@@ -227,7 +224,6 @@ impl RetargetPlan {
             }
             if c.fk.enabled {
                 plan.pairs.push(ChainPair {
-                    name: c.target_chain.clone(),
                     src: sb,
                     tgt: tb,
                     rotation: c.fk.rotation,

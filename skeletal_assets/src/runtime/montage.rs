@@ -18,7 +18,7 @@ use crate::bone_mask::BoneMaskSpec;
 use crate::montage::{AnimationMontageAsset, BlendCurve, BlendSettings, InterruptPolicy, MontageRootMotion};
 
 use super::clip::CompiledClip;
-use super::pose::{BoneTransform, Pose, RootMotion, RuntimeSkeleton};
+use super::pose::{Pose, RootMotion, RuntimeSkeleton};
 
 #[derive(Clone, Debug)]
 pub struct CompiledSegment {
@@ -75,7 +75,7 @@ impl CompiledMontage {
     pub fn compile(
         asset: &AnimationMontageAsset,
         skel: &RuntimeSkeleton,
-        clip_of: &dyn Fn(&str) -> Option<Arc<CompiledClip>>,
+        clip_of: &mut dyn FnMut(&str) -> Option<Arc<CompiledClip>>,
     ) -> Result<Self, String> {
         let mut tracks = Vec::new();
         for t in &asset.tracks {
@@ -707,7 +707,7 @@ pub(crate) mod tests {
         let mut seqasset = clip_asset(name, 2.0, vec![translate_track(bone, [0.0, 1.0, 0.0], [2.0, 1.0, 0.0], 2.0)]);
         seqasset.features.root_motion.enabled = false;
         let clip = Arc::new(CompiledClip::compile(&seqasset, skel));
-        Arc::new(CompiledMontage::compile(&asset, skel, &|_| Some(clip.clone())).unwrap())
+        Arc::new(CompiledMontage::compile(&asset, skel, &mut |_| Some(clip.clone())).unwrap())
     }
 
     fn with(m: &Arc<CompiledMontage>, f: impl FnOnce(&mut CompiledMontage)) -> Arc<CompiledMontage> {
@@ -808,7 +808,7 @@ pub(crate) mod tests {
             MontageSection { id: "s3".into(), name: "End".into(), start: 1.5, next: None, extra: Default::default() },
         ];
         let clip = Arc::new(CompiledClip::compile(&clip_asset("c", 2.0, vec![]), skel));
-        Arc::new(CompiledMontage::compile(&asset, skel, &|_| Some(clip.clone())).unwrap())
+        Arc::new(CompiledMontage::compile(&asset, skel, &mut |_| Some(clip.clone())).unwrap())
     }
 
     #[test]

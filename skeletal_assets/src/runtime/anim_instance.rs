@@ -296,7 +296,16 @@ impl AnimInstance {
             }
             self.report.spans.extend(montage_spans);
         }
-        let new = pose.unwrap_or_else(|| Arc::new(self.skeleton.bind_pose()));
+        // a pose with a non-finite bone (a degenerate clip or solver input) never
+        // reaches the palette: the previous pose is kept and the problem is traced
+        let new = match pose {
+            Some(p) if !p.is_finite() => {
+                self.report.trace.push("non-finite pose rejected; holding the previous pose".into());
+                self.pose.clone()
+            }
+            Some(p) => p,
+            None => Arc::new(self.skeleton.bind_pose()),
+        };
         self.previous = std::mem::replace(&mut self.pose, new.clone());
         new
     }

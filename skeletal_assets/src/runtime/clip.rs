@@ -36,6 +36,9 @@ pub struct CompiledClip {
     root_bone: Option<usize>,
     /// Tracks whose bone the skeleton does not have (kept for diagnostics).
     pub orphan_tracks: Vec<String>,
+    /// The asset this was compiled from, when it was compiled from a shared one:
+    /// notify consumers read the clip's notifies and identity from it.
+    pub source: Option<std::sync::Arc<AnimSeqAsset>>,
 }
 
 impl CompiledClip {
@@ -80,7 +83,16 @@ impl CompiledClip {
             root_motion,
             root_bone,
             orphan_tracks,
+            source: None,
         }
+    }
+
+    /// Compile from a shared asset and keep it, so notify consumers can reach the
+    /// sequence's notifies without a second load.
+    pub fn compile_shared(asset: &std::sync::Arc<AnimSeqAsset>, skel: &RuntimeSkeleton) -> Self {
+        let mut clip = Self::compile(asset, skel);
+        clip.source = Some(asset.clone());
+        clip
     }
 
     pub fn has_track(&self, bone: usize) -> bool {

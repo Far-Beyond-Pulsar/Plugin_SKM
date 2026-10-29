@@ -68,7 +68,6 @@ struct ActiveBlend {
     duration: f32,
     curve: BlendCurve,
     interrupt: Interrupt,
-    from_state: usize,
     to_state: usize,
     trans: usize,
 }
@@ -261,13 +260,13 @@ impl MachineState {
         self.last_transition = Some(def.id.clone());
         if def.duration <= 0.0 {
             // immediate: everything but the target is dropped
-            self.blend = Some(ActiveBlend { sources: Vec::new(), target, elapsed: 0.0, duration: 0.0, curve: def.curve, interrupt: def.interrupt, from_state: def.from, to_state: def.to, trans: t });
+            self.blend = Some(ActiveBlend { sources: Vec::new(), target, elapsed: 0.0, duration: 0.0, curve: def.curve, interrupt: def.interrupt, to_state: def.to, trans: t });
             self.current = Some(target);
             self.finish_blend(machine);
             return;
         }
         // snapshot sources: when the target is already fading out it keeps that weight as a source
-        self.blend = Some(ActiveBlend { sources: snapshot, target, elapsed: 0.0, duration: def.duration, curve: def.curve, interrupt: def.interrupt, from_state: def.from, to_state: def.to, trans: t });
+        self.blend = Some(ActiveBlend { sources: snapshot, target, elapsed: 0.0, duration: def.duration, curve: def.curve, interrupt: def.interrupt, to_state: def.to, trans: t });
         self.current = Some(target);
     }
 

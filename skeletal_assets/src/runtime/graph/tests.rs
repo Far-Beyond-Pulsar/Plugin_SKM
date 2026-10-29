@@ -1190,3 +1190,120 @@ fn every_catalogue_node_has_an_evaluator() {
         assert!(src.contains(&format!("\"{}\"", def.type_id)), "no evaluator for {}", def.type_id);
     }
 }
+
+// ---- value nodes and determinism ------------------------------------------------------------
+
+#[test]
+fn math_logic_and_vector_value_nodes_compute_what_the_catalogue_says() {
+    let mut f = Fixture::new();
+    let a = f.slide("A", 10.0, 0.0, 0.0);
+    let c = f.slide("C", 10.0, 100.0, 100.0);
+    let params = [("x", ParamType::Float), ("n", ParamType::Int), ("p", ParamType::Bool), ("q", ParamType::Bool)];
+    // alpha = clamp(x * 2 + int_to_float(n), 0, 1)
+    let asset = f.graph(&params, |b| {
+        b.node("a", "anim.sequence_player", &[("sequence", js(&a))]);
+        b.node("c", "anim.sequence_player", &[("sequence", js(&c))]);
+        b.node("x", "anim.get_parameter", &[("parameter", js("x"))]);
+        b.node("n", "anim.get_parameter", &[("parameter", js("n"))]);
+        b.node("mul", "math.float_op", &[("op", js("mul")), ("b", json!(2.0))]);
+        b.node("itf", "math.int_to_float", &[]);
+        b.node("sum", "math.float_op", &[("op", js("add"))]);
+        b.node("clamp", "math.clamp", &[("min", json!(0.0)), ("max", json!(1.0))]);
+        b.node("blend", "anim.blend", &[("curve", js("linear"))]);
+        b.wire("x", "mul", "a").wire("n", "itf", "value").wire("mul", "sum", "a").wire("itf", "sum", "b").wire("sum", "clamp", "value");
+        b.wire("a", "blend", "a").wire("c", "blend", "b").wire("clamp", "blend", "alpha").wire("blend", "out", "pose");
+    });
+    let mut inst = f.instance(&asset);
+    for (x, n, expect) in [(0.25, 0, 50.0), (0.25, 1, 100.0), (-3.0, 0, 0.0), (0.1, 0, 20.0)] {
+        inst.set_float("x", x).unwrap();
+        inst.set_int("n", n).unwrap();
+        step(&mut inst, 0.01);
+        assert!(near(x1(&inst), expect), "x={x} n={n}: {}", x1(&inst));
+    }
+    // condition = (p or q) and not q  ==  p and not q
+    let asset = f.graph(&params, |b| {
+        b.node("a", "anim.sequence_player", &[("sequence", js(&a))]);
+        b.node("c", "anim.sequence_player", &[("sequence", js(&c))]);
+        for n in ["p", "q", "q2"] {
+            b.node(n, "anim.get_parameter", &[("parameter", js(if n == "q2" { "q" } else { n }))]);
+        }
+        b.node("or", "logic.or", &[]).node("not", "logic.not", &[]).node("and", "logic.and", &[]);
+        b.node("sw", "anim.blend_by_bool", &[("blend_time", json!(0.0))]);
+        b.wire("p", "or", "a").wire("q", "or", "b").wire("q2", "not", "value").wire("or", "and", "a").wire("not", "and", "b");
+        b.wire("c", "sw", "when_true").wire("a", "sw", "when_false").wire("and", "sw", "condition").wire("sw", "out", "pose");
+    });
+    let mut inst = f.instance(&asset);
+    for (p, q, expect) in [(false, false, 0.0), (true, false, 100.0), (true, true, 0.0), (false, true, 0.0)] {
+        inst.set_bool("p", p).unwrap();
+        inst.set_bool("q", q).unwrap();
+        step(&mut inst, 0.01);
+        assert!(near(x1(&inst), expect), "p={p} q={q}: {}", x1(&inst));
+    }
+    // vectors and transforms: a constant vector and make_vector feed an IK target
+    let rest = f.seq("rest", 10.0, vec![]);
+    let asset = f.graph(&[("h", ParamType::Float)], |b| {
+        b.node("p", "anim.sequence_player", &[("sequence", js(&rest))]);
+        b.node("h", "anim.get_parameter", &[("parameter", js("h"))]);
+        b.node("v", "math.make_vector", &[("x", json!(1.0)), ("z", json!(0.0))]);
+        b.node("mk", "anim.make_transform", &[]);
+        b.node("ik", "anim.two_bone_ik", &[("end_bone", js("b2"))]);
+        b.wire("h", "v", "y").wire("v", "mk", "location").wire("p", "ik", "pose").wire("mk", "ik", "effector").wire("ik", "out", "pose");
+    });
+    let mut inst = f.instance(&asset);
+    inst.set_float("h", 1.0).unwrap();
+    step(&mut inst, 0.01);
+    let want = Vec3::new(1.0, 1.0, 0.0);
+    assert!((tip(&inst, 2) - want).length() < 5e-3, "{}", tip(&inst, 2));
+}
+
+/// Run a state machine, blend space, IK and Montage graph twice with identical
+/// inputs: every pose of every update is bit-for-bit equal.
+#[test]
+fn a_whole_graph_is_deterministic_update_by_update() {
+    let mut f = Fixture::new();
+    let idle = f.slide("idle", 3.0, 0.0, 1.0);
+    let walk = f.slide("walk", 2.0, 10.0, 14.0);
+    let space = blend_space_asset(&mut f, true, SyncMode::Phase, &[(0.0, 0.0, 0.0, 4.0), (10.0, 0.0, 100.0, 2.0), (0.0, 10.0, 200.0, 3.0)]);
+    let params = [("go", ParamType::Bool), ("x", ParamType::Float), ("y", ParamType::Float), ("t", ParamType::Vector)];
+    let mut asset = machine_asset(
+        &f,
+        &params,
+        &[("Idle", &idle, vec![]), ("Walk", &walk, vec![])],
+        &[t("go", "Idle", "Walk", "go", vec![("duration", json!(0.7)), ("interrupt", js("both"))])],
+    );
+    // main: machine -> two bone IK (target from `t`) ; blend space -> layered over it
+    let mut main = GraphBuilder::new("main", &params);
+    main.node("out", "anim.output_pose", &[]);
+    main.node("sm", "anim.state_machine", &[("machine", js("m"))]);
+    main.node("bs", "anim.blend_space_player", &[("blend_space", js(&space))]);
+    main.node("px", "anim.get_parameter", &[("parameter", js("x"))]).node("py", "anim.get_parameter", &[("parameter", js("y"))]);
+    main.node("tv", "anim.get_parameter", &[("parameter", js("t"))]).node("mk", "anim.make_transform", &[]);
+    main.node("ik", "anim.two_bone_ik", &[("end_bone", js("b2"))]);
+    main.node("lb", "anim.layered_blend_per_bone", &[("count", json!(1)), ("masks", json!([{ "branches": [{ "bone": "b2", "weight": 1.0 }], "default_weight": 0.0 }]))]);
+    main.node("half", "math.constant_float", &[("value", json!(0.5))]);
+    main.wire("px", "bs", "x").wire("py", "bs", "y").wire("tv", "mk", "location");
+    main.wire("sm", "ik", "pose").wire("mk", "ik", "effector");
+    main.wire("ik", "lb", "base").wire("bs", "lb", "layer_0").wire("half", "lb", "layer_weight_0").wire("lb", "out", "pose");
+    asset.main = main.into_graph();
+    let run = || {
+        let mut inst = f.instance(&asset);
+        let mut poses = Vec::new();
+        for i in 0..40 {
+            inst.set_bool("go", (10..25).contains(&i)).unwrap();
+            inst.set_float("x", (i as f32 * 0.37).sin().abs() * 10.0).unwrap();
+            inst.set_float("y", (i as f32 * 0.21).cos().abs() * 10.0).unwrap();
+            inst.set_vector("t", [1.0, (i as f32 * 0.1).sin() + 1.0, 0.0]).unwrap();
+            step(&mut inst, 0.05 + (i % 3) as f32 * 0.01);
+            poses.push(((**inst.pose()).clone(), inst.report.root_motion));
+        }
+        poses
+    };
+    let (a, b) = (run(), run());
+    assert_eq!(a.len(), b.len());
+    for (i, (pa, pb)) in a.iter().zip(&b).enumerate() {
+        assert_eq!(pa.0.bones, pb.0.bones, "update {i}");
+        assert_eq!(pa.0.curves, pb.0.curves, "update {i}");
+        assert_eq!(pa.1, pb.1, "update {i}");
+        assert!(pa.0.is_finite(), "update {i}");
+    }
+}

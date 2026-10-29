@@ -89,7 +89,6 @@ struct Cx<'a> {
 struct Scope<'a> {
     asset: &'a AnimationGraphAsset,
     params: &'a HashMap<String, (usize, ParamType)>,
-    skeleton: Arc<RuntimeSkeleton>,
 }
 
 fn kind_name(kind: &str) -> String {
@@ -160,7 +159,7 @@ impl<'a> Cx<'a> {
                 return None;
             }
         }
-        let clip = Arc::new(CompiledClip::compile(&asset, skel));
+        let clip = Arc::new(CompiledClip::compile_shared(&asset, skel));
         for orphan in &clip.orphan_tracks {
             self.diags.push(Diagnostic::warning("graph.orphan_track", format!("Sequence `{}` animates bone `{orphan}`, which the skeleton does not have; the track is ignored", clip.name)).at(at));
         }
@@ -224,7 +223,7 @@ impl<'a> Cx<'a> {
             .iter()
             .map(|p| ParamDef { name: p.name.clone(), ty: p.ty, default: json_value(p.ty, &p.default) })
             .collect();
-        let scope = Scope { asset, params: &params, skeleton: skeleton.clone() };
+        let scope = Scope { asset, params: &params };
         let main = self.lower_program(&scope, "main", GraphKind::Main, &asset.main, &skeleton)?;
         let mut diagnostics: Vec<Diagnostic> = self.diags.iter().filter(|d| d.severity != crate::issue::Severity::Error).cloned().collect();
         diagnostics.sort_by(|a, b| a.code.cmp(b.code));
@@ -746,7 +745,7 @@ impl<'a> Cx<'a> {
         let mut clips: Vec<SearchClip> = Vec::new();
         let mut hashes: Vec<(String, String)> = Vec::new();
         for source in asset.sources.iter().filter(|s| s.enabled) {
-            let mut push = |cx: &mut Self, source_id: String, seq: &str, clips: &mut Vec<SearchClip>, hashes: &mut Vec<(String, String)>| -> Option<()> {
+            let push = |cx: &mut Self, source_id: String, seq: &str, clips: &mut Vec<SearchClip>, hashes: &mut Vec<(String, String)>| -> Option<()> {
                 let seq_asset = cx.source.sequence(seq)?;
                 let clip = cx.clip(seq, skel, at)?;
                 hashes.push((source_id.clone(), crate::codec::sha256_hex(seq_asset.to_text().as_bytes())));
@@ -909,3 +908,34 @@ fn primary_player(program: &Program) -> Option<usize> {
 
 #[allow(dead_code)]
 fn _types(_: AnimPinType, _: &CompiledMontage) {}
+
+/// Compile the montage `id` for `skeleton`, resolving its segments' sequences
+/// through `source`. Problems come back as diagnostics, never a partial montage.
+pub fn compile_montage(id: &str, skeleton: &Arc<RuntimeSkeleton>, source: &dyn AssetSource) -> Result<Arc<CompiledMontage>, Vec<Diagnostic>> {
+    let mut cx = Cx::new(source);
+    let Some(asset) = source.montage(id) else {
+        return Err(vec![Diagnostic::error("montage.unavailable", format!("Montage {id} could not be loaded")).at(id).repair("Restore the montage asset")]);
+    };
+    if asset.skeleton.as_ref().is_some_and(|s| s.as_str() != skeleton.id) {
+        return Err(vec![Diagnostic::error("montage.skeleton_mismatch", format!("Montage `{}` is for another skeleton than the component poses", asset.name)).at(id).repair("Play a montage made for the mesh's skeleton")]);
+    }
+    let mut failed: Vec<String> = Vec::new();
+    let mut lookup = |seq: &str| -> Option<Arc<CompiledClip>> {
+        let clip = cx.clip(seq, skeleton, id);
+        if clip.is_none() {
+            failed.push(seq.to_string());
+        }
+        clip
+    };
+    let compiled = CompiledMontage::compile(&asset, skeleton, &mut lookup);
+    drop(lookup);
+    match compiled {
+        Ok(m) if !has_errors(&cx.diags) => Ok(Arc::new(m)),
+        Ok(_) => Err(cx.diags),
+        Err(e) => {
+            let mut d = cx.diags;
+            d.push(Diagnostic::error("montage.invalid", e).at(id));
+            Err(d)
+        }
+    }
+}
