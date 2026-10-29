@@ -21,13 +21,16 @@ use ui::button::{Button, ButtonVariants};
 use ui::{h_flex, v_flex, ActiveTheme, Icon, IconName, Sizable, StyledExt};
 
 use crate::anim_editors::document::content_hash;
+use crate::anim_editors::graph_preview::ProjectAssets;
+use crate::anim_editors::pose_db_build::{BuildHandle, BuildJob, BuildOutput, ProjectSources};
+use crate::anim_editors::skin_preview::FallbackPreview;
 use crate::anim_editors::pose_db_model::{IndexStatus, PoseDbModel};
 use crate::anim_editors::refs::{self, ProjectRefIndex, RefStatus, SnapshotIndex};
 use crate::anim_editors::selection::AnimSelection;
 use crate::anim_editors::store::FsStore;
 use crate::core::asset_index;
 
-use super::chrome::{edit, empty_inspector, fmt_f32, frame, labelled, parse_f32, section, short_id, value_row, Chrome, EditorBody, EditorHost, Widgets};
+use super::chrome::{edit, empty_inspector, fmt_f32, frame, labelled, parse_f32, section, short_id, value_row, Chrome, EditorBody, EditorHost, EditorModel, Widgets};
 use super::skeleton_canvas::load_skeleton;
 
 const CHANNEL_COLORS: [(f32, f32, f32); 6] = [(0.55, 0.8, 0.6), (0.75, 0.6, 0.7), (0.12, 0.85, 0.6), (0.4, 0.7, 0.55), (0.97, 0.75, 0.62), (0.9, 0.7, 0.65)];
@@ -41,6 +44,11 @@ pub struct PoseDbEditor {
     /// Source file hashes keyed by source id, for the index key.
     hashes: Vec<(String, String)>,
     build_message: Option<String>,
+    /// The index build running on a background thread.
+    running: Option<BuildHandle>,
+    /// The fallback preview: the skinned pose a Pose Search node plays without its database.
+    fallback: super::skin_pane::SkinPane,
+    fallback_preview: Option<(u64, Result<FallbackPreview, String>)>,
     /// Query editor state (not saved).
     query_speed: f32,
     query_time: f32,
@@ -52,7 +60,7 @@ impl PoseDbEditor {
         let model = PoseDbModel::open(Arc::new(FsStore), &path, &text).map_err(|message| PluginError::Other { message })?;
         let chrome = Chrome::new(&path, cx);
         asset_index::record_asset(&chrome.root, &path);
-        let mut this = Self { model, chrome, widgets: Widgets::default(), statuses: HashMap::new(), index_status: IndexStatus::Missing, hashes: Vec::new(), build_message: None, query_speed: 2.0, query_time: 0.5 };
+        let mut this = Self { model, chrome, widgets: Widgets::default(), statuses: HashMap::new(), index_status: IndexStatus::Missing, hashes: Vec::new(), build_message: None, running: None, fallback: super::skin_pane::SkinPane::default(), fallback_preview: None, query_speed: 2.0, query_time: 0.5 };
         this.reload();
         Ok(cx.new(|_| this))
     }
@@ -104,74 +112,79 @@ impl PoseDbEditor {
         }
     }
 
-    /// Compile every enabled source into search clips (blend spaces expand to
-    /// their samples) and run the real index builder.
-    fn build(&mut self) {
-        let root = self.chrome.root.clone();
+    /// Start building the index on a background thread: the sources are read
+    /// and compiled and the real builder runs there, reporting progress the
+    /// panel shows and polling a cancel flag between poses.
+    fn start_build(&mut self, cx: &mut Context<Self>) {
+        if self.running.is_some() {
+            return;
+        }
         let Some(skeleton) = self.model.skeleton.clone() else {
             self.build_message = Some("Pick the database's skeleton first.".into());
             return;
         };
-        let runtime = match RuntimeSkeleton::new("posedb", &skeleton) {
-            Ok(r) => r,
-            Err(e) => {
-                self.build_message = Some(e);
-                return;
-            }
-        };
-        let index = ProjectRefIndex::new(&root);
-        let read_seq = |id: &str| -> Option<AnimSeqAsset> {
-            let path = index.locate_path(AnimationSequenceAssetKind::KIND, id)?;
-            AnimSeqAsset::parse(&String::from_utf8(engine_fs::virtual_fs::read_file(&path).ok()?).ok()?).ok()
-        };
-        let mut clips = Vec::new();
-        let mut missing = Vec::new();
-        for s in self.model.asset().sources.iter().filter(|s| s.enabled) {
-            let mut add = |source_id: String, asset: AnimSeqAsset, clips: &mut Vec<SearchClip>| {
-                clips.push(SearchClip { source_id, clip: Arc::new(CompiledClip::compile(&asset, &runtime)), mirrored: s.mirrored, looping: s.looping, exclusions: s.exclusions.clone(), cost_bias: s.cost_bias });
-            };
-            match &s.source {
-                PoseSource::Sequence { sequence } => match read_seq(sequence.as_str()) {
-                    Some(a) => add(s.id.clone(), a, &mut clips),
-                    None => missing.push(format!("Sequence {}", short_id(sequence.as_str()))),
-                },
-                PoseSource::BlendSpace { blend_space } => {
-                    let space = index.locate_path(BlendSpaceAssetKind::KIND, blend_space.as_str()).and_then(|p| BlendSpaceAsset::parse(&String::from_utf8(engine_fs::virtual_fs::read_file(&p).ok()?).ok()?).ok());
-                    match space {
-                        Some(space) => {
-                            for sample in &space.samples {
-                                match sample.sequence.as_ref().and_then(|q| read_seq(q.as_str())) {
-                                    Some(a) => add(format!("{}:{}", s.id, sample.id), a, &mut clips),
-                                    None => missing.push(format!("a sample of Blend Space {}", short_id(blend_space.as_str()))),
-                                }
-                            }
-                        }
-                        None => missing.push(format!("Blend Space {}", short_id(blend_space.as_str()))),
-                    }
-                }
-            }
-        }
         let key = self.key();
-        match self.model.build_index(&skeleton, clips, &key) {
+        let job = BuildJob { asset: self.model.asset().clone(), skeleton, sources: Arc::new(ProjectSources { root: self.chrome.root.clone() }) };
+        let handle = BuildHandle::default();
+        let mut reporter = handle.reporter();
+        self.running = Some(handle);
+        self.build_message = None;
+        let weak = cx.weak_entity();
+        cx.spawn(async move |_, cx| {
+            let result = cx.background_executor().spawn(async move { job.run(&mut reporter) }).await;
+            let _ = weak.update(cx, |this, cx| this.finish_build(result, &key, cx));
+        })
+        .detach();
+        // repaint the progress while the build runs
+        let weak = cx.weak_entity();
+        cx.spawn(async move |_, cx| loop {
+            smol::Timer::after(std::time::Duration::from_millis(100)).await;
+            if !matches!(weak.update(cx, |this, cx| {
+                cx.notify();
+                this.running.is_some()
+            }), Ok(true))
+            {
+                break;
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn cancel_build(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = &self.running {
+            handle.cancel();
+            self.build_message = Some("Cancelling\u{2026}".into());
+            cx.notify();
+        }
+    }
+
+    fn finish_build(&mut self, result: Result<BuildOutput, Vec<skeletal_assets::diagnostics::Diagnostic>>, key: &skeletal_assets::pose_db::IndexKey, cx: &mut Context<Self>) {
+        self.running = None;
+        let missing = result.as_ref().map(|o| o.missing.clone()).unwrap_or_default();
+        match self.model.finish_build(result, key) {
             Ok(info) => {
+                let mut cache_error = None;
                 if let Some(payload) = self.model.index_payload() {
                     let path = self.cache_path();
                     if let Some(parent) = path.parent() {
                         let _ = engine_fs::virtual_fs::create_dir_all(parent);
                     }
-                    if let Err(e) = engine_fs::virtual_fs::write_file_atomically(&path, &encode_index(&key, &payload)) {
-                        self.build_message = Some(format!("Built, but the cache could not be written: {e}"));
+                    if let Err(e) = engine_fs::virtual_fs::write_file_atomically(&path, &encode_index(key, &payload)) {
+                        cache_error = Some(format!("Built, but the cache could not be written: {e}"));
                     }
                 }
-                if missing.is_empty() && self.build_message.is_none() {
-                    self.build_message = Some(format!("Built {} poses from {} clips.", info.entries, info.clips));
-                } else if !missing.is_empty() {
-                    self.build_message = Some(format!("Built without {}.", missing.join(", ")));
-                }
+                self.build_message = Some(match (cache_error, missing.is_empty()) {
+                    (Some(e), _) => e,
+                    (None, true) => format!("Built {} poses from {} clips.", info.entries, info.clips),
+                    (None, false) => format!("Built without {}.", missing.join(", ")),
+                });
             }
+            Err(d) if crate::anim_editors::pose_db_build::is_cancelled(&d) => self.build_message = Some("Build cancelled; the previous index is unchanged.".into()),
             Err(d) => self.build_message = Some(format!("Build failed: {}", d.first().map_or(String::new(), |d| d.message.clone()))),
         }
         self.refresh_index_status();
+        cx.notify();
     }
 
     fn query(&mut self) {
@@ -267,11 +280,21 @@ impl PoseDbEditor {
             .p_2()
             .gap_1()
             .children(rows)
-            .child(Button::new("pdb-build").icon(IconName::Refresh).label("Build index").small().primary().on_click(cx.listener(|this, _, window, cx| {
-                this.build();
-                this.after_change(window, cx);
-                cx.notify();
-            })))
+            .child(match &self.running {
+                Some(handle) => {
+                    let percent = handle.fraction().map_or("starting".to_string(), |f| format!("{:.0}%", f * 100.0));
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(div().text_xs().text_color(theme.foreground).child(format!("Building index\u{2026} {percent}")))
+                        .child(Button::new("pdb-cancel").icon(IconName::Close).label("Cancel").small().outline().on_click(cx.listener(|this, _, _, cx| this.cancel_build(cx))))
+                        .into_any_element()
+                }
+                None => Button::new("pdb-build").icon(IconName::Refresh).label("Build index").small().primary().on_click(cx.listener(|this, _, window, cx| {
+                    let _ = window;
+                    this.start_build(cx);
+                })).into_any_element(),
+            })
             .children(self.build_message.clone().map(|m| div().text_xs().text_color(theme.muted_foreground).child(m)))
             .into_any_element()
     }
@@ -405,9 +428,8 @@ impl EditorBody for PoseDbEditor {
     fn toolbar_extra(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         vec![
             Button::new("pdb-tb-build").icon(IconName::Refresh).label("Build").small().ghost().on_click(cx.listener(|this, _, window, cx| {
-                this.build();
-                this.after_change(window, cx);
-                cx.notify();
+                let _ = window;
+                this.start_build(cx);
             })).into_any_element(),
             Button::new("pdb-tb-query").icon(IconName::Search).label("Run query").small().ghost().tooltip("Search the built index with the query settings in the inspector").on_click(cx.listener(|this, _, _, cx| {
                 this.query();
@@ -535,6 +557,51 @@ impl EditorBody for PoseDbEditor {
     }
 
     fn inspector(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let fallback = self.fallback_section(cx);
+        let inner = self.selection_inspector(window, cx);
+        v_flex().w_full().gap_2().child(inner).child(fallback).into_any_element()
+    }
+}
+
+impl PoseDbEditor {
+    /// What a graph's Pose Search node plays when this database cannot be used:
+    /// the graph is compiled and run by the real runtime with the database
+    /// hidden, so the fallback path itself is what is shown.
+    fn fallback_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let root = self.chrome.root.clone();
+        let skeleton = self.model.asset().skeleton.as_ref().map(|s| s.as_str().to_string());
+        let mut problem = self.fallback.rig(&root, skeleton.as_deref()).err();
+        let generation = self.model.generation();
+        if problem.is_none() && self.fallback_preview.as_ref().is_none_or(|(g, _)| *g != generation) {
+            let assets = ProjectAssets::new(&root);
+            let built = match self.fallback.rig(&root, skeleton.as_deref()) {
+                Ok(rig) => FallbackPreview::build(self.model.asset(), rig, &assets).map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default()),
+                Err(e) => Err(e),
+            };
+            if let Ok(preview) = &built {
+                debug_assert!(preview.falls_back());
+            }
+            self.fallback_preview = Some((generation, built));
+        }
+        let mut note = None;
+        if problem.is_none() {
+            let palette = crate::style::Palette::from_theme(cx.theme());
+            match &mut self.fallback_preview {
+                Some((_, Ok(preview))) => {
+                    let pose = preview.advance(0.0);
+                    self.fallback.draw(&pose, generation, &palette);
+                    note = Some(format!("Sequence {} plays through the Fallback pin; the compiler reports {}.", short_id(&preview.sequence), if preview.falls_back() { "the fallback" } else { "no fallback" }));
+                }
+                Some((_, Err(e))) => problem = Some(e.clone()),
+                None => {}
+            }
+        }
+        let mut rows = vec![self.fallback.element(problem.as_deref(), cx)];
+        rows.extend(note.map(|n| div().text_xs().text_color(cx.theme().muted_foreground).child(n).into_any_element()));
+        section("Fallback when the database is unavailable", rows, cx)
+    }
+
+    fn selection_inspector(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         let root = self.chrome.root.clone();
         let skeleton_id = self.model.asset().skeleton.as_ref().map(|s| s.as_str().to_string());

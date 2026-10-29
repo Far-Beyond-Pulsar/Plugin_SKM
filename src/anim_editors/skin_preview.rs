@@ -203,6 +203,90 @@ impl MontagePreview {
     }
 }
 
+/// The assets with the database hidden, so a Pose Search node cannot use it.
+struct WithoutPoseDb<'a>(&'a dyn AssetSource);
+
+impl AssetSource for WithoutPoseDb<'_> {
+    fn skeleton(&self, id: &str) -> Option<Arc<SkeletonAsset>> {
+        self.0.skeleton(id)
+    }
+    fn sequence(&self, id: &str) -> Option<Arc<AnimSeqAsset>> {
+        self.0.sequence(id)
+    }
+    fn blend_space(&self, id: &str) -> Option<Arc<BlendSpaceAsset>> {
+        self.0.blend_space(id)
+    }
+    fn montage(&self, id: &str) -> Option<Arc<AnimationMontageAsset>> {
+        self.0.montage(id)
+    }
+    fn graph(&self, id: &str) -> Option<Arc<AnimationGraphAsset>> {
+        self.0.graph(id)
+    }
+    fn ik_rig(&self, id: &str) -> Option<Arc<IkRigAsset>> {
+        self.0.ik_rig(id)
+    }
+    fn retarget_profile(&self, id: &str) -> Option<Arc<RetargetProfileAsset>> {
+        self.0.retarget_profile(id)
+    }
+    fn ik_retargeter(&self, id: &str) -> Option<Arc<IkRetargetAsset>> {
+        self.0.ik_retargeter(id)
+    }
+    fn pose_db(&self, _: &str) -> Option<Arc<PoseDbAsset>> {
+        None
+    }
+}
+
+/// What a graph plays when its Pose Search node cannot use the database: the
+/// node's Fallback input. The graph is the real one the compiler accepts only
+/// because a fallback is connected: the first enabled Sequence source of the
+/// database into the Fallback pin, with the database made unavailable.
+pub struct FallbackPreview {
+    instance: AnimInstance,
+    /// The compile warnings, which include the node saying it falls back.
+    pub diagnostics: Vec<Diagnostic>,
+    /// The sequence that plays as the fallback.
+    pub sequence: String,
+}
+
+impl FallbackPreview {
+    pub fn build(db: &PoseDbAsset, rig: &Rig, source: &dyn AssetSource) -> Result<Self, Vec<Diagnostic>> {
+        let err = |m: String| vec![Diagnostic::error("preview.graph", m)];
+        let sequence = db
+            .sources
+            .iter()
+            .filter(|s| s.enabled)
+            .find_map(|s| match &s.source {
+                skeletal_assets::pose_db::PoseSource::Sequence { sequence } => Some(sequence.as_str().to_string()),
+                _ => None,
+            })
+            .ok_or_else(|| vec![Diagnostic::error("preview.no_fallback_source", "Add an enabled Sequence source: it is what plays when the database cannot be used")])?;
+        let mut graph = AnimationGraphAsset::default();
+        graph.skeleton = Some(rig.skeleton_ref.clone());
+        add(&mut graph, "fallback", "anim.sequence_player", 0.0, &[("sequence", json!(sequence)), ("looping", json!("loop"))]).map_err(err)?;
+        add(&mut graph, "search", "anim.pose_search", 200.0, &[("database", json!(db.id.as_str()))]).map_err(err)?;
+        wire(&mut graph, ("fallback", "pose"), ("search", "fallback")).map_err(err)?;
+        wire(&mut graph, ("search", "pose"), ("output", "pose")).map_err(err)?;
+        let hidden = WithoutPoseDb(source);
+        let output = compile_graph(&graph, &hidden);
+        let Some(compiled) = output.graph else { return Err(output.diagnostics) };
+        if has_errors(&output.diagnostics) {
+            return Err(output.diagnostics);
+        }
+        let mut instance = AnimInstance::new(compiled.skeleton.clone());
+        instance.set_graph(compiled).map_err(|e| vec![Diagnostic::error("preview.instance", e)])?;
+        Ok(Self { instance, diagnostics: output.diagnostics, sequence })
+    }
+
+    /// Whether the compiler said the node falls back.
+    pub fn falls_back(&self) -> bool {
+        self.diagnostics.iter().any(|d| d.code == "graph.pose_search_fallback")
+    }
+
+    pub fn advance(&mut self, dt: f32) -> Arc<Pose> {
+        self.instance.advance(dt, TimeStep::Variable, UpdateMode::Scrub)
+    }
+}
+
 /// A Blend Space played at an x/y input.
 pub struct BlendSpacePreview {
     instance: AnimInstance,

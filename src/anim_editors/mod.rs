@@ -23,6 +23,7 @@ pub mod ik_rig_model;
 pub mod kinds;
 pub mod montage_model;
 pub mod notify_edit;
+pub mod pose_db_build;
 pub mod pose_db_model;
 pub mod retarget_model;
 pub mod retarget_preview;

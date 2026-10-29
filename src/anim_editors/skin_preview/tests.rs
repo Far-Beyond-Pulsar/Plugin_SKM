@@ -139,3 +139,23 @@ fn the_posed_mesh_is_drawn_skinned_when_a_gpu_exists() {
     crate::rendering::preview::save("montage_preview_start", 320, 260, &a.rgba);
     crate::rendering::preview::save("montage_preview_mid", 320, 260, &b.rgba);
 }
+
+#[test]
+fn a_pose_search_without_its_database_plays_the_fallback_sequence() {
+    use skeletal_assets::pose_db::{PoseDbAsset, PoseDbSource, PoseSource};
+    let w = world();
+    let mut db = PoseDbAsset::new("Locomotion", w.rig.skeleton_ref.clone());
+    assert_eq!(FallbackPreview::build(&db, &w.rig, &w.mem).err().unwrap()[0].code, "preview.no_fallback_source");
+    db.sources.push(PoseDbSource { id: "s0".into(), source: PoseSource::Sequence { sequence: w.run.id.to_ref() }, enabled: true, mirrored: false, looping: true, exclusions: vec![], cost_bias: 0.0 });
+    let mut preview = FallbackPreview::build(&db, &w.rig, &w.mem).expect("a fallback is connected, so the graph compiles");
+    assert!(preview.falls_back(), "the compiler says the node falls back: {:?}", preview.diagnostics);
+    assert_eq!(preview.sequence, w.run.id.as_str());
+    let first = world_of(&w.rig, &preview.advance(0.0));
+    let later = world_of(&w.rig, &preview.advance(0.2));
+    assert!(moved(&first, &later) > 0.02, "the fallback sequence animates");
+    // the pose is the sequence's own pose
+    let clip = CompiledClip::compile_shared(&w.run, &w.rig.runtime);
+    let expected = clip.sample(&w.rig.runtime, 0.2);
+    let direct = world_of(&w.rig, &expected);
+    assert!(moved(&later, &direct) < 1e-2, "the Pose Search output is the Fallback input");
+}

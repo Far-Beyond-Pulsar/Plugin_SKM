@@ -238,6 +238,19 @@ impl PoseIndex {
         clips: &[SearchClip],
         mirror: Option<&MirrorTable>,
     ) -> Result<Self, Vec<Diagnostic>> {
+        Self::build_with(asset, skel, clips, mirror, &mut |_, _| true)
+    }
+
+    /// [`Self::build`] reporting `(poses visited, poses expected)` as it goes. The
+    /// build stops with a `posedb.cancelled` error as soon as `progress`
+    /// returns `false`, so a long build can run off the UI thread and be cancelled.
+    pub fn build_with(
+        asset: &PoseDbAsset,
+        skel: &RuntimeSkeleton,
+        clips: &[SearchClip],
+        mirror: Option<&MirrorTable>,
+        progress: &mut dyn FnMut(usize, usize) -> bool,
+    ) -> Result<Self, Vec<Diagnostic>> {
         let mut diagnostics = Vec::new();
         if asset.channels.is_empty() {
             diagnostics.push(Diagnostic::error("posedb.no_channels", "The database has no feature channels").repair("Add at least one feature channel"));
@@ -262,6 +275,14 @@ impl PoseIndex {
         let spans = layout(asset);
         let dims: usize = spans.iter().map(|s| s.len).sum();
         let interval = asset.sampling.interval.max(1.0 / 240.0);
+        let expected: usize = clips
+            .iter()
+            .map(|sc| {
+                let limit = if sc.looping { sc.clip.duration } else { sc.clip.duration - asset.sampling.end_margin };
+                (limit.max(0.0) / interval).floor() as usize + 1
+            })
+            .sum();
+        let mut visited = 0usize;
         let mut entries = Vec::new();
         let mut features = Vec::new();
         for (ci, sc) in clips.iter().enumerate() {
@@ -274,6 +295,10 @@ impl PoseIndex {
                     break;
                 }
                 k += 1;
+                visited += 1;
+                if !progress(visited, expected.max(visited)) {
+                    return Err(vec![Diagnostic::error("posedb.cancelled", "The build was cancelled")]);
+                }
                 if sc.exclusions.iter().any(|r| t >= r.start && t < r.end) {
                     continue;
                 }

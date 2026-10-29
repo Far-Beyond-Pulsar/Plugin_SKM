@@ -385,6 +385,27 @@ impl PoseDbModel {
         }
     }
 
+    /// Take the result of a build that ran elsewhere (on a background thread).
+    /// A cancelled build leaves the previous index and its state as they were.
+    pub fn finish_build(&mut self, result: Result<super::pose_db_build::BuildOutput, Vec<Diagnostic>>, key: &IndexKey) -> Result<BuildInfo, Vec<Diagnostic>> {
+        match result {
+            Ok(out) => {
+                let info = BuildInfo { builder_version: key.builder_version, hash: key.hash.clone(), entries: out.index.entries.len(), dims: out.index.dims, clips: out.clips.len() };
+                self.last_build = Some(info.clone());
+                self.build_diagnostics.clear();
+                self.index = Some((out.index, out.clips));
+                Ok(info)
+            }
+            Err(diagnostics) if super::pose_db_build::is_cancelled(&diagnostics) => Err(diagnostics),
+            Err(diagnostics) => {
+                self.last_build = None;
+                self.build_diagnostics = diagnostics.clone();
+                self.index = None;
+                Err(diagnostics)
+            }
+        }
+    }
+
     /// The payload to cache next to the project for the last build.
     pub fn index_payload(&self) -> Option<Vec<u8>> {
         self.index.as_ref().map(|(i, _)| i.to_payload())
