@@ -14,6 +14,7 @@
 //! the host undo history (`plugin_editor_api::undo`).
 
 pub mod blend_space_model;
+pub mod views;
 pub mod document;
 pub mod ik_rig_model;
 pub mod montage_model;

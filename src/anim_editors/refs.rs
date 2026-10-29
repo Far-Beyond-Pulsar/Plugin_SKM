@@ -42,6 +42,16 @@ impl ProjectRefIndex {
     }
 }
 
+impl ProjectRefIndex {
+    /// The file of the one asset `(kind, id)` resolves to, for opening it.
+    pub fn locate_path(&self, kind: &str, id: &str) -> Option<PathBuf> {
+        match self.locate(kind, id) {
+            Located::One { path } => Some(path),
+            _ => None,
+        }
+    }
+}
+
 impl RefIndex for ProjectRefIndex {
     fn candidates(&self, kind: &str) -> Vec<PickerCandidate> {
         asset_index::picker_candidates(&self.root, kind)
@@ -60,6 +70,34 @@ impl RefIndex for ProjectRefIndex {
             1 => Located::One { path: paths.into_iter().next().unwrap_or_default() },
             _ => Located::Ambiguous { paths },
         }
+    }
+}
+
+/// A cached [`RefIndex`] that reads each kind's candidate list once, so checking many
+/// references against the same project does not rescan its files each time.
+pub struct SnapshotIndex {
+    inner: ProjectRefIndex,
+    candidates: std::cell::RefCell<std::collections::HashMap<String, Vec<PickerCandidate>>>,
+}
+
+impl SnapshotIndex {
+    pub fn new(root: &Path) -> Self {
+        Self { inner: ProjectRefIndex::new(root), candidates: Default::default() }
+    }
+}
+
+impl RefIndex for SnapshotIndex {
+    fn candidates(&self, kind: &str) -> Vec<PickerCandidate> {
+        self.candidates.borrow_mut().entry(kind.to_string()).or_insert_with(|| self.inner.candidates(kind)).clone()
+    }
+    fn used_by(&self, kind: &str, id: &str) -> Vec<Referrer> {
+        self.inner.used_by(kind, id)
+    }
+    fn deps_of(&self, kind: &str, id: &str) -> Vec<(String, String, String)> {
+        self.inner.deps_of(kind, id)
+    }
+    fn locate(&self, kind: &str, id: &str) -> Located {
+        self.inner.locate(kind, id)
     }
 }
 
