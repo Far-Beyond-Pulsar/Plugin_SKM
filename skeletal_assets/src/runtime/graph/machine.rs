@@ -85,6 +85,8 @@ pub struct MachineState {
     /// Name of the transition that fired most recently, for traces and tests.
     pub last_transition: Option<String>,
     start_override: Option<usize>,
+    /// Whether the entry of the machine's first state was reported to the owner.
+    entry_reported: bool,
 }
 
 fn emit(env: &mut Env, machine: &Machine, kind: StateEventKind, state: usize, from: usize, to: usize, transition: &str) {
@@ -129,9 +131,8 @@ impl MachineState {
         self.weights.clear();
         let adopted = self.start_override;
         let start = self.start_override.take().unwrap_or(machine.default);
-        if adopted.is_none() {
-            emit(env, machine, StateEventKind::Entered, start, start, start, "");
-        }
+        // a machine first started by a quiet (scrub or refresh) update reports its entry at its first real one
+        self.entry_reported = adopted.is_some();
         let inst = self.new_inst(machine, start, env);
         self.current = Some(self.alloc(inst));
         self.started = true;
@@ -188,6 +189,12 @@ impl MachineState {
     pub fn update(&mut self, machine: &Machine, env: &mut Env, w: f32, tick: u64) {
         if !self.started || self.last_tick + 1 != tick {
             self.reset(machine, env);
+        }
+        if !self.entry_reported && !env.quiet {
+            self.entry_reported = true;
+            if let Some(state) = self.current.and_then(|slot| self.insts[slot].as_ref()).map(|i| i.state) {
+                emit(env, machine, StateEventKind::Entered, state, state, state, "");
+            }
         }
         self.last_tick = tick;
         if self.rules.len() != machine.transitions.len() {
