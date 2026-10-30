@@ -72,6 +72,30 @@ asset_id! {
     AnimSequenceId
 }
 
+use pulsar_reflection::{AnimationSequenceAssetKind, AssetRef, SkeletalMeshAssetKind, SkeletonAssetKind};
+
+impl SkeletonId {
+    /// The same id as a typed project asset reference.
+    pub fn to_ref(&self) -> AssetRef<SkeletonAssetKind> {
+        AssetRef::parse(&self.0).expect("ids are UUIDs")
+    }
+    pub fn from_ref(reference: &AssetRef<SkeletonAssetKind>) -> Self {
+        Self(reference.as_str().to_string())
+    }
+}
+
+impl SkeletalMeshId {
+    pub fn to_ref(&self) -> AssetRef<SkeletalMeshAssetKind> {
+        AssetRef::parse(&self.0).expect("ids are UUIDs")
+    }
+}
+
+impl AnimSequenceId {
+    pub fn to_ref(&self) -> AssetRef<AnimationSequenceAssetKind> {
+        AssetRef::parse(&self.0).expect("ids are UUIDs")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

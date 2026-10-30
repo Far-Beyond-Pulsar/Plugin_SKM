@@ -79,6 +79,7 @@ impl TimelineGutter {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         e.selected_bone.hash(&mut h);
         e.animation_features.notifies.len().hash(&mut h);
+        e.animation_features.notify_states.len().hash(&mut h);
         e.selected_notify.hash(&mut h);
         self.only_selected.hash(&mut h);
         e.skeleton_revision.hash(&mut h);
@@ -93,7 +94,7 @@ impl TimelineGutter {
     fn capture(&mut self, e: &SkeletalAnimEditorPanel) {
         self.signature = self.signature_of(e);
         self.total_keys = e.animation.key_count();
-        self.notify_count = e.animation_features.notifies.len();
+        self.notify_count = e.animation_features.notifies.len() + e.animation_features.notify_states.len();
         self.rows = e
             .animation
             .tracks
@@ -204,6 +205,7 @@ impl Render for TimelineGutter {
 
         let notify_count = self.notify_count;
         let editor_add = self.editor.clone();
+        let editor_add_state = self.editor.clone();
         let notifies = h_flex()
             .h(px(NOTIFY_HEIGHT))
             .w_full()
@@ -243,6 +245,20 @@ impl Render for TimelineGutter {
                         let editor = editor_add.clone();
                         let _ = editor.update(cx, |e, cx| {
                             e.add_notify(e.playback.time);
+                            cx.notify();
+                        });
+                    }),
+            )
+            .child(
+                Button::new("timeline-add-notify-state")
+                    .icon(IconName::Timer)
+                    .ghost()
+                    .xsmall()
+                    .tooltip("Add a notify state (begin / tick / end) at the playhead")
+                    .on_click(move |_, _, cx| {
+                        let editor = editor_add_state.clone();
+                        let _ = editor.update(cx, |e, cx| {
+                            e.add_notify_state(e.playback.time);
                             cx.notify();
                         });
                     }),

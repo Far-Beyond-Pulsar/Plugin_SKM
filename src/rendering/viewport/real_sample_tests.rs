@@ -113,6 +113,7 @@ fn render_real_sample() {
             physics: None,
             sockets: None,
             transform_gizmo: None,
+            world_override: None,
         };
         // Frame the whole animation, not just this pose, so frames compare.
         let mut bounds: Option<(crate::core::Vec3, f32)> = None;

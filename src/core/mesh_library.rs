@@ -244,6 +244,7 @@ fn remember_asset_id(root: &Path, id: &SkeletalMeshId, path: &Path) {
         if let Err(error) = result {
             log::debug!("Could not cache skeletal mesh id for {path:?}: {error:#}");
         }
+        crate::core::asset_index::record_asset(root, path);
     }
 }
 

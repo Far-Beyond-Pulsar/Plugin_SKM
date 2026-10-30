@@ -141,6 +141,29 @@ impl MeshInspectorPanel {
             )
     }
 
+    /// The resolved skeleton and what references this mesh.
+    fn render_references(&self, e: &SkeletalAnimEditorPanel, cx: &App) -> AnyElement {
+        let theme = cx.theme();
+        let (text, color) = match &e.link {
+            crate::core::SkeletonLink::Unset => ("No skeleton chosen".to_string(), theme.warning),
+            crate::core::SkeletonLink::Resolving(_) => ("Looking for the skeleton…".to_string(), theme.muted_foreground),
+            crate::core::SkeletonLink::Resolved(entry) => {
+                let compatible = e.issues.iter().all(|i| i.severity != Severity::Error || !i.message.to_lowercase().contains("skeleton"));
+                (format!("{} · {}", entry.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), if compatible { "compatible" } else { "incompatible, see the problems below" }), if compatible { theme.success } else { theme.danger })
+            }
+            crate::core::SkeletonLink::Missing(_) => ("No file in the project has this skeleton id".to_string(), theme.danger),
+            crate::core::SkeletonLink::Ambiguous { paths, .. } => (format!("{} files share this skeleton id", paths.len()), theme.danger),
+        };
+        let mesh_id = e.mesh_id.as_ref().map(|id| id.to_string());
+        v_flex()
+            .w_full()
+            .child(
+                v_flex().w_full().px_3().py_2().gap_1().child(div().text_xs().font_semibold().text_color(theme.muted_foreground).child("SKELETON")).child(div().text_xs().text_color(color).child(text)),
+            )
+            .when_some(mesh_id, |col, id| col.child(crate::ui_components::references::used_by_card(&e.project_root, "skmesh", &id, "Used by", cx)))
+            .into_any_element()
+    }
+
     fn render_stats(&self, stats: MeshStats, issues: &[Issue], cx: &App) -> impl IntoElement {
         self.section("Statistics", IconName::Info, cx)
             .child(self.stat("Vertices", stats.vertices.to_string(), cx))
@@ -404,6 +427,7 @@ impl Render for MeshInspectorPanel {
                         .min_h_0()
                         .scrollable(ScrollbarAxis::Vertical)
                         .child(self.render_stats(mesh.stats(), &e.issues, cx))
+                        .child(self.render_references(e, cx))
                         .child(self.render_slots(mesh, &e.slot_pickers, &editor, cx))
                         .child(self.render_joints(
                             mesh,

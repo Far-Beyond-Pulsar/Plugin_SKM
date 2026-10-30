@@ -31,7 +31,7 @@ pub const ANIMSEQ_EXTENSION: &str = "animseq";
 /// newer ones are refused rather than half-read.
 pub const FORMAT_VERSION: u32 = 1;
 /// version 2 protects sequence features; version 3 adds notify targets and fields.
-pub const ANIMSEQ_FORMAT_VERSION: u32 = 3;
+pub const ANIMSEQ_FORMAT_VERSION: u32 = 4;
 
 fn current_version() -> u32 {
     FORMAT_VERSION
@@ -55,6 +55,10 @@ pub struct SkeletonAsset {
     /// optional bone-local attachment points; absent in older version 1 files.
     #[serde(default, skip_serializing_if = "super::sockets::Sockets::is_empty")]
     pub sockets: super::sockets::Sockets,
+    /// Named bone masks (mask profiles) that layered blends and Montage slot
+    /// tracks refer to by name. Absent in files written before they existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<super::bone_mask::NamedBoneMask>,
 }
 
 impl SkeletonAsset {
@@ -66,6 +70,7 @@ impl SkeletonAsset {
             bones: skeleton.bones,
             sockets: Default::default(),
             preview_mesh: None,
+            masks: Vec::new(),
         }
     }
 
@@ -81,6 +86,7 @@ impl SkeletonAsset {
             .sockets
             .validate(&asset.skeleton())
             .map_err(|e| e.to_string())?;
+        super::bone_mask::validate_library(&asset.masks, &asset.skeleton())?;
         Ok(asset)
     }
 
@@ -116,6 +122,9 @@ pub struct AnimSeqAsset {
     pub clip: AnimationClip,
     #[serde(flatten)]
     pub features: AnimationFeatures,
+    /// Fields this build does not know, written back unchanged.
+    #[serde(flatten)]
+    pub extra: crate::codec::Extra,
 }
 
 impl Serialize for AnimSeqAsset {
@@ -131,12 +140,16 @@ impl Serialize for AnimSeqAsset {
             clip: &'a AnimationClip,
             #[serde(flatten)]
             features: &'a AnimationFeatures,
+            #[serde(flatten)]
+            extra: &'a crate::codec::Extra,
         }
         let version = if self.features.is_empty() {
             self.version
         } else {
             self.version.max(
-                if self
+                if self.features.needs_v4() {
+                    4
+                } else if self
                     .features
                     .notifies
                     .iter()
@@ -155,6 +168,7 @@ impl Serialize for AnimSeqAsset {
             preview_mesh: self.preview_mesh.as_ref(),
             clip: &self.clip,
             features: &self.features,
+            extra: &self.extra,
         }
         .serialize(serializer)
     }
@@ -169,6 +183,7 @@ impl AnimSeqAsset {
             preview_mesh: None,
             clip,
             features: AnimationFeatures::default(),
+            extra: Default::default(),
         }
     }
 
@@ -233,6 +248,7 @@ pub fn load_skeleton_asset(path: &Path) -> anyhow::Result<SkeletonAsset> {
 
 pub fn save_skeleton_asset(path: &Path, asset: &SkeletonAsset) -> anyhow::Result<()> {
     asset.sockets.validate(&asset.skeleton())?;
+    super::bone_mask::validate_library(&asset.masks, &asset.skeleton()).map_err(anyhow::Error::msg)?;
     write_text(path, &asset.to_text())
 }
 

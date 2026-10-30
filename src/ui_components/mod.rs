@@ -2,6 +2,7 @@ pub mod chrome;
 pub mod hierarchy_panel;
 pub mod mesh_panel;
 pub mod properties_panel;
+pub mod references;
 
 pub use hierarchy_panel::BoneHierarchyPanel;
 pub use mesh_panel::MeshInspectorPanel;

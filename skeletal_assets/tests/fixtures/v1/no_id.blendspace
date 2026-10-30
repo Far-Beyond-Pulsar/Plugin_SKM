@@ -1,0 +1,1 @@
+{ "version": 1, "name": "Anonymous", "x_axis": { "name": "Speed", "min": 0.0, "max": 1.0 }, "samples": [ { "x": 0.0 }, { "x": 1.0 } ] }

@@ -8,13 +8,20 @@ use std::collections::HashSet;
 
 use crate::core::{AnimationClip, KeyInterpolation};
 use crate::style::{mix, with_alpha, Palette};
+use crate::anim_editors::notify_edit::{lane_layout, LaneEntry, LaneMetrics, LanePlacement, NotifyKind};
+use skeletal_assets::notify_schema::AnimationNotifyState;
 use skeletal_assets::notifies::AnimationNotify;
 
 use super::types::*;
 
 pub const RULER_HEIGHT: f32 = 30.0;
 pub const SUMMARY_HEIGHT: f32 = 26.0;
-pub const NOTIFY_HEIGHT: f32 = 32.0;
+/// Rows of stacked notify markers that fit the pinned lane.
+pub const NOTIFY_ROWS: usize = 3;
+pub const NOTIFY_ROW_HEIGHT: f32 = 17.0;
+pub const NOTIFY_HEIGHT: f32 = NOTIFY_ROWS as f32 * NOTIFY_ROW_HEIGHT + 4.0;
+/// Pixels around a state's ends that grab the resize handle.
+pub const STATE_EDGE_PX: f32 = 5.0;
 pub const ROW_HEIGHT: f32 = 26.0;
 /// Ruler plus the pinned summary row; track rows scroll underneath.
 pub const HEADER_HEIGHT: f32 = RULER_HEIGHT + SUMMARY_HEIGHT + NOTIFY_HEIGHT;
@@ -22,7 +29,7 @@ pub const SCROLLBAR_HEIGHT: f32 = 12.0;
 pub const KEY_SIZE: f32 = 12.0;
 pub const SUMMARY_KEY_SIZE: f32 = 10.0;
 pub const KEY_HIT_RADIUS: f32 = 9.0;
-pub const NOTIFY_HIT_RADIUS: f32 = 16.0;
+pub const NOTIFY_HIT_RADIUS: f32 = 8.0;
 pub const BASE_PX_PER_SEC: f32 = 150.0;
 pub const MIN_ZOOM: f32 = 0.05;
 pub const MAX_ZOOM: f32 = 40.0;
@@ -208,10 +215,19 @@ pub enum Hit {
     SummaryKey { time: f32 },
     SummaryRow,
     Notify { index: usize },
+    /// A ranged notify state: its body slides it, its ends resize it.
+    State { index: usize, part: StatePart },
     NotifyRow,
     Scrollbar,
     Row { track: usize },
     Empty,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatePart {
+    Body,
+    Start,
+    End,
 }
 
 /// What the pointer hovers, for highlighting.
@@ -219,6 +235,18 @@ pub enum Hit {
 pub enum HoverTarget {
     Key { track: usize, index: usize },
     SummaryKey { time: f32 },
+    Notify { index: usize },
+    State { index: usize },
+}
+
+/// Stacked placement of the notify lane for the current zoom.
+pub struct NotifyLane {
+    /// World-pixel placements; subtract `scroll_x` for canvas x. Rows are
+    /// clamped to the lane's [`NOTIFY_ROWS`].
+    pub placements: Vec<LanePlacement>,
+    /// Markers that needed a row beyond the lane and share the last one;
+    /// zooming in separates them.
+    pub overflow: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -249,6 +277,8 @@ pub struct Scene<'a> {
     pub selected_bone: Option<&'a str>,
     pub selected_keys: &'a HashSet<(String, usize)>,
     pub notifies: &'a [AnimationNotify],
+    pub states: &'a [AnimationNotifyState],
+    /// Id of the selected notify or state.
     pub selected_notify: Option<&'a str>,
     pub time: f32,
     pub play_range: (i32, i32),
@@ -269,6 +299,91 @@ pub struct SummaryKey {
 impl<'a> Scene<'a> {
     fn fps(&self) -> f32 {
         self.clip.fps.max(1.0)
+    }
+
+    /// Stack the notifies and states so labels never overlap at this zoom.
+    pub fn notify_lane(&self) -> NotifyLane {
+        let mut entries: Vec<LaneEntry> = self
+            .notifies
+            .iter()
+            .map(|n| LaneEntry {
+                id: n.id.clone(),
+                kind: NotifyKind::Notify,
+                start: n.time,
+                end: n.time,
+                label_chars: n.name.chars().count(),
+            })
+            .collect();
+        entries.extend(self.states.iter().map(|s| LaneEntry {
+            id: s.id.clone(),
+            kind: NotifyKind::State,
+            start: s.start,
+            end: s.end,
+            label_chars: s.name.chars().count(),
+        }));
+        let metrics = LaneMetrics {
+            px_per_second: self.view.px_per_sec(),
+            ..LaneMetrics::default()
+        };
+        let (mut placements, _) = lane_layout(&entries, &metrics);
+        let mut overflow = 0;
+        for p in &mut placements {
+            if p.row >= NOTIFY_ROWS {
+                p.row = NOTIFY_ROWS - 1;
+                overflow += 1;
+            }
+        }
+        NotifyLane { placements, overflow }
+    }
+
+    /// Top of a lane row in canvas px.
+    pub fn notify_row_top(row: usize) -> f32 {
+        RULER_HEIGHT + SUMMARY_HEIGHT + 2.0 + row as f32 * NOTIFY_ROW_HEIGHT
+    }
+
+    fn notify_hit(&self, x: f32, y: f32) -> Hit {
+        let lane_y = y - (RULER_HEIGHT + SUMMARY_HEIGHT + 2.0);
+        let row = ((lane_y / NOTIFY_ROW_HEIGHT).floor().max(0.0) as usize).min(NOTIFY_ROWS - 1);
+        let wx = x + self.view.scroll_x;
+        let mut best: Option<(f32, Hit)> = None;
+        for p in self.notify_lane().placements.iter().filter(|p| p.row == row) {
+            let hit = match p.kind {
+                NotifyKind::Notify => {
+                    // the head and the label to its right
+                    if wx < p.anchor - NOTIFY_HIT_RADIUS || wx > p.x1.max(p.anchor + NOTIFY_HIT_RADIUS) {
+                        continue;
+                    }
+                    self.notifies
+                        .iter()
+                        .position(|n| n.id == p.id)
+                        .map(|index| Hit::Notify { index })
+                }
+                NotifyKind::State => {
+                    let end = p.range_end.max(p.anchor + 2.0);
+                    if wx < p.anchor - STATE_EDGE_PX || wx > end + STATE_EDGE_PX {
+                        continue;
+                    }
+                    let part = if (wx - p.anchor).abs() <= STATE_EDGE_PX && (end - p.anchor) > STATE_EDGE_PX * 2.0 {
+                        StatePart::Start
+                    } else if (wx - end).abs() <= STATE_EDGE_PX && (end - p.anchor) > STATE_EDGE_PX * 2.0 {
+                        StatePart::End
+                    } else {
+                        StatePart::Body
+                    };
+                    self.states
+                        .iter()
+                        .position(|s| s.id == p.id)
+                        .map(|index| Hit::State { index, part })
+                }
+            };
+            if let Some(hit) = hit {
+                let d = (p.anchor - wx).abs();
+                if best.is_none_or(|(bd, _)| d < bd) {
+                    best = Some((d, hit));
+                }
+            }
+        }
+        best.map_or(Hit::NotifyRow, |(_, hit)| hit)
     }
 
     pub fn row_top(&self, row: usize) -> f32 {
@@ -372,14 +487,7 @@ impl<'a> Scene<'a> {
         }
         if y < HEADER_HEIGHT {
             if y >= RULER_HEIGHT + SUMMARY_HEIGHT {
-                let mut best: Option<(f32, usize)> = None;
-                for (index, notify) in self.notifies.iter().enumerate() {
-                    let dx = (self.view.time_to_x(notify.time) - x).abs();
-                    if dx <= NOTIFY_HIT_RADIUS && best.is_none_or(|(distance, _)| dx < distance) {
-                        best = Some((dx, index));
-                    }
-                }
-                return best.map_or(Hit::NotifyRow, |(_, index)| Hit::Notify { index });
+                return self.notify_hit(x, y);
             }
             let mut best: Option<(f32, f32)> = None;
             for key in self.summary_keys() {
@@ -884,42 +992,109 @@ impl<'a> Scene<'a> {
             )
             .fixed(),
         );
-        for notify in self.notifies {
-            let x = self.view.time_to_x(notify.time);
-            if x < -KEY_SIZE || x > w + KEY_SIZE {
-                continue;
-            }
-            let selected = self.selected_notify == Some(notify.id.as_str());
-            let color = if selected {
-                mix(notify_selected, p.text, 0.24)
-            } else {
-                p.success
-            };
-            let marker_size = if selected { 24.0 } else { 20.0 };
-            let mut marker = RectInstance::new(
-                [
-                    x - marker_size * 0.5,
-                    notify_top + (NOTIFY_HEIGHT - marker_size) * 0.5,
-                ],
-                [marker_size, marker_size],
-                color,
-            )
-            .shape(SHAPE_DIAMOND)
-            .radius(1.0)
-            .outline(mix(color, p.background, 0.72), 1.5)
-            .fixed();
-            if selected {
-                marker.glow = 9.0;
-            }
-            r.push(marker);
+        // Row separators so the stacking reads as lanes.
+        for row in 1..NOTIFY_ROWS {
             r.push(
                 RectInstance::new(
-                    [x - if selected { 1.5 } else { 1.0 }, notify_top + 1.0],
-                    [if selected { 3.0 } else { 2.0 }, NOTIFY_HEIGHT - 2.0],
-                    with_alpha(color, if selected { 0.95 } else { 0.8 }),
+                    [0.0, notify_top + 2.0 + row as f32 * NOTIFY_ROW_HEIGHT - 1.0],
+                    [w, 1.0],
+                    with_alpha(p.border, 0.25),
                 )
                 .fixed(),
             );
+        }
+        let hovered_notify = match self.hover {
+            Some(HoverTarget::Notify { index }) => self.notifies.get(index).map(|n| n.id.as_str()),
+            Some(HoverTarget::State { index }) => self.states.get(index).map(|s| s.id.as_str()),
+            _ => None,
+        };
+        let lane = self.notify_lane();
+        let marker_h = NOTIFY_ROW_HEIGHT - 3.0;
+        for placement in &lane.placements {
+            let sx = placement.anchor - self.view.scroll_x;
+            let ex = placement.range_end - self.view.scroll_x;
+            if ex < -KEY_SIZE || sx > w + KEY_SIZE {
+                continue;
+            }
+            let selected = self.selected_notify == Some(placement.id.as_str());
+            let hovered = hovered_notify == Some(placement.id.as_str());
+            let top = notify_top + 2.0 + placement.row as f32 * NOTIFY_ROW_HEIGHT;
+            match placement.kind {
+                NotifyKind::Notify => {
+                    let base = if selected {
+                        mix(notify_selected, p.text, 0.24)
+                    } else if hovered {
+                        mix(p.success, p.text, 0.3)
+                    } else {
+                        p.success
+                    };
+                    let size = if selected { marker_h + 1.0 } else { marker_h - 1.0 };
+                    let mut marker = RectInstance::new(
+                        [sx - size * 0.5, top + (marker_h + 1.0 - size) * 0.5],
+                        [size, size],
+                        base,
+                    )
+                    .shape(SHAPE_DIAMOND)
+                    .radius(1.0)
+                    .outline(mix(base, p.background, 0.72), 1.2)
+                    .fixed();
+                    if selected {
+                        marker.glow = 7.0;
+                    }
+                    r.push(marker);
+                }
+                NotifyKind::State => {
+                    let disabled = self
+                        .states
+                        .iter()
+                        .find(|s| s.id == placement.id)
+                        .is_some_and(|s| s.disabled);
+                    let hue = if disabled { p.text_muted } else { p.info };
+                    let alpha = match (selected, hovered, disabled) {
+                        (true, _, false) => 0.62,
+                        (_, true, false) => 0.48,
+                        (_, _, false) => 0.34,
+                        (true, _, true) => 0.30,
+                        (_, _, true) => 0.14,
+                    };
+                    let edge = if selected {
+                        mix(notify_selected, p.text, 0.2)
+                    } else if hovered {
+                        mix(hue, p.text, 0.35)
+                    } else {
+                        hue
+                    };
+                    let width = (ex - sx).max(3.0);
+                    let mut body = RectInstance::new([sx, top], [width, marker_h], with_alpha(hue, alpha))
+                        .radius(2.5)
+                        .outline(edge, if selected { 1.6 } else { 1.0 })
+                        .fixed();
+                    if selected {
+                        body.glow = 6.0;
+                    }
+                    r.push(body);
+                    if width > STATE_EDGE_PX * 3.0 {
+                        for hx in [sx, ex - 3.0] {
+                            r.push(
+                                RectInstance::new([hx, top + 2.0], [3.0, marker_h - 4.0], with_alpha(edge, 0.9))
+                                    .radius(1.0)
+                                    .fixed(),
+                            );
+                        }
+                    }
+                    if disabled {
+                        // a strike through the range marks it as switched off
+                        r.push(
+                            RectInstance::new(
+                                [sx + 2.0, top + marker_h * 0.5 - 0.5],
+                                [(width - 4.0).max(1.0), 1.0],
+                                with_alpha(p.text_muted, 0.8),
+                            )
+                            .fixed(),
+                        );
+                    }
+                }
+            }
         }
 
         // ── Drag guide ──
@@ -1036,6 +1211,7 @@ mod tests {
             selected_bone: None,
             selected_keys: keys,
             notifies: &[],
+            states: &[],
             selected_notify: None,
             time: 0.2,
             play_range: (0, 18),
@@ -1115,6 +1291,7 @@ mod tests {
             selected_bone: None,
             selected_keys: &keys,
             notifies: &notifies,
+            states: &[],
             selected_notify: Some(notifies[0].id.as_str()),
             time: 0.0,
             play_range: (0, 18),
@@ -1125,14 +1302,66 @@ mod tests {
             palette: Palette::test_dark(),
         };
         let marker_x = scene.view.time_to_x(notifies[0].time);
-        let marker_y = RULER_HEIGHT + SUMMARY_HEIGHT + NOTIFY_HEIGHT * 0.5;
+        let marker_y = Scene::notify_row_top(0) + NOTIFY_ROW_HEIGHT * 0.5;
         assert_eq!(scene.hit_test(marker_x, marker_y), Hit::Notify { index: 0 });
         assert_eq!(
             scene.hit_test(marker_x + NOTIFY_HIT_RADIUS - 1.0, marker_y),
             Hit::Notify { index: 0 },
             "notify hit targets include the enlarged marker affordance"
         );
-        assert_eq!(scene.hit_test(700.0, marker_y), Hit::NotifyRow);
+        assert_eq!(scene.hit_test(850.0, marker_y), Hit::NotifyRow);
+    }
+
+    #[test]
+    fn dense_notifies_and_states_stack_and_stay_selectable() {
+        use skeletal_assets::notify_schema::AnimationNotifyState;
+        let skeleton = sample::humanoid_skeleton();
+        let clip = sample::run_animation(&skeleton);
+        let rows: Vec<usize> = (0..clip.tracks.len()).collect();
+        let keys = HashSet::new();
+        // three notifies 0.02 s apart cannot share a row once their labels are drawn
+        let notifies: Vec<_> = (0..3)
+            .map(|i| AnimationNotify::new(format!("Step{i}"), 0.50 + i as f32 * 0.02))
+            .collect();
+        let mut off = AnimationNotifyState::new("Trail", 0.30, 0.90);
+        off.disabled = true;
+        let states = vec![off];
+        let scene = Scene {
+            view: TimelineView::default(),
+            size: (900.0, 320.0),
+            clip: &clip,
+            rows: &rows,
+            selected_bone: None,
+            selected_keys: &keys,
+            notifies: &notifies,
+            states: &states,
+            selected_notify: Some(states[0].id.as_str()),
+            time: 0.0,
+            play_range: (0, 18),
+            hover: Some(HoverTarget::State { index: 0 }),
+            marquee: None,
+            ruler: RulerMode::Frames,
+            drag_guide: None,
+            palette: Palette::test_dark(),
+        };
+        let lane = scene.notify_lane();
+        assert_eq!(lane.placements.len(), 4);
+        let rows_used: HashSet<_> = lane.placements.iter().map(|p| p.row).collect();
+        assert!(rows_used.len() >= 3, "overlapping markers use separate rows: {rows_used:?}");
+        // each marker is reachable at its own row, at its own anchor
+        for (index, n) in notifies.iter().enumerate() {
+            let p = lane.placements.iter().find(|p| p.id == n.id).unwrap();
+            let y = Scene::notify_row_top(p.row) + NOTIFY_ROW_HEIGHT * 0.5;
+            assert_eq!(scene.hit_test(scene.view.time_to_x(n.time), y), Hit::Notify { index });
+        }
+        let sp = lane.placements.iter().find(|p| p.id == states[0].id).unwrap();
+        let y = Scene::notify_row_top(sp.row) + NOTIFY_ROW_HEIGHT * 0.5;
+        let (sx, ex) = (scene.view.time_to_x(0.30), scene.view.time_to_x(0.90));
+        assert_eq!(scene.hit_test(sx + 1.0, y), Hit::State { index: 0, part: StatePart::Start });
+        assert_eq!(scene.hit_test(ex - 1.0, y), Hit::State { index: 0, part: StatePart::End });
+        assert_eq!(scene.hit_test((sx + ex) * 0.5, y), Hit::State { index: 0, part: StatePart::Body });
+        let rects = scene.build_rects();
+        assert!(rects.iter().all(|r| r.pos.iter().chain(r.size.iter()).all(|v| v.is_finite())));
     }
 
     #[test]
@@ -1235,6 +1464,7 @@ mod render_tests {
             selected_bone: Some(clip.tracks[1].bone_id.as_str()),
             selected_keys: &keys,
             notifies: &[],
+            states: &[],
             selected_notify: None,
             time: 0.27,
             play_range: (1, 16),

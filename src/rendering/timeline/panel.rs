@@ -26,10 +26,12 @@
 
 use std::collections::HashSet;
 
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use ui::input::{InputEvent, InputState};
 use ui::{dock::PanelEvent, ActiveTheme, IconName, PixelsExt, StyledExt};
 
+use crate::anim_editors::notify_edit::NotifyKind;
 use crate::editor::panel::{KeyDrag, SkeletalAnimEditorPanel};
 use crate::style::Palette;
 use crate::ui_components::chrome::{self, MONO};
@@ -40,6 +42,15 @@ use super::renderer::TimelineRenderer;
 use super::types::TimelineUniforms;
 
 pub(super) const GUTTER_WIDTH: f32 = 208.0;
+
+/// The part of a notify or state a drag holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MarkerGrab {
+    /// Moves a notify, or slides a state keeping its length.
+    Move,
+    StateStart,
+    StateEnd,
+}
 
 /// What a pointer drag started on the canvas is doing.
 pub(super) enum DragState {
@@ -65,6 +76,8 @@ pub(super) enum DragState {
     },
     Notify {
         id: String,
+        /// Which part of the marker was grabbed.
+        part: MarkerGrab,
         grab_dt: f32,
         start_x: f32,
         moved: bool,
@@ -202,6 +215,7 @@ impl TimelinePanel {
             selected_bone: editor.selected_bone.as_deref(),
             selected_keys: &editor.selected_keyframes,
             notifies: &editor.animation_features.notifies,
+            states: &editor.animation_features.notify_states,
             selected_notify: editor.selected_notify.as_deref(),
             time: editor.playback.time,
             play_range: editor.play_range,
@@ -350,7 +364,39 @@ impl TimelinePanel {
                 });
                 self.drag = DragState::Notify {
                     id,
+                    part: MarkerGrab::Move,
                     grab_dt: self.view.x_to_time(x) - time,
+                    start_x: x,
+                    moved: false,
+                };
+                cx.notify();
+            }
+            Hit::State { index, part } => {
+                let Some((id, start)) = editor
+                    .read(cx)
+                    .animation_features
+                    .notify_states
+                    .get(index)
+                    .map(|s| (s.id.clone(), s.start))
+                else {
+                    return;
+                };
+                editor.update(cx, |e, cx| {
+                    e.select_notify(Some(id.clone()));
+                    e.seek(start, window, cx);
+                });
+                let (grab, anchor) = match part {
+                    StatePart::Body => (MarkerGrab::Move, start),
+                    StatePart::Start => (MarkerGrab::StateStart, start),
+                    StatePart::End => (
+                        MarkerGrab::StateEnd,
+                        editor.read(cx).animation_features.notify_states[index].end,
+                    ),
+                };
+                self.drag = DragState::Notify {
+                    id,
+                    part: grab,
+                    grab_dt: self.view.x_to_time(x) - anchor,
                     start_x: x,
                     moved: false,
                 };
@@ -465,6 +511,8 @@ impl TimelinePanel {
                     match scene.hit_test(x, y) {
                         Hit::Key { track, index } => Some(HoverTarget::Key { track, index }),
                         Hit::SummaryKey { time } => Some(HoverTarget::SummaryKey { time }),
+                        Hit::Notify { index } => Some(HoverTarget::Notify { index }),
+                        Hit::State { index, .. } => Some(HoverTarget::State { index }),
                         _ => None,
                     }
                 };
@@ -494,10 +542,12 @@ impl TimelinePanel {
             }
             DragState::Notify {
                 id,
+                part,
                 grab_dt,
                 start_x,
                 moved,
             } => {
+                let part = *part;
                 if !*moved && (x - *start_x).abs() < 3.0 {
                     return;
                 }
@@ -515,7 +565,11 @@ impl TimelinePanel {
                     }
                 };
                 editor.update(cx, |e, cx| {
-                    e.set_notify_time(&id, time);
+                    match part {
+                        MarkerGrab::Move => e.set_notify_time(&id, time),
+                        MarkerGrab::StateStart => e.resize_notify_state(&id, Some(time), None),
+                        MarkerGrab::StateEnd => e.resize_notify_state(&id, None, Some(time)),
+                    }
                     cx.notify();
                 });
             }
@@ -782,34 +836,74 @@ impl TimelinePanel {
             );
         }
 
-        if let Some(notify) = editor.selected_notify.as_ref().and_then(|id| {
-            editor
-                .animation_features
-                .notifies
-                .iter()
-                .find(|n| &n.id == id)
-        }) {
-            let label = format!("{}  ·  {:.3}s", notify.name, notify.time);
-            let label_w = (label.chars().count() as f32 * 6.5 + 16.0).min((w - 12.0).max(48.0));
+        // Notify and state labels, placed by the same stacking the GPU lane uses.
+        let features = &editor.animation_features;
+        let size = (w, h);
+        let scene = self.scene(editor, rows, size);
+        let lane = scene.notify_lane();
+        for placement in &lane.placements {
+            let left = placement.anchor - self.view.scroll_x;
+            if placement.x1 - self.view.scroll_x < -4.0 || left > w + 4.0 {
+                continue;
+            }
+            let (name, disabled, text_left, text_w) = match placement.kind {
+                NotifyKind::Notify => {
+                    let Some(n) = features.notifies.iter().find(|n| n.id == placement.id) else {
+                        continue;
+                    };
+                    (n.name.clone(), false, left + 9.0, (placement.x1 - placement.anchor - 9.0).max(8.0))
+                }
+                NotifyKind::State => {
+                    let Some(s) = features.notify_states.iter().find(|s| s.id == placement.id) else {
+                        continue;
+                    };
+                    (s.name.clone(), s.disabled, left + 6.0, (placement.x1 - placement.anchor - 6.0).max(8.0))
+                }
+            };
+            let selected = editor.selected_notify.as_deref() == Some(placement.id.as_str());
+            out.push(
+                div()
+                    .absolute()
+                    .left(px(text_left))
+                    .top(px(Scene::notify_row_top(placement.row) + 1.0))
+                    .w(px(text_w))
+                    .h(px(NOTIFY_ROW_HEIGHT - 3.0))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .flex()
+                    .items_center()
+                    .text_size(px(10.0))
+                    .font_family(MONO)
+                    .when(selected, |d| d.font_semibold())
+                    .text_color(if disabled {
+                        theme.muted_foreground
+                    } else if selected {
+                        theme.warning
+                    } else {
+                        theme.foreground
+                    })
+                    .child(name)
+                    .into_any_element(),
+            );
+        }
+        if lane.overflow > 0 {
             out.push(
                 div()
                     .absolute()
                     .right(px(6.0))
-                    .top(px(RULER_HEIGHT + SUMMARY_HEIGHT + 3.0))
-                    .w(px(label_w))
-                    .h(px(18.0))
-                    .px_2()
+                    .top(px(Scene::notify_row_top(NOTIFY_ROWS - 1)))
+                    .px_1()
+                    .h(px(NOTIFY_ROW_HEIGHT - 3.0))
                     .flex()
                     .items_center()
-                    .rounded(px(4.0))
+                    .rounded(px(3.0))
                     .bg(theme.popover)
                     .border_1()
                     .border_color(theme.warning)
-                    .text_size(px(10.0))
+                    .text_size(px(9.5))
                     .font_family(MONO)
-                    .font_semibold()
                     .text_color(theme.warning)
-                    .child(label)
+                    .child(format!("+{} stacked — zoom in", lane.overflow))
                     .into_any_element(),
             );
         }
@@ -873,6 +967,20 @@ impl TimelinePanel {
                         editor.animation.time_to_frame(time),
                         time
                     )),
+                    HoverTarget::Notify { index } => features
+                        .notifies
+                        .get(index)
+                        .map(|n| format!("Notify {}  ·  {:.3}s", n.name, n.time)),
+                    HoverTarget::State { index } => features.notify_states.get(index).map(|s| {
+                        format!(
+                            "State {}  ·  {:.3}–{:.3}s  ({:.3}s){}",
+                            s.name,
+                            s.start,
+                            s.end,
+                            s.end - s.start,
+                            if s.disabled { "  ·  disabled" } else { "" }
+                        )
+                    }),
                 };
                 if let Some(text) = text {
                     let tip_w = text.chars().count() as f32 * 6.4 + 18.0;

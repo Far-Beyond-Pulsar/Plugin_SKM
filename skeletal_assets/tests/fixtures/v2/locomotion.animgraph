@@ -1,0 +1,851 @@
+{
+  "id": "d0a4b100-0000-4000-8000-0000000000c1",
+  "main": {
+    "comments": [],
+    "connections": [
+      {
+        "connection_type": "Data",
+        "id": "sm.pose->output.pose",
+        "source_node": "sm",
+        "source_pin": "pose",
+        "target_node": "output",
+        "target_pin": "pose"
+      }
+    ],
+    "custom_event_defs": {},
+    "metadata": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "description": "",
+      "modified_at": "2026-01-01T00:00:00+00:00",
+      "name": "AnimGraph",
+      "version": "1.0.0"
+    },
+    "nodes": {
+      "output": {
+        "id": "output",
+        "inputs": [
+          {
+            "connected_to": [
+              "sm.pose->output.pose"
+            ],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "pose",
+            "name": "pose",
+            "pin_type": "Input"
+          }
+        ],
+        "node_type": "anim.output_pose",
+        "outputs": [],
+        "position": {
+          "x": 400.0,
+          "y": 0.0
+        },
+        "properties": {}
+      },
+      "sm": {
+        "id": "sm",
+        "inputs": [],
+        "node_type": "anim.state_machine",
+        "outputs": [
+          {
+            "connected_to": [
+              "sm.pose->output.pose"
+            ],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "pose",
+            "name": "pose",
+            "pin_type": "Output"
+          }
+        ],
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "properties": {
+          "machine": "machine"
+        }
+      }
+    }
+  },
+  "name": "Locomotion",
+  "parameters": [
+    {
+      "default": false,
+      "id": "param-moving",
+      "name": "Moving",
+      "type": "bool"
+    }
+  ],
+  "skeleton": "11111111-1111-4111-8111-111111111111",
+  "subgraphs": [
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "entry.start->idle.default",
+            "source_node": "entry",
+            "source_pin": "start",
+            "target_node": "idle",
+            "target_pin": "default"
+          },
+          {
+            "connection_type": "Data",
+            "id": "idle.leave->go.from",
+            "source_node": "idle",
+            "source_pin": "leave",
+            "target_node": "go",
+            "target_pin": "from"
+          },
+          {
+            "connection_type": "Data",
+            "id": "run.arrive->go.to",
+            "source_node": "run",
+            "source_pin": "arrive",
+            "target_node": "go",
+            "target_pin": "to"
+          },
+          {
+            "connection_type": "Data",
+            "id": "run.leave->stop.from",
+            "source_node": "run",
+            "source_pin": "leave",
+            "target_node": "stop",
+            "target_pin": "from"
+          },
+          {
+            "connection_type": "Data",
+            "id": "idle.arrive->stop.to",
+            "source_node": "idle",
+            "source_pin": "arrive",
+            "target_node": "stop",
+            "target_pin": "to"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "machine",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "entry": {
+            "id": "entry",
+            "inputs": [],
+            "node_type": "sm.entry",
+            "outputs": [
+              {
+                "connected_to": [
+                  "entry.start->idle.default"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "start",
+                "name": "start",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {}
+          },
+          "go": {
+            "id": "go",
+            "inputs": [
+              {
+                "connected_to": [
+                  "idle.leave->go.from"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "from",
+                "name": "from",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [
+                  "run.arrive->go.to"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "to",
+                "name": "to",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.transition",
+            "outputs": [],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "allow_reentry": false,
+              "curve": "ease_in_out",
+              "duration": 0.2,
+              "interrupt": "none",
+              "priority": 0,
+              "rule": "rule_go"
+            }
+          },
+          "idle": {
+            "id": "idle",
+            "inputs": [
+              {
+                "connected_to": [
+                  "entry.start->idle.default"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "default",
+                "name": "default",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.state",
+            "outputs": [
+              {
+                "connected_to": [
+                  "idle.leave->go.from"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "leave",
+                "name": "leave",
+                "pin_type": "Output"
+              },
+              {
+                "connected_to": [
+                  "idle.arrive->stop.to"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "arrive",
+                "name": "arrive",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "name": "Idle",
+              "pose_graph": "pose_idle",
+              "reset_on_entry": true
+            }
+          },
+          "run": {
+            "id": "run",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "default",
+                "name": "default",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.state",
+            "outputs": [
+              {
+                "connected_to": [
+                  "run.leave->stop.from"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "leave",
+                "name": "leave",
+                "pin_type": "Output"
+              },
+              {
+                "connected_to": [
+                  "run.arrive->go.to"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "arrive",
+                "name": "arrive",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "name": "Run",
+              "pose_graph": "pose_run",
+              "reset_on_entry": true
+            }
+          },
+          "stop": {
+            "id": "stop",
+            "inputs": [
+              {
+                "connected_to": [
+                  "run.leave->stop.from"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "from",
+                "name": "from",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [
+                  "idle.arrive->stop.to"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "to",
+                "name": "to",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.transition",
+            "outputs": [],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "allow_reentry": false,
+              "curve": "ease_in_out",
+              "duration": 0.2,
+              "interrupt": "none",
+              "priority": 1,
+              "rule": "rule_stop"
+            }
+          }
+        }
+      },
+      "id": "machine",
+      "kind": "state_machine",
+      "name": "Locomotion"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "player.pose->result.pose",
+            "source_node": "player",
+            "source_pin": "pose",
+            "target_node": "result",
+            "target_pin": "pose"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "state",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "player": {
+            "id": "player",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "play_rate",
+                "name": "play_rate",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "start_position",
+                "name": "start_position",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "anim.sequence_player",
+            "outputs": [
+              {
+                "connected_to": [
+                  "player.pose->result.pose"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::Pose",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "pose",
+                "name": "pose",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "looping": "inherit",
+              "play_rate": 1.0,
+              "sequence": "aaaaaaaa-0000-4000-8000-000000000001",
+              "start_position": 0.0,
+              "sync_role": "auto"
+            }
+          },
+          "result": {
+            "id": "result",
+            "inputs": [
+              {
+                "connected_to": [
+                  "player.pose->result.pose"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::Pose",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "pose",
+                "name": "pose",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "anim.state_result",
+            "outputs": [],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {}
+          }
+        }
+      },
+      "id": "pose_idle",
+      "kind": "state_pose",
+      "name": "idle pose"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "player.pose->result.pose",
+            "source_node": "player",
+            "source_pin": "pose",
+            "target_node": "result",
+            "target_pin": "pose"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "state",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "player": {
+            "id": "player",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "play_rate",
+                "name": "play_rate",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "start_position",
+                "name": "start_position",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "anim.sequence_player",
+            "outputs": [
+              {
+                "connected_to": [
+                  "player.pose->result.pose"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::Pose",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "pose",
+                "name": "pose",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "looping": "inherit",
+              "play_rate": 1.0,
+              "sequence": "aaaaaaaa-0000-4000-8000-000000000002",
+              "start_position": 0.0,
+              "sync_role": "auto"
+            }
+          },
+          "result": {
+            "id": "result",
+            "inputs": [
+              {
+                "connected_to": [
+                  "player.pose->result.pose"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::Pose",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "pose",
+                "name": "pose",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "anim.state_result",
+            "outputs": [],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {}
+          }
+        }
+      },
+      "id": "pose_run",
+      "kind": "state_pose",
+      "name": "run pose"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "moving.value->res.can_enter",
+            "source_node": "moving",
+            "source_pin": "value",
+            "target_node": "res",
+            "target_pin": "can_enter"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "rule",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "moving": {
+            "id": "moving",
+            "inputs": [],
+            "node_type": "anim.get_parameter",
+            "outputs": [
+              {
+                "connected_to": [
+                  "moving.value->res.can_enter"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "value",
+                "name": "value",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "parameter": "Moving"
+            }
+          },
+          "res": {
+            "id": "res",
+            "inputs": [
+              {
+                "connected_to": [
+                  "moving.value->res.can_enter"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "can_enter",
+                "name": "can_enter",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "rule.result",
+            "outputs": [],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {}
+          }
+        }
+      },
+      "id": "rule_go",
+      "kind": "transition_rule",
+      "name": "rule_go"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "moving.value->not.value",
+            "source_node": "moving",
+            "source_pin": "value",
+            "target_node": "not",
+            "target_pin": "value"
+          },
+          {
+            "connection_type": "Data",
+            "id": "not.result->res.can_enter",
+            "source_node": "not",
+            "source_pin": "result",
+            "target_node": "res",
+            "target_pin": "can_enter"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "rule",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "moving": {
+            "id": "moving",
+            "inputs": [],
+            "node_type": "anim.get_parameter",
+            "outputs": [
+              {
+                "connected_to": [
+                  "moving.value->not.value"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "value",
+                "name": "value",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "parameter": "Moving"
+            }
+          },
+          "not": {
+            "id": "not",
+            "inputs": [
+              {
+                "connected_to": [
+                  "moving.value->not.value"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "value",
+                "name": "value",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "logic.not",
+            "outputs": [
+              {
+                "connected_to": [
+                  "not.result->res.can_enter"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "result",
+                "name": "result",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {}
+          },
+          "res": {
+            "id": "res",
+            "inputs": [
+              {
+                "connected_to": [
+                  "not.result->res.can_enter"
+                ],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "can_enter",
+                "name": "can_enter",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "rule.result",
+            "outputs": [],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {}
+          }
+        }
+      },
+      "id": "rule_stop",
+      "kind": "transition_rule",
+      "name": "rule_stop"
+    }
+  ],
+  "version": 2
+}

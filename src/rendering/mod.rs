@@ -1,7 +1,6 @@
 pub mod timeline;
 pub mod viewport;
 
-#[cfg(test)]
 pub(crate) mod preview;
 
 pub use timeline::TimelinePanel;

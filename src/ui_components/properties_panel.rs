@@ -17,7 +17,7 @@ use crate::editor::panel::{EditorMode, SkeletalAnimEditorPanel};
 use crate::editor::transform_inputs::TransformGroup;
 use crate::style::{AXIS_X, AXIS_Y, AXIS_Z};
 use crate::ui_components::chrome::{empty_message, panel_header, MONO};
-use skeletal_assets::notifies::{AnimationNotify, NotifyTarget, NotifyValue};
+use skeletal_assets::notifies::{NotifyField, NotifyTarget, NotifyValue};
 
 pub struct BonePropertiesPanel {
     editor: WeakEntity<SkeletalAnimEditorPanel>,
@@ -27,7 +27,9 @@ pub struct BonePropertiesPanel {
     /// this: a view that reads an entity while rendering is rebuilt on every
     /// notify of it, and the editor notifies on every playback frame.
     details: Option<Details>,
-    notify: Option<AnimationNotify>,
+    notify: Option<Marker>,
+    /// End, tick and length inputs of a selected state, keyed `<id>:<what>`.
+    state_inputs: HashMap<String, (Entity<InputState>, Subscription)>,
     notify_name_input: Option<(String, Entity<InputState>)>,
     _notify_name_subscription: Option<Subscription>,
     notify_time_input: Option<(String, Entity<InputState>)>,
@@ -39,6 +41,21 @@ pub struct BonePropertiesPanel {
     notify_field_owner: Option<(String, usize)>,
     signature: u64,
     _editor_observer: Option<Subscription>,
+}
+
+/// A selected notify (instant) or notify state (ranged), copied out of the editor.
+#[derive(Clone)]
+struct Marker {
+    id: String,
+    name: String,
+    /// The notify time, or a state's start.
+    time: f32,
+    /// A state's end; `None` for an instant notify.
+    end: Option<f32>,
+    tick: Option<f32>,
+    disabled: bool,
+    target: NotifyTarget,
+    fields: Vec<NotifyField>,
 }
 
 /// Snapshot of what the panel shows, read once per render.
@@ -71,6 +88,7 @@ impl BonePropertiesPanel {
             collapsed: HashSet::new(),
             details: None,
             notify: None,
+            state_inputs: HashMap::new(),
             notify_name_input: None,
             _notify_name_subscription: None,
             notify_time_input: None,
@@ -115,14 +133,13 @@ impl BonePropertiesPanel {
         e.selected_socket.hash(&mut h);
         e.selected_keyframe.hash(&mut h);
         e.selected_notify.hash(&mut h);
-        if let Some(notify) = e
-            .selected_notify
-            .as_ref()
-            .and_then(|id| e.animation_features.notifies.iter().find(|n| &n.id == id))
-        {
-            notify.name.hash(&mut h);
-            notify.time.to_bits().hash(&mut h);
-            format!("{:?}{:?}", notify.target, notify.fields).hash(&mut h);
+        if let Some(marker) = Self::capture_notify(e) {
+            marker.name.hash(&mut h);
+            marker.time.to_bits().hash(&mut h);
+            marker.end.map(f32::to_bits).hash(&mut h);
+            marker.tick.map(f32::to_bits).hash(&mut h);
+            marker.disabled.hash(&mut h);
+            format!("{:?}{:?}", marker.target, marker.fields).hash(&mut h);
         }
         e.playback.playing.hash(&mut h);
         e.skeleton_revision.hash(&mut h);
@@ -142,13 +159,34 @@ impl BonePropertiesPanel {
         h.finish()
     }
 
-    fn capture_notify(e: &SkeletalAnimEditorPanel) -> Option<AnimationNotify> {
+    fn capture_notify(e: &SkeletalAnimEditorPanel) -> Option<Marker> {
         let id = e.selected_notify.as_ref()?;
+        if let Some(n) = e.animation_features.notifies.iter().find(|n| &n.id == id) {
+            return Some(Marker {
+                id: n.id.clone(),
+                name: n.name.clone(),
+                time: n.time,
+                end: None,
+                tick: None,
+                disabled: false,
+                target: n.target.clone(),
+                fields: n.fields.clone(),
+            });
+        }
         e.animation_features
-            .notifies
+            .notify_states
             .iter()
-            .find(|notify| &notify.id == id)
-            .cloned()
+            .find(|s| &s.id == id)
+            .map(|s| Marker {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                time: s.start,
+                end: Some(s.end),
+                tick: s.tick_interval,
+                disabled: s.disabled,
+                target: s.target.clone(),
+                fields: s.fields.clone(),
+            })
     }
 
     fn capture(e: &SkeletalAnimEditorPanel) -> Option<Details> {
@@ -660,6 +698,45 @@ impl ui::dock::Panel for BonePropertiesPanel {
 impl Render for BonePropertiesPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
+        // End time and tick interval of a selected state.
+        let state_id = self
+            .notify
+            .as_ref()
+            .filter(|m| m.end.is_some())
+            .map(|m| m.id.clone());
+        self.state_inputs
+            .retain(|key, _| state_id.as_ref().is_some_and(|id| key.starts_with(&format!("{id}:"))));
+        if let Some(marker) = self.notify.clone().filter(|m| m.end.is_some()) {
+            let end = marker.end.unwrap_or(marker.time);
+            self.state_input(
+                format!("{}:end", marker.id),
+                format!("{end:.3}"),
+                window,
+                cx,
+                |e, id, text| {
+                    if let Ok(end) = text.trim().parse::<f32>() {
+                        if end.is_finite() {
+                            e.resize_notify_state(id, None, Some(end));
+                        }
+                    }
+                },
+            );
+            self.state_input(
+                format!("{}:tick", marker.id),
+                marker.tick.map(|t| format!("{t}")).unwrap_or_default(),
+                window,
+                cx,
+                |e, id, text| {
+                    let text = text.trim();
+                    if text.is_empty() {
+                        let _ = e.set_notify_state_tick(id, None);
+                    } else if let Ok(interval) = text.parse::<f32>() {
+                        let _ = e.set_notify_state_tick(id, Some(interval));
+                    }
+                },
+            );
+        }
+
         let details = self.details.as_ref();
         if let Some(notify) = self.notify.as_ref() {
             if self
@@ -714,6 +791,13 @@ impl Render for BonePropertiesPanel {
                                             .iter()
                                             .find(|notify| notify.id == id)
                                             .map(|notify| notify.time)
+                                            .or_else(|| {
+                                                e.animation_features
+                                                    .notify_states
+                                                    .iter()
+                                                    .find(|s| s.id == id)
+                                                    .map(|s| s.start)
+                                            })
                                         {
                                             e.seek(snapped, window, cx);
                                         }
@@ -776,6 +860,9 @@ impl Render for BonePropertiesPanel {
         }
 
         let badge = match &details {
+            _ if self.notify.as_ref().is_some_and(|m| m.end.is_some()) => {
+                Some(Tag::info().small().child("Notify state"))
+            }
             _ if self.notify.is_some() => Some(Tag::warning().small().child("Notify")),
             Some(d) if d.socket => Some(Tag::info().small().child("Socket")),
             Some(d) if d.selected_key.is_some() => Some(Tag::warning().small().child("Keyframe")),
@@ -892,7 +979,7 @@ impl Render for BonePropertiesPanel {
 impl BonePropertiesPanel {
     fn render_notify_card(
         &mut self,
-        notify: &AnimationNotify,
+        notify: &Marker,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -950,6 +1037,15 @@ impl BonePropertiesPanel {
             .as_ref()
             .filter(|(time_id, _)| time_id == &notify.id)
             .map(|(_, input)| input.clone());
+        let is_state = notify.end.is_some();
+        let end_input = self
+            .state_inputs
+            .get(&format!("{}:end", notify.id))
+            .map(|(input, _)| input.clone());
+        let tick_input = self
+            .state_inputs
+            .get(&format!("{}:tick", notify.id))
+            .map(|(input, _)| input.clone());
         let mut fields = v_flex().w_full().gap_1();
         for (index, field) in notify.fields.iter().enumerate() {
             let kind = match &field.value {
@@ -1026,7 +1122,7 @@ impl BonePropertiesPanel {
                         div()
                             .text_xs()
                             .text_color(theme.muted_foreground)
-                            .child("Time"),
+                            .child(if is_state { "Start" } else { "Time" }),
                     )
                     .when_some(time_input, |col, input| {
                         col.child(
@@ -1044,9 +1140,69 @@ impl BonePropertiesPanel {
                         div()
                             .text_xs()
                             .text_color(theme.muted_foreground)
-                            .child("Drag its marker in the Notifies lane to move it."),
+                            .child(if is_state {
+                                "Drag the bar to slide it, or its ends to resize."
+                            } else {
+                                "Drag its marker in the Notifies lane to move it."
+                            }),
                     ),
             )
+            .when(is_state, |col| {
+                let seconds = |theme: &ui::Theme| {
+                    div()
+                        .pr_1()
+                        .text_xs()
+                        .font_family(MONO)
+                        .text_color(theme.muted_foreground)
+                        .child("s")
+                };
+                let length = notify.end.unwrap_or(notify.time) - notify.time;
+                let editor_disable = self.editor.clone();
+                let id_disable = id.clone();
+                let disabled = notify.disabled;
+                col.child(
+                    v_flex()
+                        .gap_1()
+                        .child(div().text_xs().text_color(theme.muted_foreground).child("End"))
+                        .when_some(end_input, |c, input| {
+                            c.child(NumberInput::new(&input).small().suffix(seconds(&theme)))
+                        })
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_family(MONO)
+                                .text_color(theme.muted_foreground)
+                                .child(format!("Length {length:.3} s")),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("Tick interval (blank = every update)"),
+                        )
+                        .when_some(tick_input, |c, input| {
+                            c.child(NumberInput::new(&input).small().suffix(seconds(&theme)))
+                        }),
+                )
+                .child(
+                    Button::new("notify-state-disabled")
+                        .label(if disabled { "Disabled — click to enable" } else { "Enabled — click to disable" })
+                        .ghost()
+                        .small()
+                        .tooltip("A disabled state stays in the asset but never dispatches events")
+                        .on_click(move |_, _, cx| {
+                            let id = id_disable.clone();
+                            let _ = editor_disable.update(cx, |e, cx| {
+                                e.set_notify_state_disabled(&id, !disabled);
+                                cx.notify();
+                            });
+                        }),
+                )
+            })
             .child(
                 v_flex()
                     .gap_1()
@@ -1127,7 +1283,7 @@ impl BonePropertiesPanel {
             )
             .child(
                 Button::new("notify-delete")
-                    .label("Delete notify")
+                    .label(if is_state { "Delete state" } else { "Delete notify" })
                     .ghost()
                     .small()
                     .on_click(move |_, _, cx| {
@@ -1138,6 +1294,48 @@ impl BonePropertiesPanel {
                         });
                     }),
             )
+    }
+
+    /// A text input bound to one editor edit. `apply` receives the marker id
+    /// and the text on every change; an input the user is not typing in is
+    /// refreshed to `current` so snapping and drags show up.
+    fn state_input(
+        &mut self,
+        key: String,
+        current: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        apply: impl Fn(&mut SkeletalAnimEditorPanel, &str, &str) + 'static,
+    ) -> Entity<InputState> {
+        if let Some((input, _)) = self.state_inputs.get(&key) {
+            let input = input.clone();
+            if !input.read(cx).focus_handle(cx).is_focused(window)
+                && input.read(cx).value().as_ref() != current.as_str()
+            {
+                input.update(cx, |input, cx| input.set_value(current, window, cx));
+            }
+            return input;
+        }
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(current));
+        let editor = self.editor.clone();
+        let id = key.split(':').next().unwrap_or_default().to_string();
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            move |_this, input, event: &InputEvent, _window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let text = input.read(cx).value().to_string();
+                    if let Some(editor) = editor.upgrade() {
+                        editor.update(cx, |e, cx| {
+                            apply(e, &id, &text);
+                            cx.notify();
+                        });
+                    }
+                }
+            },
+        );
+        self.state_inputs.insert(key, (input.clone(), subscription));
+        input
     }
 
     fn notify_field_input(

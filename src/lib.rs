@@ -37,7 +37,7 @@ use plugin_editor_api::*;
 use serde_json::json;
 use ui::dock::PanelView;
 
-mod animation_assets_editor;
+mod anim_editors;
 mod core;
 mod editor;
 mod rendering;
@@ -55,14 +55,22 @@ pub const SKELETAL_MESH_EDITOR_ID: &str = "skeletal-mesh-editor";
 pub const BLEND_SPACE_EDITOR_ID: &str = "blend-space-editor";
 pub const ANIMATION_MONTAGE_EDITOR_ID: &str = "animation-montage-editor";
 pub const ANIMATION_GRAPH_EDITOR_ID: &str = "animation-graph-editor";
+pub const RETARGET_PROFILE_EDITOR_ID: &str = "retarget-profile-editor";
+pub const IK_RIG_EDITOR_ID: &str = "ik-rig-editor";
+pub const IK_RETARGETER_EDITOR_ID: &str = "ik-retargeter-editor";
+pub const POSE_DATABASE_EDITOR_ID: &str = "pose-search-database-editor";
 /// Every editor id this plugin provides.
-pub const EDITOR_IDS: [&str; 6] = [
+pub const EDITOR_IDS: [&str; 10] = [
     SKELETON_EDITOR_ID,
     ANIM_SEQUENCE_EDITOR_ID,
     SKELETAL_MESH_EDITOR_ID,
     BLEND_SPACE_EDITOR_ID,
     ANIMATION_MONTAGE_EDITOR_ID,
     ANIMATION_GRAPH_EDITOR_ID,
+    RETARGET_PROFILE_EDITOR_ID,
+    IK_RIG_EDITOR_ID,
+    IK_RETARGETER_EDITOR_ID,
+    POSE_DATABASE_EDITOR_ID,
 ];
 
 /// File type of `.skeleton` assets.
@@ -77,6 +85,37 @@ pub const LEGACY_FILE_TYPE: &str = "skeletal_animation";
 pub const BLEND_SPACE_FILE_TYPE: &str = "blend_space";
 pub const ANIMATION_MONTAGE_FILE_TYPE: &str = "animation_montage";
 pub const ANIMATION_GRAPH_FILE_TYPE: &str = "animation_graph";
+pub const RETARGET_PROFILE_FILE_TYPE: &str = "retarget_profile";
+pub const IK_RIG_FILE_TYPE: &str = "ik_rig";
+pub const IK_RETARGETER_FILE_TYPE: &str = "ik_retargeter";
+pub const POSE_DATABASE_FILE_TYPE: &str = "pose_database";
+
+/// The create-menu entry of one high-level animation asset. Its default
+/// content is a valid empty document written by the real codec, so a new file
+/// opens without repair.
+fn animation_asset_file_type(kind: anim_editors::kinds::AnimationAssetEditorKind) -> FileTypeDefinition {
+    use anim_editors::kinds::AnimationAssetEditorKind as K;
+    let color = match kind {
+        K::BlendSpace => 0x7E57C2,
+        K::Montage => 0x26A69A,
+        K::Graph => 0xEF5350,
+        K::RetargetProfile => 0xFFA726,
+        K::IkRig => 0x66BB6A,
+        K::IkRetarget => 0x29B6F6,
+        K::PoseDb => 0xEC407A,
+    };
+    FileTypeDefinition {
+        id: FileTypeId::new(kind.file_type()),
+        extension: kind.extension().to_string(),
+        display_name: kind.title().to_string(),
+        icon: ui::IconName::Keyframes,
+        color: gpui::rgb(color).into(),
+        structure: FileStructure::Standalone,
+        default_content: kind.default_json(),
+        categories: vec!["Animation".to_string()],
+        creation_directory: None,
+    }
+}
 
 /// Whether `editor_id` is one of this plugin's editors.
 pub fn provides_editor(editor_id: &str) -> bool {
@@ -101,7 +140,7 @@ impl EditorPlugin for SkeletalAnimationPlugin {
     }
 
     fn file_types(&self) -> Vec<FileTypeDefinition> {
-        vec![
+        let mut types = vec![
             FileTypeDefinition {
                 id: FileTypeId::new(SKELETON_FILE_TYPE),
                 extension: core::assets::SKELETON_EXTENSION.to_string(),
@@ -154,48 +193,6 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 creation_directory: None,
             },
             FileTypeDefinition {
-                id: FileTypeId::new(BLEND_SPACE_FILE_TYPE),
-                extension: skeletal_assets::animation_sets::BLEND_SPACE_EXTENSION.to_string(),
-                display_name: "Blend Space".to_string(),
-                icon: ui::IconName::Keyframes,
-                color: gpui::rgb(0x7E57C2).into(),
-                structure: FileStructure::Standalone,
-                default_content: serde_json::to_value(
-                    skeletal_assets::animation_sets::BlendSpaceAsset::default(),
-                )
-                .unwrap_or_default(),
-                categories: vec!["Animation".to_string()],
-                creation_directory: None,
-            },
-            FileTypeDefinition {
-                id: FileTypeId::new(ANIMATION_MONTAGE_FILE_TYPE),
-                extension: skeletal_assets::animation_sets::MONTAGE_EXTENSION.to_string(),
-                display_name: "Animation Montage".to_string(),
-                icon: ui::IconName::Keyframes,
-                color: gpui::rgb(0x26A69A).into(),
-                structure: FileStructure::Standalone,
-                default_content: serde_json::to_value(
-                    skeletal_assets::animation_sets::AnimationMontageAsset::default(),
-                )
-                .unwrap_or_default(),
-                categories: vec!["Animation".to_string()],
-                creation_directory: None,
-            },
-            FileTypeDefinition {
-                id: FileTypeId::new(ANIMATION_GRAPH_FILE_TYPE),
-                extension: skeletal_assets::animation_sets::ANIMATION_GRAPH_EXTENSION.to_string(),
-                display_name: "Animation Graph".to_string(),
-                icon: ui::IconName::Keyframes,
-                color: gpui::rgb(0xEF5350).into(),
-                structure: FileStructure::Standalone,
-                default_content: serde_json::to_value(
-                    skeletal_assets::animation_sets::AnimationGraphAsset::default(),
-                )
-                .unwrap_or_default(),
-                categories: vec!["Animation".to_string()],
-                creation_directory: None,
-            },
-            FileTypeDefinition {
                 id: FileTypeId::new(LEGACY_FILE_TYPE),
                 extension: "skelanim".to_string(),
                 display_name: "Skeletal Animation (old)".to_string(),
@@ -210,11 +207,13 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 categories: vec!["Animation".to_string()],
                 creation_directory: None,
             },
-        ]
+        ];
+        types.extend(anim_editors::kinds::AnimationAssetEditorKind::ALL.map(animation_asset_file_type));
+        types
     }
 
     fn editors(&self) -> Vec<EditorMetadata> {
-        vec![
+        let mut editors = vec![
             EditorMetadata {
                 id: EditorId::new(SKELETON_EDITOR_ID),
                 display_name: "Skeleton Editor".into(),
@@ -233,22 +232,13 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 display_name: "Skeletal Mesh Editor".into(),
                 supported_file_types: vec![FileTypeId::new(SKELETAL_MESH_FILE_TYPE)],
             },
-            EditorMetadata {
-                id: EditorId::new(BLEND_SPACE_EDITOR_ID),
-                display_name: "Blend Space Editor".into(),
-                supported_file_types: vec![FileTypeId::new(BLEND_SPACE_FILE_TYPE)],
-            },
-            EditorMetadata {
-                id: EditorId::new(ANIMATION_MONTAGE_EDITOR_ID),
-                display_name: "Animation Montage Editor".into(),
-                supported_file_types: vec![FileTypeId::new(ANIMATION_MONTAGE_FILE_TYPE)],
-            },
-            EditorMetadata {
-                id: EditorId::new(ANIMATION_GRAPH_EDITOR_ID),
-                display_name: "Animation Graph Editor".into(),
-                supported_file_types: vec![FileTypeId::new(ANIMATION_GRAPH_FILE_TYPE)],
-            },
-        ]
+        ];
+        editors.extend(anim_editors::kinds::AnimationAssetEditorKind::ALL.map(|kind| EditorMetadata {
+            id: EditorId::new(kind.editor_id()),
+            display_name: format!("{} Editor", kind.title()).into(),
+            supported_file_types: vec![FileTypeId::new(kind.file_type())],
+        }));
+        editors
     }
 
     fn on_load(&mut self) {
@@ -276,26 +266,8 @@ impl EditorPluginEditor for SkeletalAnimationPlugin {
                 },
             );
         }
-        for (id, kind) in [
-            (
-                BLEND_SPACE_EDITOR_ID,
-                animation_assets_editor::AnimationAssetEditorKind::BlendSpace,
-            ),
-            (
-                ANIMATION_MONTAGE_EDITOR_ID,
-                animation_assets_editor::AnimationAssetEditorKind::Montage,
-            ),
-            (
-                ANIMATION_GRAPH_EDITOR_ID,
-                animation_assets_editor::AnimationAssetEditorKind::Graph,
-            ),
-        ] {
-            registry.register_fn(EditorId::new(id), move |file_path, window, cx| {
-                let panel = animation_assets_editor::AnimationAssetEditor::open(
-                    file_path, kind, window, cx,
-                )?;
-                Ok(Arc::new(panel) as Arc<dyn PanelView>)
-            });
+        for kind in anim_editors::kinds::AnimationAssetEditorKind::ALL {
+            registry.register_fn_with_settings(EditorId::new(kind.editor_id()), move |file_path, settings, window, cx| kind.open(file_path, Some(&settings.services().undo), window, cx));
         }
     }
 }
@@ -316,13 +288,35 @@ impl EditorPluginSubsystems for SkeletalAnimationPlugin {
 impl SkeletalAnimationPlugin {
     /// Open `file_path` in a new editor panel (for hosts that link this crate).
     /// A `.skeleton` opens the Skeleton editor, an `.animseq` or an old
-    /// `.skelanim` folder the Animation Sequence editor.
+    /// `.skelanim` folder the Animation Sequence editor, and every higher-level
+    /// animation asset (blend space, montage, animation graph, retarget
+    /// profile, IK rig, IK retargeter, pose database) its own editor.
     pub fn create_editor(
         file_path: PathBuf,
         window: &mut Window,
         cx: &mut App,
     ) -> Result<Arc<dyn PanelView>, PluginError> {
         Self::create_editor_with_undo(file_path, None, window, cx)
+    }
+
+    /// Open the editor named `editor_id` for `file_path` (the built-in
+    /// registration path resolves the id from the file type first). Each
+    /// higher-level animation asset has its own editor id; the older editors
+    /// share the one panel.
+    pub fn create_editor_for(
+        editor_id: &str,
+        file_path: PathBuf,
+        undo: Option<&UndoService>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<Arc<dyn PanelView>, PluginError> {
+        let kind = anim_editors::kinds::AnimationAssetEditorKind::ALL
+            .into_iter()
+            .find(|kind| kind.editor_id() == editor_id);
+        match kind {
+            Some(kind) => kind.open(file_path, undo, window, cx),
+            None => Self::create_editor_with_undo(file_path, undo, window, cx),
+        }
     }
 
     /// open an editor with the host's per-document undo service.
@@ -332,6 +326,13 @@ impl SkeletalAnimationPlugin {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<Arc<dyn PanelView>, PluginError> {
+        // The new animation assets have purpose-built editors, shared with the
+        // DLL registration; the panel below only knows the older three files.
+        if let Some(kind) =
+            anim_editors::kinds::AnimationAssetEditorKind::for_path(&file_path)
+        {
+            return kind.open(file_path, undo, window, cx);
+        }
         let mut load_error = None;
         let panel = cx.new(|cx| {
             SkeletalAnimEditorPanel::new_with_path(file_path.clone(), window, cx).unwrap_or_else(
@@ -366,7 +367,7 @@ mod tests {
     use plugin_editor_api::EditorPlugin;
 
     #[test]
-    fn every_asset_has_a_file_type_and_an_editor_and_only_the_first_two_can_be_created() {
+    fn every_asset_has_a_file_type_and_an_editor_and_only_imports_and_legacy_cannot_be_created() {
         let plugin = SkeletalAnimationPlugin::default();
         let file_types = plugin.file_types();
         let editors = plugin.editors();
@@ -376,6 +377,13 @@ mod tests {
             (ANIM_SEQUENCE_FILE_TYPE, "animseq", true),
             (SKELETAL_MESH_FILE_TYPE, "skmesh", false),
             (LEGACY_FILE_TYPE, "skelanim", false),
+            (super::BLEND_SPACE_FILE_TYPE, "blendspace", true),
+            (super::ANIMATION_MONTAGE_FILE_TYPE, "montage", true),
+            (super::ANIMATION_GRAPH_FILE_TYPE, "animgraph", true),
+            (super::RETARGET_PROFILE_FILE_TYPE, "animretarget", true),
+            (super::IK_RIG_FILE_TYPE, "ikrig", true),
+            (super::IK_RETARGETER_FILE_TYPE, "ikretarget", true),
+            (super::POSE_DATABASE_FILE_TYPE, "posedb", true),
         ] {
             let definition = file_types
                 .iter()
@@ -400,5 +408,36 @@ mod tests {
             );
         }
         assert!(!provides_editor("something-else"));
+    }
+
+    #[test]
+    fn every_high_level_asset_is_registered_end_to_end_with_a_valid_default() {
+        use crate::anim_editors::kinds::AnimationAssetEditorKind as K;
+        use pulsar_reflection::AssetKind;
+        let plugin = SkeletalAnimationPlugin::default();
+        let file_types = plugin.file_types();
+        let editors = plugin.editors();
+        let mut extensions = std::collections::HashSet::new();
+        for kind in K::ALL {
+            let definition = file_types
+                .iter()
+                .find(|d| d.id.as_str() == kind.file_type())
+                .unwrap_or_else(|| panic!("no file type for {}", kind.title()));
+            assert_eq!(definition.extension, kind.extension());
+            assert!(extensions.insert(definition.extension.clone()), "one extension per format");
+            assert!(definition.is_creatable(), "{} is in the create menu", kind.title());
+            assert!(definition.categories.iter().any(|c| c == "Animation"));
+            assert!(provides_editor(kind.editor_id()));
+            assert!(editors.iter().any(|e| e.id.as_str() == kind.editor_id()
+                && e.supported_file_types.iter().any(|t| t.as_str() == kind.file_type())));
+            // the menu writes this content as the new file; the real codec must accept it
+            let text = definition.default_content.to_string();
+            let id = kind.parses(&text).unwrap_or_else(|e| panic!("{} default content does not load: {e}", kind.title()));
+            assert!(!id.is_empty());
+            // and it indexes under the kind the picker and Reflection use
+            assert_eq!(skeletal_assets::dependencies::kind_of_extension(kind.extension()), Some(kind.asset_kind()));
+        }
+        assert_eq!(K::ALL.len(), 7);
+        assert_eq!(skeletal_assets::dependencies::extension_of(pulsar_reflection::AnimationMontageAssetKind::KIND), Some("montage"));
     }
 }

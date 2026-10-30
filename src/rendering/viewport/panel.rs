@@ -1033,6 +1033,7 @@ impl Render for ViewportPanel {
                 physics: self.physics_asset.as_ref(),
                 sockets: Some((&e.sockets, e.selected_socket.as_deref())),
                 transform_gizmo,
+                world_override: None,
             });
             let name = |id: &str| {
                 e.skeleton

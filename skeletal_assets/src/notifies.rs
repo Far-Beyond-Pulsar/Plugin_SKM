@@ -11,6 +11,9 @@ pub struct AnimationNotify {
     pub target: NotifyTarget,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<NotifyField>,
+    /// Id of the [`crate::notify_schema::NotifyPayloadSchema`] this notify's fields follow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
 }
 
 /// reusable assets name a class variable; they never store a live Entity handle.
@@ -45,7 +48,7 @@ pub enum NotifyValue {
     String(String),
 }
 
-const RESERVED_NOTIFY_FIELDS: &[&str] = &[
+pub(crate) const RESERVED_NOTIFY_FIELDS: &[&str] = &[
     "entity",
     "source",
     "sequence_id",
@@ -55,6 +58,12 @@ const RESERVED_NOTIFY_FIELDS: &[&str] = &[
     "playback_time",
     "cycle",
     "generation",
+    "playback_instance",
+    "notify_phase",
+    "tick_delta",
+    "end_reason",
+    "source_kind",
+    "source_id",
     "target",
     "class",
     "exec",
@@ -62,7 +71,7 @@ const RESERVED_NOTIFY_FIELDS: &[&str] = &[
     "Body",
 ];
 
-fn identifier(name: &str) -> bool {
+pub(crate) fn identifier(name: &str) -> bool {
     let mut chars = name.chars();
     chars
         .next()
@@ -84,6 +93,7 @@ impl AnimationNotify {
             time,
             target: NotifyTarget::Self_,
             fields: Vec::new(),
+            schema: None,
         }
     }
 }
@@ -100,6 +110,8 @@ pub enum PlaybackInterval {
 #[derive(Clone, Copy, Debug)]
 pub struct CrossedNotify<'a> {
     pub notify: &'a AnimationNotify,
+    /// Position of the notify in the asset's own list.
+    pub index: usize,
     pub playback_time: f64,
     pub cycle: i64,
 }
@@ -124,7 +136,7 @@ fn occurrence_time(cycle: i64, duration: f64, offset: f64) -> f64 {
 /// Division at a rounded arrival can land in a neighboring cycle. Include
 /// that neighbor on both sides, plus the preceding cycle's clip-end event;
 /// inclusion is decided only from occurrence_time, never inverse arithmetic.
-fn candidate_cycles(from: f64, to: f64, duration: f64) -> Result<(i64, i64), String> {
+pub(crate) fn candidate_cycles(from: f64, to: f64, duration: f64) -> Result<(i64, i64), String> {
     let first = (from.min(to) / duration).floor();
     let last = (from.max(to) / duration).floor();
     // f64 no longer distinguishes adjacent cycles past this range.
@@ -190,6 +202,7 @@ pub fn collect_crossed_notifies(
                     index,
                     CrossedNotify {
                         notify,
+                        index,
                         playback_time: time,
                         cycle,
                     },
@@ -308,6 +321,7 @@ impl NotifyIndex {
                 };
                 let hit = |index: usize| CrossedNotify {
                     notify: &self.notifies[index],
+                    index: self.asset_order[index],
                     playback_time: time_of(index),
                     cycle,
                 };
@@ -332,13 +346,21 @@ pub(crate) fn validate_notify(notify: &AnimationNotify, duration: f32) -> Result
     if !notify.time.is_finite() || notify.time < 0.0 || notify.time > duration {
         return Err("Notify time must be within the clip".into());
     }
-    if let NotifyTarget::ClassVariable(variable) = &notify.target {
+    validate_target_and_fields(&notify.target, &notify.fields)
+}
+
+/// The target and free-form payload rules shared by notifies and notify states.
+pub(crate) fn validate_target_and_fields(
+    target: &NotifyTarget,
+    fields: &[NotifyField],
+) -> Result<(), String> {
+    if let NotifyTarget::ClassVariable(variable) = target {
         if !identifier(variable) {
             return Err("Target must name a class object-reference variable".into());
         }
     }
     let mut names = std::collections::HashSet::new();
-    for field in &notify.fields {
+    for field in fields {
         if !identifier(&field.name) || RESERVED_NOTIFY_FIELDS.contains(&field.name.as_str()) {
             return Err("Payload field needs a unique, nonreserved identifier".into());
         }

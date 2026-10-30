@@ -39,6 +39,11 @@ use skeletal_assets::notifies::AnimationNotify;
 use skeletal_assets::notifies::{NotifyField, NotifyTarget, NotifyValue};
 use skeletal_assets::sequence_features::AnimationFeatures;
 
+use crate::anim_editors::notify_edit::NotifyView;
+
+/// Length, in seconds, of a notify state added from the timeline.
+const DEFAULT_STATE_LENGTH: f32 = 0.25;
+
 use super::transform_inputs::{TransformGroup, TransformInputs};
 
 /// Which asset the panel is editing.
@@ -667,13 +672,83 @@ impl SkeletalAnimEditorPanel {
         Some(id)
     }
 
-    pub fn select_notify(&mut self, id: Option<String>) {
-        self.selected_notify = id.filter(|id| {
-            self.animation_features
-                .notifies
+    /// Add a ranged notify state at `start` and select it.
+    pub fn add_notify_state(&mut self, start: f32) -> Option<String> {
+        if self.mode != EditorMode::Sequence {
+            return None;
+        }
+        let limit = self.animation.duration;
+        let start = self.animation.snap_time(start.clamp(0.0, limit)).clamp(0.0, limit);
+        let id = self
+            .notify_view()
+            .add_state("State", start, start + DEFAULT_STATE_LENGTH, limit);
+        self.selected_notify = Some(id.clone());
+        self.selected_bone = None;
+        self.selected_socket = None;
+        self.selected_keyframe = None;
+        self.selected_keyframes.clear();
+        self.is_dirty = true;
+        Some(id)
+    }
+
+    pub fn notify_view(&mut self) -> NotifyView<'_> {
+        NotifyView {
+            notifies: &mut self.animation_features.notifies,
+            states: &mut self.animation_features.notify_states,
+            schemas: &mut self.animation_features.notify_schemas,
+        }
+    }
+
+    /// Whether `id` names a notify or a notify state of this sequence.
+    pub fn has_marker(&self, id: &str) -> bool {
+        self.animation_features.notifies.iter().any(|n| n.id == id)
+            || self
+                .animation_features
+                .notify_states
                 .iter()
-                .any(|notify| &notify.id == id)
-        });
+                .any(|s| s.id == id)
+    }
+
+    fn marker_target(&self, id: &str) -> Option<NotifyTarget> {
+        self.animation_features
+            .notifies
+            .iter()
+            .find(|n| n.id == id)
+            .map(|n| n.target.clone())
+            .or_else(|| {
+                self.animation_features
+                    .notify_states
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map(|s| s.target.clone())
+            })
+    }
+
+    /// Set a state's start and/or end, snapped to the frame grid and kept inside the clip.
+    pub fn resize_notify_state(&mut self, id: &str, start: Option<f32>, end: Option<f32>) {
+        let limit = self.animation.duration;
+        let snap = |t: f32| self.animation.snap_time(t.clamp(0.0, limit)).clamp(0.0, limit);
+        let (start, end) = (start.map(snap), end.map(snap));
+        if self.notify_view().resize_state(id, start, end, limit) {
+            self.is_dirty = true;
+        }
+    }
+
+    pub fn set_notify_state_disabled(&mut self, id: &str, disabled: bool) {
+        if self.notify_view().set_disabled(id, disabled) {
+            self.is_dirty = true;
+        }
+    }
+
+    pub fn set_notify_state_tick(&mut self, id: &str, interval: Option<f32>) -> Result<(), String> {
+        if self.notify_view().set_tick_interval(id, interval)? {
+            self.is_dirty = true;
+        }
+        Ok(())
+    }
+
+    pub fn select_notify(&mut self, id: Option<String>) {
+        self.selected_notify = id.filter(|id| self.has_marker(id));
         if self.selected_notify.is_some() {
             self.selected_bone = None;
             self.selected_socket = None;
@@ -683,79 +758,52 @@ impl SkeletalAnimEditorPanel {
     }
 
     pub fn set_notify_name(&mut self, id: &str, name: String) {
-        if let Some(notify) = self
-            .animation_features
-            .notifies
-            .iter_mut()
-            .find(|n| n.id == id)
-        {
-            if notify.name != name {
-                notify.name = name;
-                self.is_dirty = true;
-            }
+        if self.notify_view().rename(id, &name) {
+            self.is_dirty = true;
         }
     }
 
     pub fn set_notify_time(&mut self, id: &str, time: f32) {
-        let time = self
-            .animation
-            .snap_time(time.clamp(0.0, self.animation.duration))
-            .clamp(0.0, self.animation.duration);
-        if let Some(notify) = self
-            .animation_features
-            .notifies
-            .iter_mut()
-            .find(|n| n.id == id)
-        {
-            if (notify.time - time).abs() > f32::EPSILON {
-                notify.time = time;
-                self.is_dirty = true;
-                self.animation_features
-                    .notifies
-                    .sort_by(|a, b| a.time.total_cmp(&b.time));
-            }
+        let limit = self.animation.duration;
+        let time = self.animation.snap_time(time.clamp(0.0, limit)).clamp(0.0, limit);
+        if self.notify_view().move_to(id, time, limit) {
+            self.is_dirty = true;
+            self.animation_features
+                .notifies
+                .sort_by(|a, b| a.time.total_cmp(&b.time));
         }
     }
 
     pub fn delete_notify(&mut self, id: &str) {
-        let old_len = self.animation_features.notifies.len();
-        self.animation_features
-            .notifies
-            .retain(|notify| notify.id != id);
-        if self.animation_features.notifies.len() != old_len {
-            self.selected_notify = None;
+        if self.notify_view().delete(id) {
+            if self.selected_notify.as_deref() == Some(id) {
+                self.selected_notify = None;
+            }
             self.is_dirty = true;
         }
     }
 
     pub fn toggle_notify_target(&mut self, id: &str) {
-        if let Some(notify) = self
-            .animation_features
-            .notifies
-            .iter_mut()
-            .find(|n| n.id == id)
-        {
-            notify.target = match &notify.target {
-                NotifyTarget::Self_ => NotifyTarget::ClassVariable("Target".into()),
-                NotifyTarget::ClassVariable(_) => NotifyTarget::Self_,
-            };
+        let Some(current) = self.marker_target(id) else {
+            return;
+        };
+        let next = match current {
+            NotifyTarget::Self_ => NotifyTarget::ClassVariable("Target".into()),
+            NotifyTarget::ClassVariable(_) => NotifyTarget::Self_,
+        };
+        if matches!(self.notify_view().set_target(id, next), Ok(true)) {
             self.is_dirty = true;
         }
     }
 
     pub fn set_notify_target_name(&mut self, id: &str, name: String) {
-        if let Some(notify) = self
-            .animation_features
-            .notifies
-            .iter_mut()
-            .find(|n| n.id == id)
+        if matches!(self.marker_target(id), Some(NotifyTarget::ClassVariable(_)))
+            && matches!(
+                self.notify_view().set_target(id, NotifyTarget::ClassVariable(name)),
+                Ok(true)
+            )
         {
-            if let NotifyTarget::ClassVariable(current) = &mut notify.target {
-                if *current != name {
-                    *current = name;
-                    self.is_dirty = true;
-                }
-            }
+            self.is_dirty = true;
         }
     }
 
@@ -763,67 +811,63 @@ impl SkeletalAnimEditorPanel {
         self.add_notify_field_value(id, NotifyValue::String(String::new()));
     }
 
-    pub fn add_notify_field_value(&mut self, id: &str, value: NotifyValue) {
-        if let Some(notify) = self
+    /// Payload fields of a notify or a notify state.
+    fn marker_fields_mut(&mut self, id: &str) -> Option<&mut Vec<NotifyField>> {
+        if let Some(n) = self
             .animation_features
             .notifies
             .iter_mut()
             .find(|n| n.id == id)
         {
+            return Some(&mut n.fields);
+        }
+        self.animation_features
+            .notify_states
+            .iter_mut()
+            .find(|s| s.id == id)
+            .map(|s| &mut s.fields)
+    }
+
+    pub fn add_notify_field_value(&mut self, id: &str, value: NotifyValue) {
+        if let Some(fields) = self.marker_fields_mut(id) {
             let mut suffix = 1;
             let mut name = "payload".to_string();
-            while notify.fields.iter().any(|field| field.name == name) {
+            while fields.iter().any(|field| field.name == name) {
                 suffix += 1;
                 name = format!("payload_{suffix}");
             }
-            notify.fields.push(NotifyField { name, value });
+            fields.push(NotifyField { name, value });
             self.is_dirty = true;
         }
     }
 
     pub fn delete_notify_field(&mut self, id: &str, index: usize) {
-        if let Some(notify) = self
-            .animation_features
-            .notifies
-            .iter_mut()
-            .find(|n| n.id == id)
-        {
-            if index < notify.fields.len() {
-                notify.fields.remove(index);
+        if let Some(fields) = self.marker_fields_mut(id) {
+            if index < fields.len() {
+                fields.remove(index);
                 self.is_dirty = true;
             }
         }
     }
 
     pub fn set_notify_field_name(&mut self, id: &str, index: usize, name: String) {
-        if let Some(notify) = self
-            .animation_features
-            .notifies
-            .iter_mut()
-            .find(|n| n.id == id)
-        {
-            if index < notify.fields.len()
-                && !notify
-                    .fields
+        if let Some(fields) = self.marker_fields_mut(id) {
+            if index < fields.len()
+                && !fields
                     .iter()
                     .enumerate()
                     .any(|(i, field)| i != index && field.name == name)
-                && notify.fields[index].name != name
+                && fields[index].name != name
             {
-                notify.fields[index].name = name;
+                fields[index].name = name;
                 self.is_dirty = true;
             }
         }
     }
 
     pub fn set_notify_field_value(&mut self, id: &str, index: usize, value: String) {
-        if let Some(notify) = self
-            .animation_features
-            .notifies
-            .iter_mut()
-            .find(|n| n.id == id)
-        {
-            let Some(field) = notify.fields.get_mut(index) else {
+        if let Some(fields) = self.marker_fields_mut(id) {
+            let Some(field) = fields.get_mut(index) else {
                 return;
             };
             let parsed = match &field.value {
@@ -1790,6 +1834,8 @@ impl SkeletalAnimEditorPanel {
             bones: self.skeleton.bones.clone(),
             sockets: self.sockets.clone(),
             preview_mesh: self.preview_mesh_ref.clone(),
+            // the skeleton editor does not edit masks; keep the ones on disk (the graph editor owns them)
+            masks: assets::load_skeleton_asset(path).map(|a| a.masks).unwrap_or_default(),
         };
         assets::save_skeleton_asset(path, &asset)?;
         self.asset_id = Some(id);
@@ -1860,5 +1906,6 @@ fn remember_asset_id(root: &Path, id: &str, path: &Path) {
         {
             log::debug!("could not cache asset id for {}: {error:#}", path.display());
         }
+        crate::core::asset_index::record_asset(root, path);
     }
 }

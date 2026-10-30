@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "id": "1d000000-0000-4000-8000-0000000000c1",
+  "name": "A to B",
+  "source_rig": "1c000000-0000-4000-8000-0000000000c1",
+  "target_rig": "1c000000-0000-4000-8000-0000000000c2",
+  "chains": [],
+  "source_pose": {
+    "bone_rotations": [],
+    "root_translation": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "target_pose": {
+    "bone_rotations": [],
+    "root_translation": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "root": {
+    "rotation_alpha": 1.0,
+    "translation_alpha": 1.0,
+    "scale_horizontal": 1.0,
+    "scale_vertical": 1.0,
+    "offset": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  }
+}
