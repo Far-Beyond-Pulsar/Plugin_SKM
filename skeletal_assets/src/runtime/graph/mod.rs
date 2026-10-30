@@ -389,6 +389,45 @@ pub struct RuleContext {
     pub complete: bool,
 }
 
+/// What a state machine reports to its owner. Delivery is the owner's business (the component
+/// publishes these on itself, never globally); the graph only records them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StateEventKind {
+    /// A state became the machine's current state (at the start of the transition into it, or when the machine starts).
+    Entered,
+    /// A state stopped carrying weight: its transition blend finished.
+    Exited,
+    TransitionStarted,
+    /// A transition's blend ran to the end. A transition replaced by another one in flight is not completed.
+    TransitionCompleted,
+}
+
+impl StateEventKind {
+    pub const ALL: [StateEventKind; 4] = [Self::Entered, Self::Exited, Self::TransitionStarted, Self::TransitionCompleted];
+
+    /// The suffix used in canonical event names (`state_entered`, ...).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Entered => "entered",
+            Self::Exited => "exited",
+            Self::TransitionStarted => "transition_started",
+            Self::TransitionCompleted => "transition_completed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StateEvent {
+    pub machine: String,
+    pub kind: StateEventKind,
+    /// The state entered or exited; for transitions, the state transitioned from.
+    pub state: String,
+    pub from_state: String,
+    pub to_state: String,
+    /// Id of the transition (empty for a machine starting up).
+    pub transition: String,
+}
+
 /// Everything an update or evaluation reads from outside the graph.
 pub struct Env<'a> {
     pub dt: f32,
@@ -398,6 +437,8 @@ pub struct Env<'a> {
     pub rule: Option<RuleContext>,
     pub spans: &'a mut Vec<PlaybackSpan>,
     pub searches: &'a mut Vec<SearchRecord>,
+    /// State machine events of this update (empty when `quiet`).
+    pub state_events: &'a mut Vec<StateEvent>,
     pub trace: &'a mut Vec<String>,
     /// Next instance id for nested instances created during the update.
     pub next_uid: &'a mut u64,

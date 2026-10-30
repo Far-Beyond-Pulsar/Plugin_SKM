@@ -15,7 +15,7 @@ use crate::diagnostics::Diagnostic;
 
 use super::clip::CompiledClip;
 use super::graph::instance::{GraphInstance, SyncRegistry};
-use super::graph::{
+use super::graph::{StateEvent, 
     CNode, CompiledGraph, Env, NodeKind, ParamDef, ParamError, ParamValues, PlaybackSpan, Program, SearchRecord, SeqCfg, Value,
 };
 use super::montage::{CompiledMontage, MontageEvent, MontageHandle, MontageSet, PlayRefused};
@@ -63,6 +63,8 @@ pub struct UpdateReport {
     /// reported above; their playbacks end now).
     pub finished_montages: Vec<MontageHandle>,
     pub searches: Vec<SearchRecord>,
+    /// State machine events in the order they happened (empty when scrubbing).
+    pub state_events: Vec<StateEvent>,
     /// State machine and IK debug lines of the latest update.
     pub trace: Vec<String>,
     /// Accumulated root motion of the advance, in the actor's space.
@@ -277,6 +279,7 @@ impl AnimInstance {
         let mut timelines = Vec::new();
         let mut montage_events = Vec::new();
         let mut finished = Vec::new();
+        let mut state_events = Vec::new();
         let mut searches = Vec::new();
         for d in deltas {
             self.report.substeps += 1;
@@ -290,12 +293,14 @@ impl AnimInstance {
             montage_events.append(&mut self.report.montage_events);
             finished.append(&mut self.report.finished_montages);
             searches.append(&mut self.report.searches);
+            state_events.append(&mut self.report.state_events);
         }
         self.report.spans = spans;
         self.report.montage_timelines = timelines;
         self.report.montage_events = montage_events;
         self.report.finished_montages = finished;
         self.report.searches = searches;
+        self.report.state_events = state_events;
         self.report.advanced = advanced;
         self.report.root_motion = root_motion;
         self.report.montage_root_motion = montage_root_motion;
@@ -317,6 +322,7 @@ impl AnimInstance {
             let mut spans = Vec::new();
             let mut searches = Vec::new();
             let mut trace = Vec::new();
+            let mut state_events = Vec::new();
             let mut env = Env {
                 dt,
                 params: &self.params,
@@ -325,6 +331,7 @@ impl AnimInstance {
                 rule: None,
                 spans: &mut spans,
                 searches: &mut searches,
+                state_events: &mut state_events,
                 trace: &mut trace,
                 next_uid: &mut self.next_uid,
                 quiet,
@@ -343,6 +350,7 @@ impl AnimInstance {
             if !quiet {
                 self.report.spans.extend(spans);
                 self.report.searches.extend(searches);
+                self.report.state_events.extend(state_events);
             }
             self.report.trace = trace;
         }

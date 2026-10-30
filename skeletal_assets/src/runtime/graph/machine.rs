@@ -13,7 +13,7 @@ use crate::montage::BlendCurve;
 
 use super::super::pose::{blend_weighted, Pose, RuntimeSkeleton};
 use super::instance::{GraphInstance, GroupPhase};
-use super::{Env, PlaybackSpan, Program, RuleContext};
+use super::{Env, PlaybackSpan, Program, RuleContext, StateEvent, StateEventKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Interrupt {
@@ -87,6 +87,20 @@ pub struct MachineState {
     start_override: Option<usize>,
 }
 
+fn emit(env: &mut Env, machine: &Machine, kind: StateEventKind, state: usize, from: usize, to: usize, transition: &str) {
+    if env.quiet {
+        return;
+    }
+    env.state_events.push(StateEvent {
+        machine: machine.name.clone(),
+        kind,
+        state: machine.states[state].name.clone(),
+        from_state: machine.states[from].name.clone(),
+        to_state: machine.states[to].name.clone(),
+        transition: transition.to_string(),
+    });
+}
+
 impl MachineState {
     fn alloc(&mut self, inst: StateInst) -> usize {
         if let Some(i) = self.insts.iter().position(Option::is_none) {
@@ -113,7 +127,11 @@ impl MachineState {
         self.dormant.clear();
         self.blend = None;
         self.weights.clear();
+        let adopted = self.start_override;
         let start = self.start_override.take().unwrap_or(machine.default);
+        if adopted.is_none() {
+            emit(env, machine, StateEventKind::Entered, start, start, start, "");
+        }
         let inst = self.new_inst(machine, start, env);
         self.current = Some(self.alloc(inst));
         self.started = true;
@@ -142,18 +160,28 @@ impl MachineState {
         acc
     }
 
-    fn finish_blend(&mut self, machine: &Machine) {
+    fn finish_blend(&mut self, machine: &Machine, env: &mut Env) {
         let Some(b) = self.blend.take() else { return };
+        let from = machine.transitions[b.trans].from;
+        let id = machine.transitions[b.trans].id.clone();
+        let mut exited: Vec<usize> = Vec::new();
         for slot in 0..self.insts.len() {
             if slot == b.target {
                 continue;
             }
             if let Some(inst) = self.insts[slot].take() {
+                if !exited.contains(&inst.state) {
+                    exited.push(inst.state);
+                }
                 if !machine.states[inst.state].reset_on_entry {
                     self.dormant.insert(inst.state, inst);
                 }
             }
         }
+        for state in exited {
+            emit(env, machine, StateEventKind::Exited, state, from, b.to_state, &id);
+        }
+        emit(env, machine, StateEventKind::TransitionCompleted, from, from, b.to_state, &id);
         self.current = Some(b.target);
     }
 
@@ -171,7 +199,7 @@ impl MachineState {
             b.elapsed += dt;
         }
         if self.blend.as_ref().is_some_and(|b| b.elapsed >= b.duration) {
-            self.finish_blend(machine);
+            self.finish_blend(machine, env);
         }
         // 2. which transitions may fire
         let live = self.current_weights();
@@ -258,11 +286,13 @@ impl MachineState {
             }
         };
         self.last_transition = Some(def.id.clone());
+        emit(env, machine, StateEventKind::TransitionStarted, def.from, def.from, def.to, &def.id);
+        emit(env, machine, StateEventKind::Entered, def.to, def.from, def.to, &def.id);
         if def.duration <= 0.0 {
             // immediate: everything but the target is dropped
             self.blend = Some(ActiveBlend { sources: Vec::new(), target, elapsed: 0.0, duration: 0.0, curve: def.curve, interrupt: def.interrupt, to_state: def.to, trans: t });
             self.current = Some(target);
-            self.finish_blend(machine);
+            self.finish_blend(machine, env);
             return;
         }
         // snapshot sources: when the target is already fading out it keeps that weight as a source

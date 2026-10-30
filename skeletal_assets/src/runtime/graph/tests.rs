@@ -1486,3 +1486,87 @@ fn promoting_inline_layer_masks_keeps_the_pose_and_moves_the_rule_to_the_skeleto
     assert!(near(inst.pose().bones[1].translation.x, 1.0));
     assert!(near(inst.pose().bones[2].translation.x, 9.0));
 }
+
+// ---- state machine events ------------------------------------------------------------------
+
+fn state_events(inst: &mut AnimInstance) -> Vec<(StateEventKind, String, String, String)> {
+    let events = std::mem::take(&mut inst.report.state_events);
+    events.into_iter().map(|e| (e.kind, e.state, e.to_state, e.transition)).collect()
+}
+
+use super::{StateEventKind, StateEventKind as K};
+
+#[test]
+fn a_machine_reports_entry_then_a_timed_transition_in_order() {
+    let mut f = Fixture::new();
+    let idle = f.slide("idle", 100.0, 0.0, 0.0);
+    let walk = f.slide("walk", 100.0, 10.0, 10.0);
+    let asset = machine_asset(&f, &[("go", ParamType::Bool)], &[("Idle", &idle, vec![]), ("Walk", &walk, vec![])], &[t("t1", "Idle", "Walk", "go", vec![("duration", json!(1.0)), ("curve", js("linear"))])]);
+    let mut inst = f.instance(&asset);
+    step(&mut inst, 0.1);
+    assert_eq!(state_events(&mut inst), vec![(K::Entered, "Idle".into(), "Idle".into(), "".into())], "starting enters the default state once");
+    step(&mut inst, 0.1);
+    assert!(state_events(&mut inst).is_empty(), "nothing happens while the state holds");
+    inst.set_bool("go", true).unwrap();
+    step(&mut inst, 0.0);
+    let started = state_events(&mut inst);
+    step(&mut inst, 0.5);
+    assert!(state_events(&mut inst).is_empty());
+    assert_eq!(
+        started,
+        vec![(K::TransitionStarted, "Idle".into(), "Walk".into(), "t1".into()), (K::Entered, "Walk".into(), "Walk".into(), "t1".into())],
+        "the target is entered when the transition starts; the source is still blending out"
+    );
+    step(&mut inst, 0.6);
+    assert_eq!(
+        state_events(&mut inst),
+        vec![(K::Exited, "Idle".into(), "Walk".into(), "t1".into()), (K::TransitionCompleted, "Idle".into(), "Walk".into(), "t1".into())],
+        "the source exits and the transition completes when the blend ends"
+    );
+}
+
+#[test]
+fn an_immediate_transition_reports_all_four_events_in_one_update() {
+    let mut f = Fixture::new();
+    let a = f.slide("a", 100.0, 0.0, 0.0);
+    let b = f.slide("b", 100.0, 1.0, 1.0);
+    let asset = machine_asset(&f, &[("go", ParamType::Bool)], &[("A", &a, vec![]), ("B", &b, vec![])], &[t("t", "A", "B", "go", vec![("duration", json!(0.0))])]);
+    let mut inst = f.instance(&asset);
+    step(&mut inst, 0.1);
+    state_events(&mut inst);
+    inst.set_bool("go", true).unwrap();
+    step(&mut inst, 0.1);
+    let kinds: Vec<StateEventKind> = state_events(&mut inst).into_iter().map(|e| e.0).collect();
+    assert_eq!(kinds, vec![K::TransitionStarted, K::Entered, K::Exited, K::TransitionCompleted]);
+}
+
+#[test]
+fn an_interrupted_transition_is_not_completed_and_scrubbing_reports_nothing() {
+    let mut f = Fixture::new();
+    let a = f.slide("a", 100.0, 0.0, 0.0);
+    let b = f.slide("b", 100.0, 1.0, 1.0);
+    let c = f.slide("c", 100.0, 2.0, 2.0);
+    let asset = machine_asset(
+        &f,
+        &[("to_b", ParamType::Bool), ("to_c", ParamType::Bool)],
+        &[("A", &a, vec![]), ("B", &b, vec![]), ("C", &c, vec![])],
+        &[t("ab", "A", "B", "to_b", vec![("duration", json!(1.0)), ("interrupt", js("target"))]), t("bc", "B", "C", "to_c", vec![("duration", json!(0.2))])],
+    );
+    let mut inst = f.instance(&asset);
+    step(&mut inst, 0.1);
+    state_events(&mut inst);
+    inst.set_bool("to_b", true).unwrap();
+    step(&mut inst, 0.1);
+    inst.set_bool("to_c", true).unwrap();
+    step(&mut inst, 0.1);
+    step(&mut inst, 0.5);
+    let events = state_events(&mut inst);
+    let completed: Vec<&str> = events.iter().filter(|e| e.0 == K::TransitionCompleted).map(|e| e.3.as_str()).collect();
+    assert_eq!(completed, vec!["bc"], "ab was interrupted: {events:?}");
+    let exited: Vec<&str> = events.iter().filter(|e| e.0 == K::Exited).map(|e| e.1.as_str()).collect();
+    assert!(exited.contains(&"A") && exited.contains(&"B"), "both sources exit when the last blend ends: {events:?}");
+
+    let mut quiet = f.instance(&asset);
+    quiet.advance(0.1, TimeStep::Variable, UpdateMode::Scrub);
+    assert!(quiet.report.state_events.is_empty(), "a scrub never raises gameplay events");
+}
