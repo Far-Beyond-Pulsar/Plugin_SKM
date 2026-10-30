@@ -324,7 +324,7 @@ impl NotifyTracker {
         let Some(sequence) = &span.clip.source else { return Ok(()) };
         let owner = NotifyOwner::Sequence(sequence.clone());
         let key = PlaybackKey { scope: span.scope, origin: span.origin.clone() };
-        self.observe(key, owner, span.from, span.to, span.looping, span.weight, out)
+        self.observe_with_seam(key, owner, span.from, span.to, span.looping, span.weight, span.seam, out)
     }
 
     /// Feed the span of a Montage instance's own timeline.
@@ -424,6 +424,21 @@ impl NotifyTracker {
         weight: f32,
         out: &mut Vec<NotifyOccurrence>,
     ) -> Result<(), String> {
+        self.observe_with_seam(key, owner, from, to, looping, weight, None, out)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn observe_with_seam(
+        &mut self,
+        key: PlaybackKey,
+        owner: NotifyOwner,
+        from: f64,
+        to: f64,
+        looping: bool,
+        weight: f32,
+        seam: Option<(f64, f64)>,
+        out: &mut Vec<NotifyOccurrence>,
+    ) -> Result<(), String> {
         if !from.is_finite() || !to.is_finite() {
             return Err("Playback times must be finite".into());
         }
@@ -477,6 +492,9 @@ impl NotifyTracker {
                 } else {
                     jumped = true;
                 }
+            } else if let Some((start, end)) = seam.filter(|(start, end)| (playback.last_to - end).abs() <= eps && (from - start).abs() <= eps && end > start) {
+                // the next cycle of a looping Montage segment: the run goes on across the seam
+                let _ = (start, end);
             } else if gap.abs() > eps {
                 jumped = true;
             }

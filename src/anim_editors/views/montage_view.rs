@@ -572,6 +572,17 @@ impl MontageEditor {
         body = body.child(self.widgets.text_field("seg.clip_end", "Trim end (s)", &seg.clip_end.map(fmt_f32).unwrap_or_default(), window, cx));
         body = body.child(self.widgets.text_field("seg.rate", "Play rate", &fmt_f32(seg.play_rate), window, cx));
         body = body.child(self.widgets.text_field("seg.loops", "Loops", &seg.loop_count.to_string(), window, cx));
+        if seg.loop_count > 1 {
+            let (id, restart) = (seg.id.clone(), seg.restart_states_on_loop);
+            body = body.child(
+                h_flex().gap_1().items_center().child(div().text_xs().text_color(cx.theme().muted_foreground).child("Notify states on loop:")).child(
+                    Button::new("mt-seg-restart").label(if restart { "End and begin every cycle" } else { "Run across the seam" }).small().outline().tooltip("A state that covers the whole trimmed range either keeps running across each loop seam or ends and begins again in every cycle").on_click(cx.listener(move |this, _, window, cx| {
+                        let id = id.clone();
+                        edit(this, window, cx, |m| m.set_segment_restart_states(&id, !restart));
+                    })),
+                ),
+            );
+        }
         body = body.child(value_row("Timeline span", format!("{} \u{2192} {}", fmt_f32(a), fmt_f32(b)), cx));
         if let Some(d) = duration {
             body = body.child(value_row("Clip length", format!("{} s", fmt_f32(d)), cx));

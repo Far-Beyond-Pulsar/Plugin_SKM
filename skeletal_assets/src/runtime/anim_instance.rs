@@ -444,7 +444,7 @@ fn montage_playback(inst: &super::montage::MontageInstance, spans: &mut Vec<Play
                 let total = clip_len * seg.loop_count as f64;
                 let rate = seg.rate as f64;
                 let push = |spans: &mut Vec<PlaybackSpan>, from: f64, to: f64| {
-                    spans.push(PlaybackSpan { scope: inst.handle.0, clip: seg.clip.clone(), from, to, looping: false, weight: inst.weight, origin: origin() });
+                    spans.push(PlaybackSpan { scope: inst.handle.0, clip: seg.clip.clone(), from, to, looping: false, weight: inst.weight, origin: origin(), seam: (seg.loop_count > 1 && !seg.restart_states_on_loop).then_some((seg.clip_start as f64, seg.clip_end as f64)) });
                 };
                 if a == b {
                     // paused (or just jumped to): live at one point of this segment

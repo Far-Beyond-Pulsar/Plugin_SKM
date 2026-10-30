@@ -363,6 +363,10 @@ pub struct PlaybackSpan {
     /// Contribution weight of the producing node.
     pub weight: f32,
     pub origin: SpanOrigin,
+    /// For a Montage segment that continues across its loop seam: the `(clip_start, clip_end)`
+    /// window it loops over. A span that starts at the window start right after one that ended at
+    /// its end is the same run, not a jump.
+    pub seam: Option<(f64, f64)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

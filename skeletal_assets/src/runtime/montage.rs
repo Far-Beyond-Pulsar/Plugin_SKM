@@ -28,6 +28,8 @@ pub struct CompiledSegment {
     pub clip_end: f32,
     pub rate: f32,
     pub loop_count: u32,
+    /// Whether each loop cycle ends and begins its notify states again.
+    pub restart_states_on_loop: bool,
     /// Length on the montage timeline.
     pub length: f32,
 }
@@ -89,7 +91,7 @@ impl CompiledMontage {
                 let clip_end = s.clip_end.unwrap_or(clip.duration).min(clip.duration);
                 let rate = if s.play_rate.abs() > 1e-6 { s.play_rate.abs() } else { 1.0 };
                 let length = s.timeline_length(clip.duration).max(0.0);
-                segments.push(CompiledSegment { id: s.id.clone(), start: s.start, clip, clip_start: s.clip_start.max(0.0), clip_end, rate, loop_count: s.loop_count.max(1), length });
+                segments.push(CompiledSegment { id: s.id.clone(), start: s.start, clip, clip_start: s.clip_start.max(0.0), clip_end, rate, loop_count: s.loop_count.max(1), restart_states_on_loop: s.restart_states_on_loop, length });
             }
             segments.sort_by(|a, b| a.start.total_cmp(&b.start));
             tracks.push(CompiledTrack {

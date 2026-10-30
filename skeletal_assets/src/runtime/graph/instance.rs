@@ -1390,7 +1390,7 @@ fn record_span(env: &mut Env, scope: u64, clip: Arc<CompiledClip>, from: f64, to
 
 /// An empty span (`from == to`) is kept: it says the playback is still live.
 fn span_push(spans: &mut Vec<PlaybackSpan>, scope: u64, clip: Arc<CompiledClip>, from: f64, to: f64, looping: bool, weight: f32, origin: SpanOrigin) {
-    spans.push(PlaybackSpan { scope, clip, from, to, looping, weight, origin });
+    spans.push(PlaybackSpan { scope, clip, from, to, looping, weight, origin, seam: None });
 }
 
 /// A clip sampled at an unbounded position, with its root motion for the move

@@ -366,6 +366,20 @@ impl MontageModel {
         Ok(())
     }
 
+    /// Whether a looping segment ends and begins its notify states again every cycle (default:
+    /// states that cover the whole trimmed range run across the seam).
+    pub fn set_segment_restart_states(&mut self, segment: &str, restart: bool) -> Result<(), String> {
+        let (t, s) = self.locate_segment(segment).ok_or("no such segment")?;
+        if self.asset().tracks[t].segments[s].restart_states_on_loop == restart {
+            return Err("unchanged".into());
+        }
+        self.doc.edit("Set segment loop states", Some(&format!("loopstates:{segment}")), |a| {
+            a.tracks[t].segments[s].restart_states_on_loop = restart;
+            (true, ())
+        });
+        Ok(())
+    }
+
     pub fn set_segment_sequence(&mut self, segment: &str, sequence: Option<AssetRef<AnimationSequenceAssetKind>>) -> bool {
         let Some((t, s)) = self.locate_segment(segment) else { return false };
         self.doc.edit("Set segment sequence", None, |a| {
@@ -828,6 +842,10 @@ mod tests {
         m.set_segment_rate(&s2, 2.0).unwrap();
         assert_eq!(m.length(), 2.0, "double speed halves the segment");
         m.set_segment_loops(&s1, 2).unwrap();
+        m.set_segment_restart_states(&s1, true).unwrap();
+        assert!(m.asset().tracks[0].segments[0].restart_states_on_loop && m.set_segment_restart_states(&s1, true).is_err());
+        let text = m.asset().to_text().unwrap();
+        assert!(AnimationMontageAsset::parse(&text).unwrap().tracks[0].segments[0].restart_states_on_loop, "authored restart survives save and reopen");
         assert!(m.set_segment_loops(&s1, 0).is_err() && m.set_segment_rate(&s1, -1.0).is_err());
         assert!(m.trim_segment(&s2, 5.0, None).is_err(), "past the clip end");
         assert!(m.trim_segment(&s2, 0.5, Some(0.5)).is_err(), "empty trim");

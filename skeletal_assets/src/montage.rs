@@ -112,6 +112,10 @@ pub struct MontageSegment {
     /// How many times the trimmed clip plays back to back.
     #[serde(default = "one_loop")]
     pub loop_count: u32,
+    /// Notify states that cover the whole trimmed range keep running across the loop seam by
+    /// default (one activation for the whole run); set to end and begin them again every cycle.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub restart_states_on_loop: bool,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -133,6 +137,7 @@ impl MontageSegment {
             clip_end: None,
             play_rate: 1.0,
             loop_count: 1,
+            restart_states_on_loop: false,
             extra: Extra::new(),
         }
     }

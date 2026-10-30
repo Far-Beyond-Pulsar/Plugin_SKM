@@ -256,3 +256,58 @@ fn a_hot_reloaded_montage_ends_its_states_as_reload_and_the_new_asset_takes_over
     assert!(reasons.contains(&("ms".to_string(), Some(EndReason::Reload))), "{reasons:?}");
     assert_eq!(count(&out, "ms", NotifyPhase::Begin), 1, "the reloaded asset begins its own activation");
 }
+
+/// A Montage whose one segment loops three times over the trimmed range 0.25..1.25 of a 2 s clip.
+/// Clip states: `wide` 0.0..1.9 covers the whole range (and so the seam), `edge` 1.0..1.9 is
+/// running when a cycle ends but not when the next begins, `inner` 0.5..1.0 lives inside a cycle.
+fn looping_rig(restart: bool) -> (Arc<RuntimeSkeleton>, Arc<CompiledMontage>) {
+    let (skel, base) = rig();
+    let mut m = (*base).clone();
+    m.notifies.clear();
+    m.notify_states.clear();
+    let clip_seq = sequence(2.0, &[], &[("wide", 0.0, 1.9), ("edge", 1.0, 1.9), ("inner", 0.5, 1.0)]);
+    let clip = Arc::new(CompiledClip::compile_shared(&clip_seq, &skel));
+    let segment = &mut m.tracks[0].segments[0];
+    segment.clip = clip;
+    segment.clip_start = 0.25;
+    segment.clip_end = 1.25;
+    segment.loop_count = 3;
+    segment.length = 3.0;
+    segment.restart_states_on_loop = restart;
+    m.length = 3.0;
+    (skel, Arc::new(m))
+}
+
+fn play_loops(restart: bool) -> Vec<NotifyOccurrence> {
+    let (skel, m) = looping_rig(restart);
+    let mut inst = AnimInstance::new(skel);
+    let mut tracker = NotifyTracker::new();
+    inst.play_montage(m, 1.0, None).unwrap();
+    let mut out = Vec::new();
+    for _ in 0..40 {
+        drive(&mut inst, &mut tracker, 0.1, &mut out);
+    }
+    out
+}
+
+#[test]
+fn a_state_covering_a_looping_segments_range_runs_across_the_seam_as_one_activation() {
+    let out = play_loops(false);
+    assert_eq!(count(&out, "wide", NotifyPhase::Begin), 1, "{:?}", names(&out));
+    assert_eq!(count(&out, "wide", NotifyPhase::End), 1);
+    assert!(count(&out, "wide", NotifyPhase::Tick) >= 20, "it keeps ticking through the seams");
+    // states that do not span the seam are per cycle, as authored
+    assert_eq!(count(&out, "inner", NotifyPhase::Begin), 3);
+    assert_eq!(count(&out, "inner", NotifyPhase::End), 3);
+    assert_eq!(count(&out, "edge", NotifyPhase::Begin), 3);
+    assert_eq!(count(&out, "edge", NotifyPhase::End), 3);
+}
+
+#[test]
+fn a_segment_authored_to_restart_ends_and_begins_every_state_each_cycle() {
+    let out = play_loops(true);
+    assert_eq!(count(&out, "wide", NotifyPhase::Begin), 3, "{:?}", names(&out));
+    assert_eq!(count(&out, "wide", NotifyPhase::End), 3);
+    let jumps = out.iter().filter(|e| e.id() == "wide" && e.phase == NotifyPhase::End && e.end_reason == Some(EndReason::Jump)).count();
+    assert_eq!(jumps, 2, "the restarts at the two seams");
+}
