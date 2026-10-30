@@ -22,11 +22,21 @@ use crate::core::asset_index;
 #[derive(Clone, Debug, PartialEq)]
 pub enum MaskOp {
     /// A new mask; `name` is made unique.
-    Add { name: String, spec: BoneMaskSpec },
-    Rename { from: String, to: String },
-    Delete { name: String },
+    Add {
+        name: String,
+        spec: BoneMaskSpec,
+    },
+    Rename {
+        from: String,
+        to: String,
+    },
+    Delete {
+        name: String,
+    },
     /// Edit the rule of one mask.
-    Edit { name: String },
+    Edit {
+        name: String,
+    },
 }
 
 /// Apply `op` to the skeleton's library. `Edit` is applied by [`edit`] with a closure;
@@ -35,7 +45,10 @@ pub fn apply(asset: &mut SkeletonAsset, op: MaskOp) -> Result<String, String> {
     let name = match op {
         MaskOp::Add { name, spec } => {
             let name = unique_name(&asset.masks, &name);
-            asset.masks.push(NamedBoneMask { name: name.clone(), spec });
+            asset.masks.push(NamedBoneMask {
+                name: name.clone(),
+                spec,
+            });
             name
         }
         MaskOp::Rename { from, to } => {
@@ -46,7 +59,12 @@ pub fn apply(asset: &mut SkeletonAsset, op: MaskOp) -> Result<String, String> {
             if from != to && asset.masks.iter().any(|m| m.name == to) {
                 return Err(format!("The skeleton already has a mask named `{to}`"));
             }
-            asset.masks.iter_mut().find(|m| m.name == from).ok_or_else(|| format!("no mask named `{from}`"))?.name = to.clone();
+            asset
+                .masks
+                .iter_mut()
+                .find(|m| m.name == from)
+                .ok_or_else(|| format!("no mask named `{from}`"))?
+                .name = to.clone();
             to
         }
         MaskOp::Delete { name } => {
@@ -64,8 +82,16 @@ pub fn apply(asset: &mut SkeletonAsset, op: MaskOp) -> Result<String, String> {
 }
 
 /// Edit the rule of the mask `name` with `change`; the result must stay valid.
-pub fn edit(asset: &mut SkeletonAsset, name: &str, change: impl FnOnce(&mut BoneMaskSpec) -> Result<(), String>) -> Result<(), String> {
-    let index = asset.masks.iter().position(|m| m.name == name).ok_or_else(|| format!("no mask named `{name}`"))?;
+pub fn edit(
+    asset: &mut SkeletonAsset,
+    name: &str,
+    change: impl FnOnce(&mut BoneMaskSpec) -> Result<(), String>,
+) -> Result<(), String> {
+    let index = asset
+        .masks
+        .iter()
+        .position(|m| m.name == name)
+        .ok_or_else(|| format!("no mask named `{name}`"))?;
     let mut spec = asset.masks[index].spec.clone();
     change(&mut spec)?;
     let mut library = asset.masks.clone();
@@ -80,7 +106,8 @@ pub fn skeleton_path(root: &Path, id: &str) -> Option<PathBuf> {
 }
 
 pub fn load(root: &Path, id: &str) -> Result<SkeletonAsset, String> {
-    let path = skeleton_path(root, id).ok_or("the skeleton asset could not be found in the project")?;
+    let path =
+        skeleton_path(root, id).ok_or("the skeleton asset could not be found in the project")?;
     let bytes = engine_fs::virtual_fs::read_file(&path).map_err(|e| e.to_string())?;
     SkeletonAsset::parse(&String::from_utf8(bytes).map_err(|e| e.to_string())?)
 }
@@ -91,8 +118,13 @@ pub fn library(root: &Path, id: &str) -> Vec<NamedBoneMask> {
 }
 
 /// Load the skeleton, run `change` on it and save it. Returns the saved asset.
-pub fn update(root: &Path, id: &str, change: impl FnOnce(&mut SkeletonAsset) -> Result<(), String>) -> Result<SkeletonAsset, String> {
-    let path = skeleton_path(root, id).ok_or("the skeleton asset could not be found in the project")?;
+pub fn update(
+    root: &Path,
+    id: &str,
+    change: impl FnOnce(&mut SkeletonAsset) -> Result<(), String>,
+) -> Result<SkeletonAsset, String> {
+    let path =
+        skeleton_path(root, id).ok_or("the skeleton asset could not be found in the project")?;
     let mut asset = load(root, id)?;
     change(&mut asset)?;
     save_skeleton_asset(&path, &asset).map_err(|e| e.to_string())?;
@@ -111,19 +143,73 @@ mod tests {
     }
 
     fn spec_on(bone: &str) -> BoneMaskSpec {
-        BoneMaskSpec { branches: vec![MaskBranch { bone: bone.into(), depth: None, weight: 1.0 }], ..Default::default() }
+        BoneMaskSpec {
+            branches: vec![MaskBranch {
+                bone: bone.into(),
+                depth: None,
+                weight: 1.0,
+            }],
+            ..Default::default()
+        }
     }
 
     #[test]
     fn masks_are_added_renamed_edited_and_deleted_with_validation() {
         let mut a = asset();
-        let spine = a.bones.iter().find(|b| b.name.to_lowercase().contains("spine")).unwrap().id.clone();
-        let first = apply(&mut a, MaskOp::Add { name: "Upper".into(), spec: spec_on(&spine) }).unwrap();
-        let second = apply(&mut a, MaskOp::Add { name: "Upper".into(), spec: spec_on(&spine) }).unwrap();
+        let spine = a
+            .bones
+            .iter()
+            .find(|b| b.name.to_lowercase().contains("spine"))
+            .unwrap()
+            .id
+            .clone();
+        let first = apply(
+            &mut a,
+            MaskOp::Add {
+                name: "Upper".into(),
+                spec: spec_on(&spine),
+            },
+        )
+        .unwrap();
+        let second = apply(
+            &mut a,
+            MaskOp::Add {
+                name: "Upper".into(),
+                spec: spec_on(&spine),
+            },
+        )
+        .unwrap();
         assert_eq!((first.as_str(), second.as_str()), ("Upper", "Upper 2"));
-        assert!(apply(&mut a, MaskOp::Rename { from: "Upper 2".into(), to: "Upper".into() }).is_err());
-        assert_eq!(apply(&mut a, MaskOp::Rename { from: "Upper 2".into(), to: "Arms".into() }).unwrap(), "Arms");
-        assert!(apply(&mut a, MaskOp::Add { name: "Bad".into(), spec: spec_on("ghost") }).is_err(), "an unknown bone is refused");
+        assert!(apply(
+            &mut a,
+            MaskOp::Rename {
+                from: "Upper 2".into(),
+                to: "Upper".into()
+            }
+        )
+        .is_err());
+        assert_eq!(
+            apply(
+                &mut a,
+                MaskOp::Rename {
+                    from: "Upper 2".into(),
+                    to: "Arms".into()
+                }
+            )
+            .unwrap(),
+            "Arms"
+        );
+        assert!(
+            apply(
+                &mut a,
+                MaskOp::Add {
+                    name: "Bad".into(),
+                    spec: spec_on("ghost")
+                }
+            )
+            .is_err(),
+            "an unknown bone is refused"
+        );
         a.masks.retain(|m| m.name != "Bad");
         edit(&mut a, "Arms", |s| {
             s.default_weight = 0.5;
@@ -135,9 +221,30 @@ mod tests {
             Ok(())
         })
         .is_err());
-        assert_eq!(a.masks.iter().find(|m| m.name == "Arms").unwrap().spec.default_weight, 0.5, "a refused edit changes nothing");
-        apply(&mut a, MaskOp::Delete { name: "Upper".into() }).unwrap();
-        assert!(apply(&mut a, MaskOp::Delete { name: "Upper".into() }).is_err());
+        assert_eq!(
+            a.masks
+                .iter()
+                .find(|m| m.name == "Arms")
+                .unwrap()
+                .spec
+                .default_weight,
+            0.5,
+            "a refused edit changes nothing"
+        );
+        apply(
+            &mut a,
+            MaskOp::Delete {
+                name: "Upper".into(),
+            },
+        )
+        .unwrap();
+        assert!(apply(
+            &mut a,
+            MaskOp::Delete {
+                name: "Upper".into()
+            }
+        )
+        .is_err());
         let back = SkeletonAsset::parse(&a.to_text()).unwrap();
         assert_eq!(back.masks, a.masks, "masks survive save and reopen");
     }
