@@ -11,6 +11,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use graphy_gpui::canvas::{system_fonts, CanvasEvent, GraphCanvas};
 use graphy_gpui::Action;
+use graphy::GraphCommand;
 use plugin_editor_api::{OpenAsset, PluginError};
 use pulsar_reflection::{AnimationGraphAssetKind, AssetKind, AssetRef, SkeletonAssetKind};
 use serde_json::{json, Value};
@@ -493,6 +494,15 @@ impl EditorHost for AnimGraphEditor {
     }
 
     fn commit_field(&mut self, key: &str, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(index) = key.strip_prefix("zip_tie.straight_length.").and_then(|s| s.parse::<usize>().ok()) {
+            if let Some(length) = parse_f32(&text).filter(|v| v.is_finite() && *v >= 0.0) {
+                let command = GraphCommand::SetZipTieStraightLength { index, length: length as f64 };
+                let _ = self.canvas.update(cx, |canvas, cx| canvas.apply("Set zip-tie straight length", &[command], cx));
+            } else {
+                self.chrome.status = Some("Enter a non-negative length.".into());
+            }
+            return;
+        }
         if let Some(name) = key.strip_prefix("pv.") {
             let value = self.preview.as_ref().and_then(|p| p.parameters().into_iter().find(|q| q.0 == name)).map(|q| q.1);
             let parsed = match value {
@@ -516,6 +526,10 @@ impl EditorHost for AnimGraphEditor {
             cx.notify();
             return;
         }
+        if let Some(rest) = key.strip_prefix("skmask.") {
+            bone_mask_panel::commit_library(self, rest, text, window, cx);
+            return;
+        }
         if let Some(rest) = key.strip_prefix("mask.") {
             bone_mask_panel::commit(self, rest, text, window, cx);
             return;
@@ -526,10 +540,6 @@ impl EditorHost for AnimGraphEditor {
                 m.rename(&text);
                 Ok(())
             }
-        if let Some(rest) = key.strip_prefix("skmask.") {
-            bone_mask_panel::commit_library(self, rest, text, window, cx);
-            return;
-        }
             ("param.name", AnimSelection::GraphParameter { name }) => m.rename_parameter(name, &text),
             ("param.default", AnimSelection::GraphParameter { name }) => {
                 let ty = m.asset().parameter(name).map(|p| p.ty).ok_or("no such parameter")?;
@@ -799,6 +809,26 @@ impl EditorBody for AnimGraphEditor {
     }
 
     fn inspector(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let selected_ties: Vec<usize> = self.canvas.read(cx).controller().selection.ties.iter().copied().collect();
+        if selected_ties.len() == 1 {
+            let index = selected_ties[0];
+            if let Some(tie) = self.canvas.read(cx).graph().zip_ties.get(index).cloned() {
+                let theme = cx.theme().clone();
+                let body = v_flex().w_full().gap_2()
+                    .child(div().text_sm().font_semibold().text_color(theme.foreground).child("Zip Tie"))
+                    .child(self.widgets.text_field(
+                        &format!("zip_tie.straight_length.{index}"),
+                        "Straight-through length",
+                        &fmt_f32(tie.straight_length as f32),
+                        window,
+                        cx,
+                    ))
+                    .child(value_row("Wires", tie.wires.len().to_string(), cx))
+                    .child(value_row("Position", format!("{}, {}", fmt_f32(tie.position.x as f32), fmt_f32(tie.position.y as f32)), cx))
+                    .child(div().text_xs().text_color(theme.muted_foreground).child("Wires run straight through this length, with smooth transitions on either side."));
+                return body.into_any_element();
+            }
+        }
         match self.model.selection.clone() {
             AnimSelection::GraphNode { id } => self.node_inspector(&id, window, cx),
             AnimSelection::GraphParameter { name } => self.parameter_inspector(&name, window, cx),
@@ -813,6 +843,7 @@ impl EditorBody for AnimGraphEditor {
                 body = body.child(value_row("Nodes in it", self.model.graph().nodes.len().to_string(), cx));
                 body = body.child(value_row("Sub-graphs", a.subgraphs.len().to_string(), cx));
                 body = body.child(value_row("Parameters", a.parameters.len().to_string(), cx));
+                body = body.child(bone_mask_panel::library_rows(self, window, cx));
                 body = body.child(div().text_xs().text_color(cx.theme().muted_foreground).child("Right-click the canvas for the node list; double-click a state machine, state or transition to open its graph."));
                 body.into_any_element()
             }
@@ -828,4 +859,3 @@ impl Render for AnimGraphEditor {
 
 crate::editor_model!(AnimGraphModel, <AnimationGraphAssetKind as AssetKind>::KIND);
 crate::anim_panel!(AnimGraphEditor, "animation-graph-editor");
-                body = body.child(bone_mask_panel::library_rows(self, window, cx));
