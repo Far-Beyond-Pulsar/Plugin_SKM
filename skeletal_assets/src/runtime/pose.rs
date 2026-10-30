@@ -212,6 +212,8 @@ pub struct RuntimeSkeleton {
     /// Topological order, parents first, ties by asset order.
     pub order: Vec<usize>,
     pub bind: Vec<BoneTransform>,
+    /// Named bone masks of the skeleton asset, for `BoneMaskSpec::named` references.
+    pub mask_library: Vec<crate::bone_mask::NamedBoneMask>,
     index: std::collections::HashMap<String, usize>,
     name_index: std::collections::HashMap<String, usize>,
 }
@@ -246,9 +248,16 @@ impl RuntimeSkeleton {
             ids,
             parents,
             order,
+            mask_library: Vec::new(),
             index,
             name_index,
         })
+    }
+
+    /// This skeleton with the asset's named masks attached.
+    pub fn with_mask_library(mut self, masks: Vec<crate::bone_mask::NamedBoneMask>) -> Self {
+        self.mask_library = masks;
+        self
     }
 
     pub fn len(&self) -> usize {

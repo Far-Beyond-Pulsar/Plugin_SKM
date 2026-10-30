@@ -233,7 +233,7 @@ fn montage_with_two_tracks() -> AnimationMontageAsset {
     let mut lower = SlotTrack::new("LowerBody", "DefaultGroup");
     lower.segments.push(MontageSegment::new(Some(aref(WALK)), 0.0));
     let mut upper = SlotTrack::new("UpperBody", "DefaultGroup");
-    upper.mask = Some(BoneMaskSpec { branches: vec![MaskBranch { bone: "spine".into(), depth: None, weight: 1.0 }], default_weight: 0.0 });
+    upper.mask = Some(BoneMaskSpec { branches: vec![MaskBranch { bone: "spine".into(), depth: None, weight: 1.0 }], default_weight: 0.0, ..Default::default() });
     upper.segments.push(MontageSegment::new(Some(aref(RUN)), 0.5));
     a.tracks = vec![lower, upper];
     a.sections = vec![MontageSection { id: "s1".into(), name: "Intro".into(), start: 0.0, next: None, extra: Default::default() }];

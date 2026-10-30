@@ -1422,3 +1422,67 @@ fn no_root_motion_extraction_leaves_the_travel_in_the_pose() {
     assert!(in_pose.report.root_motion.is_identity(), "nothing extracted");
     assert!(near(in_pose.pose().bones[0].translation.z, 2.0), "the root bone carries the travel itself: {}", in_pose.pose().bones[0].translation.z);
 }
+
+// ---- named skeleton masks ----------------------------------------------------------------
+
+fn layered_with_masks(f: &mut Fixture, base: &str, layer: &str, masks: Json) -> AnimationGraphAsset {
+    f.graph(&[("w", ParamType::Float)], |b| {
+        b.node("base", "anim.sequence_player", &[("sequence", js(base))]);
+        b.node("layer", "anim.sequence_player", &[("sequence", js(layer))]);
+        b.node("w", "anim.get_parameter", &[("parameter", js("w"))]);
+        b.node("lb", "anim.layered_blend_per_bone", &[("count", json!(1)), ("masks", masks)]);
+        b.wire("base", "lb", "base").wire("layer", "lb", "layer_0").wire("w", "lb", "layer_weight_0").wire("lb", "out", "pose");
+    })
+}
+
+fn add_library_mask(f: &mut Fixture, name: &str, bone: &str) {
+    use crate::bone_mask::{BoneMaskSpec, MaskBranch, NamedBoneMask};
+    let mut asset = (*f.src.skeletons[&f.skeleton_id]).clone();
+    asset.masks.push(NamedBoneMask { name: name.into(), spec: BoneMaskSpec { branches: vec![MaskBranch { bone: bone.into(), depth: None, weight: 1.0 }], ..Default::default() } });
+    f.src.skeletons.insert(f.skeleton_id.clone(), Arc::new(asset));
+}
+
+#[test]
+fn a_layered_blend_layer_can_follow_a_named_skeleton_mask() {
+    let mut f = Fixture::new();
+    let base = f.seq("base", 10.0, vec![translate_track("b1", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], 10.0), translate_track("b2", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], 10.0)]);
+    let layer = f.seq("layer", 10.0, vec![translate_track("b1", [9.0, 1.0, 0.0], [9.0, 1.0, 0.0], 10.0), translate_track("b2", [9.0, 1.0, 0.0], [9.0, 1.0, 0.0], 10.0)]);
+    add_library_mask(&mut f, "Tip", "b2");
+    let asset = layered_with_masks(&mut f, &base, &layer, json!([{ "profile": "Tip" }]));
+    let mut inst = f.instance(&asset);
+    inst.set_float("w", 1.0).unwrap();
+    step(&mut inst, 0.1);
+    assert!(near(inst.pose().bones[1].translation.x, 1.0), "b1 is outside the named mask");
+    assert!(near(inst.pose().bones[2].translation.x, 9.0), "b2 is inside the named mask");
+}
+
+#[test]
+fn an_unknown_named_mask_is_a_compile_error_with_a_repair() {
+    let mut f = Fixture::new();
+    let base = f.slide("base", 2.0, 0.0, 1.0);
+    let asset = layered_with_masks(&mut f, &base, &base, json!([{ "profile": "Missing" }]));
+    let out = f.try_compile(&asset);
+    let d = out.diagnostics.iter().find(|d| d.code == "graph.mask_profile").expect("diagnostic");
+    assert!(d.message.contains("Missing"));
+}
+
+#[test]
+fn promoting_inline_layer_masks_keeps_the_pose_and_moves_the_rule_to_the_skeleton() {
+    let mut f = Fixture::new();
+    let base = f.seq("base", 10.0, vec![translate_track("b1", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], 10.0), translate_track("b2", [1.0, 1.0, 0.0], [1.0, 1.0, 0.0], 10.0)]);
+    let layer = f.seq("layer", 10.0, vec![translate_track("b1", [9.0, 1.0, 0.0], [9.0, 1.0, 0.0], 10.0), translate_track("b2", [9.0, 1.0, 0.0], [9.0, 1.0, 0.0], 10.0)]);
+    let mut asset = layered_with_masks(&mut f, &base, &layer, json!([{ "branches": [{ "bone": "b2", "weight": 1.0 }], "default_weight": 0.0 }]));
+    let mut library = Vec::new();
+    let used = crate::mask_library::promote_graph_masks(&mut asset, &mut library);
+    assert_eq!(used.len(), 1);
+    assert_eq!(library.len(), 1);
+    assert_eq!(asset.main.nodes["lb"].properties["masks"][0]["profile"], json!(used[0]));
+    let mut skeleton = (*f.src.skeletons[&f.skeleton_id]).clone();
+    skeleton.masks = library;
+    f.src.skeletons.insert(f.skeleton_id.clone(), Arc::new(skeleton));
+    let mut inst = f.instance(&asset);
+    inst.set_float("w", 1.0).unwrap();
+    step(&mut inst, 0.1);
+    assert!(near(inst.pose().bones[1].translation.x, 1.0));
+    assert!(near(inst.pose().bones[2].translation.x, 9.0));
+}

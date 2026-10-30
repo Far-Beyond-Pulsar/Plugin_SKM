@@ -45,6 +45,13 @@ fn sequence_duration(source: &dyn AssetSource, id: &str) -> Option<f32> {
     }
 }
 
+fn skeleton_asset_of(source: &dyn AssetSource, reference: &Option<AssetRef<SkeletonAssetKind>>) -> Option<SkeletonAsset> {
+    match source.read(SkeletonAssetKind::KIND, reference.as_ref()?.as_str()) {
+        Lookup::Found(bytes) => SkeletonAsset::parse(std::str::from_utf8(&bytes).ok()?).ok(),
+        _ => None,
+    }
+}
+
 fn skeleton_of(source: &dyn AssetSource, reference: &Option<AssetRef<SkeletonAssetKind>>) -> Option<Skeleton> {
     load_skeleton(source, reference.as_ref()?.as_str())
 }
@@ -99,11 +106,17 @@ fn own_diagnostics(source: &dyn AssetSource, kind: &str, text: &str, bytes: &[u8
         k if k == AnimationMontageAssetKind::KIND => {
             if let Ok(a) = AnimationMontageAsset::parse(text) {
                 out.extend(a.diagnostics(|r| sequence_duration(source, r.as_str())));
-                if let Some(skeleton) = skeleton_of(source, &a.skeleton) {
+                if let Some(asset) = skeleton_asset_of(source, &a.skeleton) {
+                    let skeleton = asset.skeleton();
                     for track in &a.tracks {
                         if let Some(mask) = &track.mask {
-                            for bone in mask.missing_bones(&skeleton) {
-                                out.push(Diagnostic::error("montage.unknown_bone", format!("Slot `{}` mask names bone `{bone}` which the skeleton does not have", track.slot)).at(&track.id));
+                            match mask.missing_bones_in(&skeleton, &asset.masks) {
+                                Ok(missing) => {
+                                    for bone in missing {
+                                        out.push(Diagnostic::error("montage.unknown_bone", format!("Slot `{}` mask names bone `{bone}` which the skeleton does not have", track.slot)).at(&track.id));
+                                    }
+                                }
+                                Err(e) => out.push(Diagnostic::error("montage.unknown_mask", format!("Slot `{}`: {e}", track.slot)).at(&track.id).repair("Pick a mask the skeleton defines")),
                             }
                         }
                     }
@@ -113,8 +126,8 @@ fn own_diagnostics(source: &dyn AssetSource, kind: &str, text: &str, bytes: &[u8
         k if k == AnimationGraphAssetKind::KIND => {
             if let Ok(a) = AnimationGraphAsset::parse(text) {
                 out.extend(validate::validate(&a));
-                if let Some(skeleton) = skeleton_of(source, &a.skeleton) {
-                    out.extend(validate::validate_against_skeleton(&a, &skeleton));
+                if let Some(asset) = skeleton_asset_of(source, &a.skeleton) {
+                    out.extend(validate::validate_against_skeleton_masks(&a, &asset.skeleton(), &asset.masks));
                 }
             }
         }

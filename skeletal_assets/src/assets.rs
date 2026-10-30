@@ -55,6 +55,10 @@ pub struct SkeletonAsset {
     /// optional bone-local attachment points; absent in older version 1 files.
     #[serde(default, skip_serializing_if = "super::sockets::Sockets::is_empty")]
     pub sockets: super::sockets::Sockets,
+    /// Named bone masks (mask profiles) that layered blends and Montage slot
+    /// tracks refer to by name. Absent in files written before they existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masks: Vec<super::bone_mask::NamedBoneMask>,
 }
 
 impl SkeletonAsset {
@@ -66,6 +70,7 @@ impl SkeletonAsset {
             bones: skeleton.bones,
             sockets: Default::default(),
             preview_mesh: None,
+            masks: Vec::new(),
         }
     }
 
@@ -81,6 +86,7 @@ impl SkeletonAsset {
             .sockets
             .validate(&asset.skeleton())
             .map_err(|e| e.to_string())?;
+        super::bone_mask::validate_library(&asset.masks, &asset.skeleton())?;
         Ok(asset)
     }
 
@@ -242,6 +248,7 @@ pub fn load_skeleton_asset(path: &Path) -> anyhow::Result<SkeletonAsset> {
 
 pub fn save_skeleton_asset(path: &Path, asset: &SkeletonAsset) -> anyhow::Result<()> {
     asset.sockets.validate(&asset.skeleton())?;
+    super::bone_mask::validate_library(&asset.masks, &asset.skeleton()).map_err(anyhow::Error::msg)?;
     write_text(path, &asset.to_text())
 }
 

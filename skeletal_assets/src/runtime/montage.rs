@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use crate::bone_mask::BoneMaskSpec;
 use crate::montage::{AnimationMontageAsset, BlendCurve, BlendSettings, InterruptPolicy, MontageRootMotion};
 
 use super::clip::CompiledClip;
@@ -98,7 +97,10 @@ impl CompiledMontage {
                 slot: t.slot.clone(),
                 group: t.group.clone(),
                 segments,
-                mask: t.mask.as_ref().map(|m: &BoneMaskSpec| m.weights(&skeleton_for_mask(skel))),
+                mask: match t.mask.as_ref() {
+                    Some(m) => Some(m.weights_in(&skeleton_for_mask(skel), &skel.mask_library).map_err(|e| format!("slot `{}`: {e}", t.slot))?),
+                    None => None,
+                },
             });
         }
         let length = tracks.iter().flat_map(|t| &t.segments).map(|s| s.start + s.length).fold(0.0, f32::max);
@@ -783,7 +785,7 @@ pub(crate) mod tests {
         let mut track = SlotTrack::new(slot, "DefaultGroup");
         track.segments.push(MontageSegment::new(Some(seq.clone()), 0.0));
         if let Some(b) = mask_from {
-            track.mask = Some(BoneMaskSpec { branches: vec![crate::bone_mask::MaskBranch { bone: b.into(), depth: None, weight: 1.0 }], default_weight: 0.0 });
+            track.mask = Some(crate::bone_mask::BoneMaskSpec { branches: vec![crate::bone_mask::MaskBranch { bone: b.into(), depth: None, weight: 1.0 }], default_weight: 0.0, ..Default::default() });
         }
         asset.tracks.push(track);
         asset.blend_in = BlendSettings { duration: 0.0, curve: BlendCurve::Linear };
@@ -798,6 +800,25 @@ pub(crate) mod tests {
         let mut c = (**m).clone();
         f(&mut c);
         Arc::new(c)
+    }
+
+    #[test]
+    fn a_named_skeleton_mask_drives_a_slot_track_and_an_unknown_name_is_refused() {
+        use crate::bone_mask::{BoneMaskSpec, MaskBranch, NamedBoneMask};
+        let plain = skel();
+        let inline = montage(&plain, "m", "DefaultSlot", "b2", Some("b2"));
+        let library = vec![NamedBoneMask { name: "Tip".into(), spec: BoneMaskSpec { branches: vec![MaskBranch { bone: "b2".into(), depth: None, weight: 1.0 }], ..Default::default() } }];
+        let with_library = skel().with_mask_library(library);
+        let mut asset = AnimationMontageAsset::default();
+        let mut track = SlotTrack::new("DefaultSlot", "DefaultGroup");
+        track.segments.push(MontageSegment::new(Some(AssetRef::new()), 0.0));
+        track.mask = Some(BoneMaskSpec::named("Tip"));
+        asset.tracks.push(track);
+        let clip = Arc::new(CompiledClip::compile(&clip_asset("c", 2.0, vec![translate_track("b2", [0.0, 1.0, 0.0], [2.0, 1.0, 0.0], 2.0)]), &with_library));
+        let named = CompiledMontage::compile(&asset, &with_library, &mut |_| Some(clip.clone())).unwrap();
+        assert_eq!(named.tracks[0].mask, inline.tracks[0].mask, "the named mask resolves to the inline weights");
+        let err = CompiledMontage::compile(&asset, &plain, &mut |_| Some(clip.clone())).unwrap_err();
+        assert!(err.contains("Tip"), "{err}");
     }
 
     fn results(set: &mut MontageSet) -> Vec<(MontageHandle, MontageResult)> {

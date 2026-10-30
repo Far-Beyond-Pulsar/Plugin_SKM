@@ -168,6 +168,29 @@ impl MontageModel {
         Ok(())
     }
 
+    /// Limit a slot track to the skeleton mask `name` (`None`: the whole pose). The name is
+    /// checked against `library` so a track never points at a mask the skeleton lacks.
+    pub fn set_track_mask(&mut self, track: &str, name: Option<&str>, library: &[skeletal_assets::bone_mask::NamedBoneMask]) -> Result<(), String> {
+        let index = self.track_index(track).ok_or("no such track")?;
+        let mask = match name {
+            Some(name) => {
+                if !library.iter().any(|m| m.name == name) {
+                    return Err(format!("the skeleton has no mask named `{name}`"));
+                }
+                Some(skeletal_assets::bone_mask::BoneMaskSpec::named(name))
+            }
+            None => None,
+        };
+        if self.asset().tracks[index].mask == mask {
+            return Err("unchanged".into());
+        }
+        self.doc.edit("Slot mask", Some(&format!("slotmask:{track}")), |a| {
+            a.tracks[index].mask = mask;
+            (true, ())
+        });
+        Ok(())
+    }
+
     pub fn delete_track(&mut self, track: &str) -> bool {
         let Some(index) = self.track_index(track) else { return false };
         self.doc.apply("Delete slot track", |a| {
@@ -776,6 +799,21 @@ mod tests {
         m.rename_track(&t, "UpperBody", "Combat").unwrap();
         assert!(m.delete_track(&t));
         assert_ne!(m.selection, AnimSelection::MontageSlot { track: t });
+    }
+
+    #[test]
+    fn a_slot_track_follows_a_skeleton_mask_by_name_and_undoes() {
+        use skeletal_assets::bone_mask::{BoneMaskSpec, NamedBoneMask};
+        let (mut m, _) = model();
+        let t = m.add_track("UpperBody", "DefaultGroup").unwrap();
+        let library = vec![NamedBoneMask { name: "Upper".into(), spec: BoneMaskSpec::default() }];
+        assert!(m.set_track_mask(&t, Some("Nope"), &library).is_err());
+        m.set_track_mask(&t, Some("Upper"), &library).unwrap();
+        assert_eq!(m.asset().tracks[0].mask, Some(BoneMaskSpec::named("Upper")));
+        assert!(m.set_track_mask(&t, Some("Upper"), &library).is_err(), "unchanged");
+        m.set_track_mask(&t, None, &library).unwrap();
+        assert_eq!(m.asset().tracks[0].mask, None);
+        assert!(m.asset().to_text().unwrap().contains("slot") );
     }
 
     #[test]

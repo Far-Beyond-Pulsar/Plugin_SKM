@@ -50,7 +50,7 @@ pub struct Rig {
 impl Rig {
     pub fn new(asset: &SkeletonAsset, mesh: Option<SkeletalMeshAsset>) -> Result<Self, String> {
         let skeleton = asset.skeleton();
-        let runtime = Arc::new(RuntimeSkeleton::new(asset.id.as_str(), &skeleton)?);
+        let runtime = Arc::new(RuntimeSkeleton::new(asset.id.as_str(), &skeleton)?.with_mask_library(asset.masks.clone()));
         Ok(Self { skeleton_ref: asset.id.to_ref(), skeleton, runtime, mesh })
     }
 }

@@ -619,6 +619,7 @@ impl MontageEditor {
         body = body.child(self.widgets.text_field("slot.name", "Slot", &t.slot, window, cx));
         body = body.child(self.widgets.text_field("slot.group", "Group", &t.group, window, cx));
         body = body.child(value_row("Segments", t.segments.len().to_string(), cx));
+        body = body.child(self.mask_row(&t, cx));
         body = body.child(div().text_xs().text_color(cx.theme().muted_foreground).child("A Slot node with this name in the graph plays this track."));
         let (a, b) = (t.id.clone(), t.id.clone());
         body = body.child(
@@ -637,6 +638,47 @@ impl MontageEditor {
                 }))),
         );
         body.into_any_element()
+    }
+
+    /// The track's mask: the whole pose, or one of the skeleton's named masks.
+    fn mask_row(&mut self, track: &skeletal_assets::montage::SlotTrack, cx: &mut Context<Self>) -> AnyElement {
+        let library = self.skeleton_masks();
+        let current = track.mask.as_ref().and_then(|m| m.profile.clone());
+        let inline = track.mask.as_ref().is_some_and(|m| m.profile.is_none());
+        let theme = cx.theme().clone();
+        let mut row = h_flex().gap_1().flex_wrap().items_center().child(div().text_xs().text_color(theme.muted_foreground).child("Mask:"));
+        let mut whole = Button::new("mt-mask-none").label("Whole pose").xsmall();
+        whole = if track.mask.is_none() { whole.primary() } else { whole.outline() };
+        let id = track.id.clone();
+        let lib = library.clone();
+        row = row.child(whole.on_click(cx.listener(move |this, _, window, cx| {
+            let (id, lib) = (id.clone(), lib.clone());
+            edit(this, window, cx, |m| m.set_track_mask(&id, None, &lib));
+        })));
+        for mask in &library {
+            let (id, name, lib) = (track.id.clone(), mask.name.clone(), library.clone());
+            let mut button = Button::new(SharedString::from(format!("mt-mask-{}", mask.name))).label(mask.name.clone()).xsmall();
+            button = if current.as_deref() == Some(mask.name.as_str()) { button.primary() } else { button.outline() };
+            row = row.child(button.on_click(cx.listener(move |this, _, window, cx| {
+                let (id, name, lib) = (id.clone(), name.clone(), lib.clone());
+                edit(this, window, cx, |m| m.set_track_mask(&id, Some(&name), &lib));
+            })));
+        }
+        let mut col = v_flex().gap_1().child(row);
+        if library.is_empty() {
+            col = col.child(div().text_xs().text_color(theme.muted_foreground).child("The skeleton has no named masks yet. Create them under Skeleton Masks in an Animation Graph."));
+        }
+        if inline {
+            col = col.child(div().text_xs().text_color(theme.warning).child("This track has an inline mask from an older file; pick a skeleton mask to replace it."));
+        }
+        if let Some(name) = current.filter(|n| !library.iter().any(|m| &m.name == n)) {
+            col = col.child(div().text_xs().text_color(theme.danger).child(format!("The skeleton has no mask named `{name}`.")));
+        }
+        col.into_any_element()
+    }
+
+    fn skeleton_masks(&self) -> Vec<skeletal_assets::bone_mask::NamedBoneMask> {
+        self.model.asset().skeleton.as_ref().map(|s| crate::anim_editors::skeleton_masks::library(&self.chrome.root, s.as_str())).unwrap_or_default()
     }
 
     fn section_inspector(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

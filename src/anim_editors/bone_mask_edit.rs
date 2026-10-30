@@ -9,7 +9,7 @@
 //! at the edit rather than at compile time.
 
 use serde_json::Value;
-use skeletal_assets::bone_mask::{BoneMaskSpec, MaskBranch};
+use skeletal_assets::bone_mask::{BoneMaskSpec, MaskBranch, NamedBoneMask};
 use skeletal_assets::skeleton::Skeleton;
 
 /// The masks of a node with `layers` layers; missing layers are empty masks
@@ -30,7 +30,7 @@ pub fn write(specs: &[BoneMaskSpec]) -> Value {
 }
 
 /// Whether `value` is a well-formed `masks` property for `skeleton`.
-pub fn validate(value: &Value, skeleton: Option<&Skeleton>) -> Result<(), String> {
+pub fn validate(value: &Value, skeleton: Option<&Skeleton>, library: &[NamedBoneMask]) -> Result<(), String> {
     if value.is_null() || value == &Value::String(String::new()) {
         return Ok(());
     }
@@ -39,7 +39,8 @@ pub fn validate(value: &Value, skeleton: Option<&Skeleton>) -> Result<(), String
         let spec: BoneMaskSpec = serde_json::from_value(spec.clone()).map_err(|e| format!("Layer {layer}: {e}"))?;
         spec.validate().map_err(|e| format!("Layer {layer}: {e}"))?;
         if let Some(skeleton) = skeleton {
-            if let Some(missing) = spec.missing_bones(skeleton).first() {
+            let missing = spec.missing_bones_in(skeleton, library).map_err(|e| format!("Layer {layer}: {e}"))?;
+            if let Some(missing) = missing.first() {
                 return Err(format!("Layer {layer} names bone `{missing}`, which the skeleton does not have"));
             }
         }
@@ -61,11 +62,23 @@ pub enum Preset {
 
 pub fn apply_preset(spec: &mut BoneMaskSpec, preset: &Preset) {
     *spec = match preset {
-        Preset::Everything => BoneMaskSpec { branches: Vec::new(), default_weight: 1.0 },
-        Preset::Nothing => BoneMaskSpec { branches: Vec::new(), default_weight: 0.0 },
-        Preset::Subtree(bone) => BoneMaskSpec { branches: vec![MaskBranch { bone: bone.clone(), depth: None, weight: 1.0 }], default_weight: 0.0 },
-        Preset::Except(bone) => BoneMaskSpec { branches: vec![MaskBranch { bone: bone.clone(), depth: None, weight: 0.0 }], default_weight: 1.0 },
+        Preset::Everything => BoneMaskSpec { branches: Vec::new(), default_weight: 1.0, ..Default::default() },
+        Preset::Nothing => BoneMaskSpec { branches: Vec::new(), default_weight: 0.0, ..Default::default() },
+        Preset::Subtree(bone) => BoneMaskSpec { branches: vec![MaskBranch { bone: bone.clone(), depth: None, weight: 1.0 }], default_weight: 0.0, ..Default::default() },
+        Preset::Except(bone) => BoneMaskSpec { branches: vec![MaskBranch { bone: bone.clone(), depth: None, weight: 0.0 }], default_weight: 1.0, ..Default::default() },
     };
+}
+
+/// Make `spec` follow the skeleton mask `name`.
+pub fn use_named(spec: &mut BoneMaskSpec, name: &str) {
+    *spec = BoneMaskSpec::named(name);
+}
+
+/// Copy the rule of the skeleton mask `spec` names into `spec`, so it is authored here from now on.
+pub fn detach(spec: &mut BoneMaskSpec, library: &[NamedBoneMask]) -> Result<(), String> {
+    let rule = spec.resolve(library)?.clone();
+    *spec = rule;
+    Ok(())
 }
 
 pub fn add_branch(spec: &mut BoneMaskSpec, bone: &str) {
@@ -144,13 +157,14 @@ pub fn resolve_bone(skeleton: &Skeleton, text: &str) -> Option<String> {
 }
 
 /// The weight each bone ends up with, in skeleton order, as `(bone name, weight)`.
-pub fn effective(spec: &BoneMaskSpec, skeleton: &Skeleton) -> Vec<(String, f32)> {
-    skeleton.bones.iter().zip(spec.weights(skeleton)).map(|(b, w)| (b.name.clone(), w)).collect()
+pub fn effective(spec: &BoneMaskSpec, skeleton: &Skeleton, library: &[NamedBoneMask]) -> Vec<(String, f32)> {
+    let weights = spec.weights_in(skeleton, library).unwrap_or_else(|_| vec![0.0; skeleton.bones.len()]);
+    skeleton.bones.iter().zip(weights).map(|(b, w)| (b.name.clone(), w)).collect()
 }
 
 /// How many bones have any weight, and how many there are, for the summary line.
-pub fn coverage(spec: &BoneMaskSpec, skeleton: &Skeleton) -> (usize, usize) {
-    let weights = spec.weights(skeleton);
+pub fn coverage(spec: &BoneMaskSpec, skeleton: &Skeleton, library: &[NamedBoneMask]) -> (usize, usize) {
+    let weights = spec.weights_in(skeleton, library).unwrap_or_else(|_| vec![0.0; skeleton.bones.len()]);
     (weights.iter().filter(|w| **w > 0.0).count(), weights.len())
 }
 
@@ -166,10 +180,10 @@ mod tests {
         let spine = skeleton.bones.iter().find(|b| b.name.to_lowercase().contains("spine")).expect("a spine").id.clone();
         let mut spec = BoneMaskSpec::default();
         apply_preset(&mut spec, &Preset::Subtree(spine.clone()));
-        let (covered, total) = coverage(&spec, &skeleton);
+        let (covered, total) = coverage(&spec, &skeleton, &[]);
         assert!(covered > 1 && covered < total, "an upper body covers some of the bones: {covered}/{total}");
         apply_preset(&mut spec, &Preset::Except(spine.clone()));
-        let (lower, _) = coverage(&spec, &skeleton);
+        let (lower, _) = coverage(&spec, &skeleton, &[]);
         assert_eq!(lower + covered, total, "the two presets partition the skeleton");
 
         add_branch(&mut spec, &spine);
@@ -183,12 +197,12 @@ mod tests {
 
         let value = write(&[spec.clone()]);
         assert_eq!(read(&value, 1), vec![spec.clone()], "the property round-trips");
-        assert!(validate(&value, Some(&skeleton)).is_ok());
+        assert!(validate(&value, Some(&skeleton), &[]).is_ok());
         let bad = json!([{ "branches": [{ "bone": "ghost", "weight": 1.0 }], "default_weight": 0.0 }]);
-        assert!(validate(&bad, Some(&skeleton)).unwrap_err().contains("ghost"));
-        assert!(validate(&bad, None).is_ok(), "without a skeleton only the local rules apply");
-        assert!(validate(&json!([{ "branches": [], "default_weight": 3.0 }]), None).is_err());
-        assert!(validate(&json!("nope"), None).is_err());
+        assert!(validate(&bad, Some(&skeleton), &[]).unwrap_err().contains("ghost"));
+        assert!(validate(&bad, None, &[]).is_ok(), "without a skeleton only the local rules apply");
+        assert!(validate(&json!([{ "branches": [], "default_weight": 3.0 }]), None, &[]).is_err());
+        assert!(validate(&json!("nope"), None, &[]).is_err());
         let mut flipped = spec.clone();
         invert(&mut flipped);
         invert(&mut flipped);
@@ -199,9 +213,24 @@ mod tests {
     }
 
     #[test]
+    fn a_layer_can_follow_a_skeleton_mask_and_detach_back_to_an_inline_copy() {
+        let skeleton = sample::humanoid_skeleton();
+        let rule = BoneMaskSpec { branches: vec![MaskBranch { bone: skeleton.bones[1].id.clone(), depth: None, weight: 1.0 }], ..Default::default() };
+        let library = vec![NamedBoneMask { name: "Upper".into(), spec: rule.clone() }];
+        let mut spec = BoneMaskSpec::default();
+        use_named(&mut spec, "Upper");
+        assert_eq!(coverage(&spec, &skeleton, &library), coverage(&rule, &skeleton, &[]));
+        assert!(validate(&write(&[spec.clone()]), Some(&skeleton), &library).is_ok());
+        assert!(validate(&write(&[spec.clone()]), Some(&skeleton), &[]).is_err(), "a name the skeleton lacks is refused");
+        detach(&mut spec, &library).unwrap();
+        assert_eq!(spec, rule);
+        assert!(detach(&mut BoneMaskSpec::named("Nope"), &library).is_err());
+    }
+
+    #[test]
     fn layers_are_padded_and_truncated_to_the_node_count() {
         assert_eq!(read(&Value::Null, 3).len(), 3);
-        let two = write(&[BoneMaskSpec::default(), BoneMaskSpec { branches: vec![], default_weight: 0.5 }]);
+        let two = write(&[BoneMaskSpec::default(), BoneMaskSpec { branches: vec![], default_weight: 0.5, ..Default::default() }]);
         assert_eq!(read(&two, 1).len(), 1);
         assert_eq!(read(&two, 3)[1].default_weight, 0.5);
     }

@@ -588,6 +588,11 @@ pub fn find_cycle(edges: &HashMap<String, Vec<String>>) -> Option<Vec<String>> {
 /// Checks that need the graph's skeleton: bone properties and masks name real
 /// bones, and IK chains are shaped as the solver needs.
 pub fn validate_against_skeleton(asset: &AnimationGraphAsset, skeleton: &Skeleton) -> Vec<Diagnostic> {
+    validate_against_skeleton_masks(asset, skeleton, &[])
+}
+
+/// [`validate_against_skeleton`] with the skeleton's named masks, so a layer that refers to one is checked against it.
+pub fn validate_against_skeleton_masks(asset: &AnimationGraphAsset, skeleton: &Skeleton, library: &[crate::bone_mask::NamedBoneMask]) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for (sub, _, graph) in asset.graphs() {
         let mut ids: Vec<&String> = graph.nodes.keys().collect();
@@ -608,8 +613,13 @@ pub fn validate_against_skeleton(asset: &AnimationGraphAsset, skeleton: &Skeleto
                     PropKind::BoneMask => {
                         for (i, mask) in node.properties.get(prop.name).and_then(Value::as_array).into_iter().flatten().enumerate() {
                             if let Ok(spec) = serde_json::from_value::<BoneMaskSpec>(mask.clone()) {
-                                for bone in spec.missing_bones(skeleton) {
-                                    out.push(Diagnostic::error("graph.unknown_bone", format!("Mask {i} names bone `{bone}` which the skeleton does not have")).at(&at));
+                                match spec.missing_bones_in(skeleton, library) {
+                                    Ok(missing) => {
+                                        for bone in missing {
+                                            out.push(Diagnostic::error("graph.unknown_bone", format!("Mask {i} names bone `{bone}` which the skeleton does not have")).at(&at));
+                                        }
+                                    }
+                                    Err(e) => out.push(Diagnostic::error("graph.mask_profile", format!("Mask {i}: {e}")).at(&at).repair("Pick a mask the skeleton defines")),
                                 }
                             }
                         }

@@ -1834,6 +1834,8 @@ impl SkeletalAnimEditorPanel {
             bones: self.skeleton.bones.clone(),
             sockets: self.sockets.clone(),
             preview_mesh: self.preview_mesh_ref.clone(),
+            // the skeleton editor does not edit masks; keep the ones on disk (the graph editor owns them)
+            masks: assets::load_skeleton_asset(path).map(|a| a.masks).unwrap_or_default(),
         };
         assets::save_skeleton_asset(path, &asset)?;
         self.asset_id = Some(id);

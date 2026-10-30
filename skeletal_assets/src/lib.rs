@@ -38,6 +38,7 @@ pub mod sequence_features;
 pub mod anim_graph;
 pub mod blend_space;
 pub mod bone_mask;
+pub mod mask_library;
 pub mod ik_retarget;
 pub mod ik_rig;
 pub mod montage;

@@ -130,7 +130,7 @@ impl<'a> Cx<'a> {
             self.error("graph.skeleton_unavailable", format!("Skeleton {id} could not be loaded"), at, "Restore the skeleton asset or pick another");
             return None;
         };
-        match RuntimeSkeleton::new(id, &asset.skeleton()) {
+        match RuntimeSkeleton::new(id, &asset.skeleton()).map(|s| s.with_mask_library(asset.masks.clone())) {
             Ok(s) => {
                 let s = Arc::new(s);
                 self.skeletons.insert(id.to_string(), s.clone());
@@ -560,10 +560,18 @@ impl<'a> Cx<'a> {
                 for l in 0..layers {
                     masks.push(match specs.get(l) {
                         Some(spec) => {
-                            for missing in spec.missing_bones(&sk) {
-                                self.error("graph.mask_bone", format!("Layer {l} mask names bone `{missing}`, which the skeleton does not have"), at, "Pick bones of the graph's skeleton");
+                            match spec.missing_bones_in(&sk, &skel.mask_library) {
+                                Ok(missing) => {
+                                    for missing in missing {
+                                        self.error("graph.mask_bone", format!("Layer {l} mask names bone `{missing}`, which the skeleton does not have"), at, "Pick bones of the graph's skeleton");
+                                    }
+                                    spec.weights_in(&sk, &skel.mask_library).ok()
+                                }
+                                Err(e) => {
+                                    self.error("graph.mask_profile", format!("Layer {l}: {e}"), at, "Pick a mask the skeleton defines, or author the mask inline");
+                                    None
+                                }
                             }
-                            Some(spec.weights(&sk))
                         }
                         None => None,
                     });

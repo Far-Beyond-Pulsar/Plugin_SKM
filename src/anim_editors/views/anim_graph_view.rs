@@ -526,6 +526,10 @@ impl EditorHost for AnimGraphEditor {
                 m.rename(&text);
                 Ok(())
             }
+        if let Some(rest) = key.strip_prefix("skmask.") {
+            bone_mask_panel::commit_library(self, rest, text, window, cx);
+            return;
+        }
             ("param.name", AnimSelection::GraphParameter { name }) => m.rename_parameter(name, &text),
             ("param.default", AnimSelection::GraphParameter { name }) => {
                 let ty = m.asset().parameter(name).map(|p| p.ty).ok_or("no such parameter")?;
@@ -824,3 +828,4 @@ impl Render for AnimGraphEditor {
 
 crate::editor_model!(AnimGraphModel, <AnimationGraphAssetKind as AssetKind>::KIND);
 crate::anim_panel!(AnimGraphEditor, "animation-graph-editor");
+                body = body.child(bone_mask_panel::library_rows(self, window, cx));
