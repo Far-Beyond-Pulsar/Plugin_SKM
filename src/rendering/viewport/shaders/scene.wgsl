@@ -33,9 +33,16 @@ fn vs_mesh(input: MeshVertexIn) -> MeshVertexOut {
     return out;
 }
 
+// mirrored influences can cancel a normal completely.
+fn safe_direction(v: vec3<f32>) -> vec3<f32> {
+    let len = length(v);
+    if len == 0.0 { return v; }
+    return v / len;
+}
+
 fn shade(input: MeshVertexOut) -> vec3<f32> {
-    let view = normalize(u.eye.xyz - input.world);
-    var n = normalize(input.normal);
+    let view = safe_direction(u.eye.xyz - input.world);
+    var n = safe_direction(input.normal);
     // Bones are thin and double sided; always light the face toward the camera.
     if dot(n, view) < 0.0 {
         n = -n;
@@ -49,7 +56,7 @@ fn shade(input: MeshVertexOut) -> vec3<f32> {
     let ambient = mix(u.sky_bottom.rgb, u.sky_top.rgb, n.y * 0.5 + 0.5) * 0.9 + vec3<f32>(0.10);
     let diffuse = max(dot(n, key), 0.0) * 0.62 + max(dot(n, fill), 0.0) * 0.20;
     let headlight = ndotv * 0.22;
-    let half_v = normalize(key + view);
+    let half_v = safe_direction(key + view);
     let spec = pow(max(dot(n, half_v), 0.0), 56.0) * 0.30;
     let rim = pow(1.0 - ndotv, 3.0);
 
@@ -70,8 +77,8 @@ fn fs_mesh(input: MeshVertexOut) -> @location(0) vec4<f32> {
 // the whole skeleton stays readable.
 @fragment
 fn fs_xray(input: MeshVertexOut) -> @location(0) vec4<f32> {
-    let view = normalize(u.eye.xyz - input.world);
-    let n = normalize(input.normal);
+    let view = safe_direction(u.eye.xyz - input.world);
+    let n = safe_direction(input.normal);
     let edge = pow(1.0 - abs(dot(n, view)), 1.5);
     return vec4<f32>(input.color.rgb * (0.7 + 0.5 * edge), (0.10 + 0.20 * edge) * input.color.a);
 }
@@ -79,8 +86,8 @@ fn fs_xray(input: MeshVertexOut) -> @location(0) vec4<f32> {
 // Translucent onion-skin poses.
 @fragment
 fn fs_ghost(input: MeshVertexOut) -> @location(0) vec4<f32> {
-    let view = normalize(u.eye.xyz - input.world);
-    let n = normalize(input.normal);
+    let view = safe_direction(u.eye.xyz - input.world);
+    let n = safe_direction(input.normal);
     let edge = pow(1.0 - abs(dot(n, view)), 1.2);
     return vec4<f32>(input.color.rgb * (0.85 + 0.4 * edge), input.color.a * (0.55 + 0.45 * edge));
 }

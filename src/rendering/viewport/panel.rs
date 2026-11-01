@@ -36,11 +36,12 @@ use crate::editor::panel::{SkeletalAnimEditorPanel, ViewOptions};
 use crate::style::Palette;
 use crate::ui_components::chrome::{toolbar_divider, MONO};
 
-use super::camera::{FlyInput, OrbitCamera, MAX_DISTANCE, MIN_DISTANCE};
+use super::camera::{FlyInput, OrbitCamera};
 use super::renderer::{SceneFrame, ViewportRenderer};
 use super::scene::{
     build_gizmo, build_scene, GizmoLayout, SceneInput, SkinInput, TransformGizmoMode,
 };
+use super::skinning::SkinCache;
 use super::types::ViewportUniforms;
 
 /// Hit-test radius, in pixels, used to pick the nearest joint.
@@ -77,6 +78,7 @@ pub struct ViewportPanel {
     editor: WeakEntity<SkeletalAnimEditorPanel>,
     focus_handle: FocusHandle,
     renderer: ViewportRenderer,
+    skin_cache: SkinCache,
     surface: Option<WgpuSurfaceHandle>,
     camera: OrbitCamera,
     /// Camera the view is easing toward (framing / axis snaps).
@@ -110,6 +112,7 @@ impl ViewportPanel {
             editor,
             focus_handle: cx.focus_handle(),
             renderer: ViewportRenderer::new(),
+            skin_cache: SkinCache::default(),
             surface: None,
             camera: OrbitCamera::default(),
             camera_goal: None,
@@ -445,8 +448,8 @@ impl ViewportPanel {
             ScrollDelta::Pixels(p) => p.y.as_f32() / 40.0,
         };
         self.camera_goal = None;
-        self.camera.distance =
-            (self.camera.distance * (1.0 - delta * 0.1)).clamp(MIN_DISTANCE, MAX_DISTANCE);
+        self.camera
+            .set_distance(self.camera.distance * (1.0 - delta * 0.1));
         cx.notify();
     }
 
@@ -1005,6 +1008,7 @@ impl Render for ViewportPanel {
             } else {
                 None
             };
+            let prepared_skin = self.skin_cache.get(e.mesh.as_ref(), e.mesh_revision);
             let geo = build_scene(&SceneInput {
                 skeleton: &e.skeleton,
                 clip: &e.animation,
@@ -1018,9 +1022,8 @@ impl Render for ViewportPanel {
                     .debug
                     .show_tracers
                     .then_some((&e.tracer_state.trails, &e.tracer_state.colors)),
-                skin: e
-                    .mesh
-                    .as_deref()
+                skin: prepared_skin
+                    .as_ref()
                     .filter(|_| e.view_options.mesh)
                     .map(|mesh| SkinInput {
                         mesh,
@@ -1070,6 +1073,10 @@ impl Render for ViewportPanel {
 
         self.joints = geo.joint_positions.clone();
         self.bounds = (geo.center, geo.radius.max(0.25));
+        self.camera.set_scene_bounds(self.bounds.0, self.bounds.1);
+        if let Some(goal) = &mut self.camera_goal {
+            goal.set_scene_bounds(self.bounds.0, self.bounds.1);
+        }
         if self.needs_fit && geo.radius > 0.0 {
             self.camera.frame_sphere(geo.center, geo.radius);
             self.needs_fit = false;
@@ -1186,7 +1193,7 @@ impl Render for ViewportPanel {
                                 uniforms: &uniforms,
                                 mesh: &geo.mesh,
                                 transform_gizmo: &geo.transform_gizmo_mesh,
-                                skin: &geo.skin,
+                                skin: geo.skin.as_ref(),
                                 ghost: &geo.ghost,
                                 ribbons: &geo.ribbons,
                                 joints: &geo.joints,

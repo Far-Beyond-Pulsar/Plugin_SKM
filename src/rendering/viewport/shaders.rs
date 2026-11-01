@@ -16,6 +16,18 @@ pub fn scene() -> String {
     with_common(include_str!("shaders/scene.wgsl"))
 }
 
+// the test compute entry point uses exactly the same skinning function as vs_skin.
+const SKINNING: &str = include_str!("shaders/skinning.wgsl");
+
+pub fn skin() -> String {
+    format!(
+        "{}\n{}\n{}",
+        scene(),
+        SKINNING,
+        include_str!("shaders/skin.wgsl")
+    )
+}
+
 pub fn ribbon() -> String {
     with_common(include_str!("shaders/ribbon.wgsl"))
 }
@@ -34,6 +46,7 @@ pub fn all() -> Vec<(&'static str, String)> {
     vec![
         ("backdrop", backdrop()),
         ("scene", scene()),
+        ("skin", skin()),
         ("ribbon", ribbon()),
         ("gizmo", gizmo()),
         ("resolve", resolve()),

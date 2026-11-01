@@ -24,8 +24,17 @@ impl Gpu {
                 .request_adapter(&wgpu::RequestAdapterOptions::default())
                 .await
                 .ok()?;
+            #[cfg(test)]
+            eprintln!("preview adapter: {:?}", adapter.get_info());
             let (device, queue) = adapter
-                .request_device(&wgpu::DeviceDescriptor::default())
+                .request_device(&wgpu::DeviceDescriptor {
+                    required_features: if cfg!(test) {
+                        adapter.features() & wgpu::Features::TIMESTAMP_QUERY
+                    } else {
+                        wgpu::Features::empty()
+                    },
+                    ..Default::default()
+                })
                 .await
                 .ok()?;
             Some(Self { device, queue })

@@ -76,6 +76,9 @@ pub struct OrbitCamera {
     pub yaw_deg: f32,
     pub pitch_deg: f32,
     pub distance: f32,
+    // the posed bounds also drive clipping when the camera isn't being framed.
+    pub scene_center: Vec3,
+    pub scene_radius: f32,
 }
 
 impl Default for OrbitCamera {
@@ -85,6 +88,8 @@ impl Default for OrbitCamera {
             yaw_deg: DEFAULT_YAW,
             pitch_deg: DEFAULT_PITCH,
             distance: 3.0,
+            scene_center: Vec3::ZERO,
+            scene_radius: 1.0,
         }
     }
 }
@@ -116,20 +121,28 @@ impl OrbitCamera {
 
     pub fn view_proj(&self, aspect: f32) -> Mat4 {
         let view = Mat4::look_at(self.eye(), self.target, Vec3::new(0.0, 1.0, 0.0));
-        let proj = Mat4::perspective(FOV_Y_DEG, aspect.max(0.01), NEAR, FAR);
+        let far = FAR.max(self.eye().sub(self.scene_center).length() + self.scene_radius * 1.2);
+        let near = NEAR.max(self.distance * 1e-5);
+        let proj = Mat4::perspective(FOV_Y_DEG, aspect.max(0.01), near, far);
         proj.mul(&view)
     }
 
     pub fn set_distance(&mut self, distance: f32) {
-        self.distance = distance.clamp(MIN_DISTANCE, MAX_DISTANCE);
+        self.distance = distance.clamp(MIN_DISTANCE, MAX_DISTANCE.max(self.scene_radius * 10.0));
     }
 
     /// Aim at the bounding sphere `(center, radius)` so it just fills the
     /// vertical field of view, with some breathing room.
     pub fn frame_sphere(&mut self, center: Vec3, radius: f32) {
         let half_fov = (FOV_Y_DEG * 0.5).to_radians();
+        self.set_scene_bounds(center, radius);
         self.target = center;
         self.set_distance((radius.max(0.1) / half_fov.tan() * 1.25).max(0.5));
+    }
+
+    pub fn set_scene_bounds(&mut self, center: Vec3, radius: f32) {
+        self.scene_center = center;
+        self.scene_radius = radius.max(0.1);
     }
 
     /// Unit vector the camera is facing (from the eye toward the target).
@@ -371,5 +384,40 @@ mod tests {
             // Poles are clamped just short of vertical.
             assert!(dir.dot(want) > 0.999, "{axis:?}: {dir:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod large_mesh_bounds_tests {
+    use super::*;
+
+    #[test]
+    fn framing_large_posed_meshes_expands_zoom_and_clipping() {
+        let center = Vec3::new(3000.0, -70.0, 500.0);
+        let mut camera = OrbitCamera::default();
+        camera.frame_sphere(center, 2000.0);
+        assert!(camera.distance > MAX_DISTANCE);
+        for axis in [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ] {
+            for sign in [-1.0, 1.0] {
+                let (x, y, z, w) = camera
+                    .view_proj(1.0)
+                    .transform_clip(center.add(axis.scale(sign * 2000.0)));
+                assert!(
+                    w > 0.0 && x.abs() < w && y.abs() < w && z >= 0.0 && z < w,
+                    "{x} {y} {z} {w}"
+                );
+            }
+        }
+        let before = camera.distance;
+        camera.set_distance(before * 0.95);
+        assert!(camera.distance > MAX_DISTANCE && camera.distance < before);
+        // moving geometry updates the far plane without snapping the camera to it.
+        camera.set_scene_bounds(center.add(Vec3::new(0.0, 0.0, -10000.0)), 2000.0);
+        let (_, _, z, w) = camera.view_proj(1.0).transform_clip(camera.scene_center);
+        assert!(z > 0.0 && z < w);
     }
 }

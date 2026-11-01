@@ -83,6 +83,7 @@ fn render_real_sample() {
         eprintln!("worst deviation from the independent reference: {worst:e}");
     }
 
+    let prepared = super::skinning::PreparedSkin::new(std::sync::Arc::new(mesh.clone())).unwrap();
     let Some(gpu) = Gpu::new() else { return };
     let palette = Palette::test_dark();
     let render = |name: &str,
@@ -107,7 +108,7 @@ fn render_real_sample() {
             palette: &palette,
             tracers: None,
             skin: Some(SkinInput {
-                mesh: &mesh,
+                mesh: &prepared,
                 weights_of: selected,
             }),
             physics: None,
@@ -154,7 +155,7 @@ fn render_real_sample() {
                         uniforms: &uniforms,
                         mesh: &geo.mesh,
                         transform_gizmo: &geo.transform_gizmo_mesh,
-                        skin: &geo.skin,
+                        skin: geo.skin.as_ref(),
                         ghost: &geo.ghost,
                         ribbons: &geo.ribbons,
                         joints: &geo.joints,
