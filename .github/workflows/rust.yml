@@ -36,7 +36,7 @@ jobs:
         sudo apt-get install -y \
           pkg-config libssl-dev libfontconfig1-dev libfreetype6-dev \
           libx11-dev libx11-xcb-dev libwayland-dev libxkbcommon-x11-dev \
-          libasound2-dev libudev-dev
+          libasound2-dev libudev-dev mesa-vulkan-drivers
     - name: Cache Rust build
       uses: Swatinem/rust-cache@v2
       with:
@@ -46,4 +46,10 @@ jobs:
       run: cargo build -p skeletal_animation_plugin --verbose
     - name: Run tests
       working-directory: pulsar
-      run: cargo test -p skeletal_animation_plugin --verbose
+      run: cargo test -p skeletal_animation_plugin -p skeletal_assets --verbose -- --test-threads=1
+    - name: GPU skinning parity and resource lifecycle (software Vulkan)
+      working-directory: pulsar
+      env:
+        WGPU_BACKEND: vulkan
+        XDG_RUNTIME_DIR: /tmp
+      run: cargo test -p skeletal_animation_plugin --lib -- --ignored --skip skinning_geometry_benchmark --skip skinning_render_benchmark --nocapture --test-threads=1

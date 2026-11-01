@@ -32,6 +32,9 @@ anti-aliased ground grid, lit bones with an x-ray ghost for occluded parts, onio
 the selected bone, thick anti-aliased ribbon lines, and a temporally anti-aliased resolve. The timeline is a
 single SDF shape pipeline (diamonds, rounded rects, glow, hatch) with GPUI text on top for crisp labels.
 
+Skeletal meshes use indexed vertex-stage GPU skinning with a cached bind-pose mesh
+and per-preview joint palette. See [skinning contracts, tests and benchmarks](docs/gpu-skinning-preview.md).
+
 ## Previewing the GPU output headlessly
 
 The renderers can be run without opening the editor. These tests render into an offscreen texture and skip

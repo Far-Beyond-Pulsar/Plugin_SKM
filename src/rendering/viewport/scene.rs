@@ -6,14 +6,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::core::skinning::{bone_influence, joint_matrices, skin_lod};
-use crate::core::skmesh::SkeletalMeshAsset;
+use super::skinning::{PreparedSkin, SkinFrame};
 use crate::core::{
     bone_world_transform, evaluate_world_transforms, AnimationClip, Mat4, Skeleton, Vec3,
 };
 use crate::editor::panel::ViewOptions;
 use crate::style::{mix, with_alpha, Palette};
 use pulsar_physics::{SkeletalPhysicsAsset, SkeletalShape};
+use std::sync::Arc;
 
 use super::camera::{OrbitCamera, ViewAxis};
 use super::types::*;
@@ -69,7 +69,7 @@ pub enum TransformGizmoMode {
 /// The skinned mesh of a scene.
 #[derive(Clone, Copy)]
 pub struct SkinInput<'a> {
-    pub mesh: &'a SkeletalMeshAsset,
+    pub mesh: &'a Arc<PreparedSkin>,
     /// Color the mesh by this bone's influence (a weight heat map).
     pub weights_of: Option<&'a str>,
 }
@@ -82,7 +82,7 @@ pub struct SceneGeometry {
     pub transform_gizmo_mesh: Vec<MeshVertex>,
     /// The skinned mesh, drawn before the bones so they show through it only
     /// as x-ray.
-    pub skin: Vec<MeshVertex>,
+    pub skin: Option<SkinFrame>,
     pub ghost: Vec<MeshVertex>,
     pub ribbons: Vec<RibbonSegment>,
     pub joints: Vec<JointInstance>,
@@ -333,13 +333,19 @@ pub fn build_scene(input: &SceneInput) -> SceneGeometry {
     // The skinned mesh, posed by the same world transforms as the bones.
     let mut points: Vec<Vec3> = geo.joint_positions.iter().map(|(_, p)| *p).collect();
     if let Some(skin) = input.skin {
-        points.extend(push_skin(
-            &mut geo.skin,
-            &skin,
-            &world,
-            p,
+        let plain = mix(mix(p.text, p.background, 0.5), p.info, 0.12);
+        geo.skin = SkinFrame::new(
+            skin.mesh.clone(),
             input.view.mesh_lod,
-        ));
+            world,
+            skin.weights_of,
+            plain,
+        );
+        if let Some(frame) = &geo.skin {
+            if let Some(corners) = frame.mesh.lods[frame.lod].posed_bounds(&frame.joints) {
+                points.extend(corners);
+            }
+        }
     }
 
     if input.view.bones {
@@ -836,6 +842,7 @@ fn push_physics_overlay(
 
 /// Weight heat map: blue (no influence) through cyan, green and yellow to red
 /// (full influence), in the linear space the shaders output.
+#[cfg(test)]
 pub fn weight_color(weight: f32) -> [f32; 4] {
     let t = weight.clamp(0.0, 1.0);
     let (r, g, b) = if t < 0.25 {
@@ -849,50 +856,6 @@ pub fn weight_color(weight: f32) -> [f32; 4] {
     };
     let lin = crate::style::srgb_to_linear;
     [lin(r), lin(g), lin(b), 1.0]
-}
-
-/// Append the triangles of the skinned mesh, posed by `world` (bone world
-/// matrices by bone id; bones missing from it leave their vertices unmoved).
-/// Returns the posed vertex positions, for framing the camera.
-///
-/// This is the preview's reference skinning, on the CPU, every time the scene
-/// is built: meant for previews of characters, not for million-vertex meshes.
-fn push_skin(
-    out: &mut Vec<MeshVertex>,
-    skin: &SkinInput,
-    world: &HashMap<String, Mat4>,
-    p: &Palette,
-    lod_index: usize,
-) -> Vec<Vec3> {
-    let lod_index = lod_index.min(skin.mesh.lods.len().saturating_sub(1));
-    let Some(lod) = skin.mesh.lods.get(lod_index) else {
-        return Vec::new();
-    };
-    let posed = skin_lod(lod, &joint_matrices(skin.mesh, world));
-    let influence = skin
-        .weights_of
-        .map(|bone| bone_influence(skin.mesh, lod, bone));
-    let plain = mix(mix(p.text, p.background, 0.5), p.info, 0.12);
-    let color = |v: usize| match &influence {
-        Some(weights) => weight_color(weights[v]),
-        None => plain,
-    };
-    out.reserve(lod.indices.len());
-    for triangle in lod.indices.chunks_exact(3) {
-        if triangle.iter().any(|i| *i as usize >= posed.len()) {
-            continue;
-        }
-        for &i in triangle {
-            let v = i as usize;
-            out.push(MeshVertex {
-                pos: posed[v].position.to_array(),
-                normal: posed[v].normal.to_array(),
-                color: color(v),
-                glow: 0.0,
-            });
-        }
-    }
-    posed.iter().map(|v| v.position).collect()
 }
 
 fn push_motion_path(geo: &mut SceneGeometry, input: &SceneInput, bone_id: &str) {
@@ -1150,7 +1113,7 @@ mod tests {
     fn a_skinned_mesh_adds_its_triangles_follows_the_pose_and_widens_the_bounds() {
         let skeleton_asset = SkeletonAsset::new(sample::humanoid_skeleton());
         let skeleton = skeleton_asset.skeleton();
-        let mesh = sample::sample_mesh(&skeleton_asset);
+        let mesh = PreparedSkin::new(Arc::new(sample::sample_mesh(&skeleton_asset))).unwrap();
         let clip = sample::run_animation(&skeleton);
         let palette = Palette::test_dark();
         let scene = |time: f32, with_mesh: bool| {
@@ -1164,28 +1127,17 @@ mod tests {
         };
 
         let without = scene(0.0, false);
-        assert!(without.skin.is_empty());
+        assert!(without.skin.is_none());
 
         let (early, later) = (scene(0.0, true), scene(0.3, true));
-        let triangles = mesh.lods[0].indices.len();
-        assert_eq!(
-            early.skin.len(),
-            triangles,
-            "one vertex per triangle corner"
+        let early_frame = early.skin.as_ref().unwrap();
+        let later_frame = later.skin.as_ref().unwrap();
+        assert!(Arc::ptr_eq(&early_frame.mesh, &later_frame.mesh));
+        assert_eq!(early_frame.mesh.lods[0].indices, mesh.asset.lods[0].indices);
+        assert_ne!(
+            early_frame.joints, later_frame.joints,
+            "animation updates the palette"
         );
-        let finite = |v: &[f32]| v.iter().all(|x| x.is_finite());
-        assert!(early
-            .skin
-            .iter()
-            .all(|v| finite(&v.pos) && finite(&v.normal)));
-        // The running pose moves the mesh with the bones.
-        let moved = early
-            .skin
-            .iter()
-            .zip(&later.skin)
-            .filter(|(a, b)| (0..3).any(|i| (a.pos[i] - b.pos[i]).abs() > 1e-3))
-            .count();
-        assert!(moved > 0, "the mesh did not follow the pose");
         assert!(
             early.radius >= without.radius - 1e-4,
             "the bounds include the mesh"
@@ -1196,7 +1148,7 @@ mod tests {
     fn the_weight_heat_map_colors_the_mesh_by_the_selected_bone() {
         let skeleton_asset = SkeletonAsset::new(sample::humanoid_skeleton());
         let skeleton = skeleton_asset.skeleton();
-        let mesh = sample::sample_mesh(&skeleton_asset);
+        let mesh = PreparedSkin::new(Arc::new(sample::sample_mesh(&skeleton_asset))).unwrap();
         let clip = AnimationClip::bind_pose();
         let palette = Palette::test_dark();
         let colors = |weights_of: Option<&str>| {
@@ -1207,9 +1159,26 @@ mod tests {
             });
             let geo = build_scene(&scene_input);
             let mut distinct: Vec<[f32; 4]> = Vec::new();
-            for v in &geo.skin {
-                if !distinct.contains(&v.color) {
-                    distinct.push(v.color);
+            let frame = geo.skin.as_ref().unwrap();
+            for v in &mesh.asset.lods[0].vertices {
+                let weight: f32 = v
+                    .joints
+                    .iter()
+                    .zip(v.weights)
+                    .map(|(&j, w)| {
+                        frame
+                            .joints
+                            .get(j as usize)
+                            .map_or(0.0, |p| p.selected[0] * w)
+                    })
+                    .sum();
+                let color = if frame.uniforms.params[1] != 0 {
+                    weight_color(weight)
+                } else {
+                    frame.uniforms.color
+                };
+                if !distinct.contains(&color) {
+                    distinct.push(color);
                 }
             }
             distinct

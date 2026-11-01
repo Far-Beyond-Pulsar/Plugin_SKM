@@ -1,12 +1,12 @@
 //! CPU linear-blend skinning of a [`SkeletalMeshAsset`] by a pose.
 //!
-//! Used for the editor's previews. The engine's runtime skinning is separate
-//! (and on the GPU); this is the reference the previews and tests use.
+//! Reference for the editor's GPU preview and headless asset tests. Runtime
+//! skinning is separate.
 
 use std::collections::HashMap;
 
 use crate::math::{Mat4, Vec3};
-use crate::skmesh::{MeshLod, SkeletalMeshAsset, SkinnedVertex};
+use crate::skmesh::{Joint, MeshLod, SkeletalMeshAsset, SkinnedVertex};
 
 /// A skinned vertex: where it ends up, and its normal there.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -21,11 +21,16 @@ pub struct Posed {
 pub fn joint_matrices(mesh: &SkeletalMeshAsset, world: &HashMap<String, Mat4>) -> Vec<Mat4> {
     mesh.joints
         .iter()
-        .map(|joint| match world.get(&joint.bone) {
-            Some(bone_world) => bone_world.mul(&joint.inverse_bind_matrix()),
-            None => Mat4::IDENTITY,
-        })
+        .map(|joint| joint_matrix(joint, world))
         .collect()
+}
+
+/// One joint in mesh order, shared by the CPU reference and GPU palette packing.
+pub fn joint_matrix(joint: &Joint, world: &HashMap<String, Mat4>) -> Mat4 {
+    match world.get(&joint.bone) {
+        Some(bone_world) => bone_world.mul(&joint.inverse_bind_matrix()),
+        None => Mat4::IDENTITY,
+    }
 }
 
 /// Blend `vertex` by `matrices` (see [`joint_matrices`]).

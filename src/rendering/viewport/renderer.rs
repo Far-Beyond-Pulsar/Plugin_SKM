@@ -19,11 +19,12 @@ use super::types::{
     GizmoBubbleInstance, JointInstance, MeshVertex, ResolveUniforms, RibbonSegment,
     ViewportUniforms,
 };
+use super::{skin_gpu::SkinGpu, skinning::SkinFrame};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Format of the offscreen scene color and TAA history textures. Float so
 /// the resolve pass can blend/clamp without banding.
-const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+pub(super) const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// Internal scene render resolution as a fraction of the output size.
 const RENDER_SCALE: f32 = 1.0;
@@ -51,7 +52,7 @@ pub struct SceneFrame<'a> {
     /// Scene-space transform controls, rendered in a dedicated depth-tested pass.
     pub transform_gizmo: &'a [MeshVertex],
     /// The skinned mesh, drawn first so bones behind it show only as x-ray.
-    pub skin: &'a [MeshVertex],
+    pub skin: Option<&'a SkinFrame>,
     /// Translucent onion-skin geometry.
     pub ghost: &'a [MeshVertex],
     pub ribbons: &'a [RibbonSegment],
@@ -137,7 +138,7 @@ struct Pipelines {
     gizmo_uniforms: UniformSet,
     mesh_buf: GrowBuf,
     transform_gizmo_buf: GrowBuf,
-    skin_buf: GrowBuf,
+    skin: Option<SkinGpu>,
     ghost_buf: GrowBuf,
     ribbon_buf: GrowBuf,
     joint_buf: GrowBuf,
@@ -168,6 +169,8 @@ struct ResolveState {
 }
 
 pub struct ViewportRenderer {
+    #[cfg(test)]
+    pub(super) scene_timestamps: Option<wgpu::QuerySet>,
     pipelines: Option<Pipelines>,
     offscreen: Option<OffscreenState>,
     /// Index into `OffscreenState::history` that was written *last* frame,
@@ -184,6 +187,8 @@ pub struct ViewportRenderer {
 impl ViewportRenderer {
     pub fn new() -> Self {
         Self {
+            #[cfg(test)]
+            scene_timestamps: None,
             pipelines: None,
             offscreen: None,
             history_idx: 0,
@@ -247,7 +252,9 @@ impl ViewportRenderer {
         let transform_gizmo_n = p
             .transform_gizmo_buf
             .upload(device, queue, frame.transform_gizmo);
-        let skin_n = p.skin_buf.upload(device, queue, frame.skin);
+        if let Some(skin) = &mut p.skin {
+            skin.update(device, queue, frame.skin);
+        }
         let ghost_n = p.ghost_buf.upload(device, queue, frame.ghost);
         let ribbon_n = p.ribbon_buf.upload(device, queue, frame.ribbons);
         let joint_n = p.joint_buf.upload(device, queue, frame.joints);
@@ -284,7 +291,22 @@ impl ViewportRenderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: {
+                    #[cfg(test)]
+                    {
+                        self.scene_timestamps.as_ref().map(|query_set| {
+                            wgpu::RenderPassTimestampWrites {
+                                query_set,
+                                beginning_of_pass_write_index: Some(0),
+                                end_of_pass_write_index: Some(1),
+                            }
+                        })
+                    }
+                    #[cfg(not(test))]
+                    {
+                        None
+                    }
+                },
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -293,10 +315,8 @@ impl ViewportRenderer {
             pass.set_pipeline(&p.sky);
             pass.draw(0..3, 0..1);
 
-            if skin_n > 0 {
-                pass.set_pipeline(&p.mesh);
-                pass.set_vertex_buffer(0, p.skin_buf.buf.slice(..));
-                pass.draw(0..skin_n, 0..1);
+            if let Some(skin) = &p.skin {
+                skin.draw(&mut pass, frame.skin);
             }
             if mesh_n > 0 {
                 pass.set_pipeline(&p.mesh);
@@ -557,14 +577,14 @@ impl ViewportRenderer {
 
 // ── pipeline construction ──────────────────────────────────────────────────
 
-fn module(device: &wgpu::Device, label: &str, source: String) -> wgpu::ShaderModule {
+pub(super) fn module(device: &wgpu::Device, label: &str, source: String) -> wgpu::ShaderModule {
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     })
 }
 
-fn depth_state(write: bool, compare: wgpu::CompareFunction) -> wgpu::DepthStencilState {
+pub(super) fn depth_state(write: bool, compare: wgpu::CompareFunction) -> wgpu::DepthStencilState {
     wgpu::DepthStencilState {
         format: DEPTH_FORMAT,
         depth_write_enabled: Some(write),
@@ -585,19 +605,19 @@ fn target(
     })
 }
 
-struct PipelineSpec<'a> {
-    label: &'a str,
-    layout: &'a wgpu::PipelineLayout,
-    shader: &'a wgpu::ShaderModule,
-    vs: &'a str,
-    fs: &'a str,
-    buffers: &'a [Option<wgpu::VertexBufferLayout<'a>>],
-    format: wgpu::TextureFormat,
-    blend: Option<wgpu::BlendState>,
-    depth: Option<wgpu::DepthStencilState>,
+pub(super) struct PipelineSpec<'a> {
+    pub(super) label: &'a str,
+    pub(super) layout: &'a wgpu::PipelineLayout,
+    pub(super) shader: &'a wgpu::ShaderModule,
+    pub(super) vs: &'a str,
+    pub(super) fs: &'a str,
+    pub(super) buffers: &'a [Option<wgpu::VertexBufferLayout<'a>>],
+    pub(super) format: wgpu::TextureFormat,
+    pub(super) blend: Option<wgpu::BlendState>,
+    pub(super) depth: Option<wgpu::DepthStencilState>,
 }
 
-fn pipeline(device: &wgpu::Device, spec: PipelineSpec) -> wgpu::RenderPipeline {
+pub(super) fn pipeline(device: &wgpu::Device, spec: PipelineSpec) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(spec.label),
         layout: Some(spec.layout),
@@ -880,7 +900,12 @@ impl Pipelines {
                 Usage::VERTEX,
                 1024,
             ),
-            skin_buf: GrowBuf::new(device, "viewport_skin", Usage::VERTEX, 4096),
+            skin: if super::skin_gpu::supported(&device.limits()) {
+                Some(SkinGpu::new(device, &bgl))
+            } else {
+                log::warn!("device limits do not support skeletal preview skinning");
+                None
+            },
             ghost_buf: GrowBuf::new(device, "viewport_ghost", Usage::VERTEX, 4096),
             ribbon_buf: GrowBuf::new(device, "viewport_ribbons", Usage::VERTEX, 4096),
             joint_buf: GrowBuf::new(device, "viewport_joints", Usage::VERTEX, 1024),
@@ -983,3 +1008,6 @@ impl Pipelines {
         }
     }
 }
+
+#[cfg(test)]
+mod skin_resource_tests;

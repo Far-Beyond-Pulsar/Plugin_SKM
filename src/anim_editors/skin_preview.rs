@@ -44,14 +44,22 @@ pub struct Rig {
     pub skeleton_ref: pulsar_reflection::AssetRef<pulsar_reflection::SkeletonAssetKind>,
     pub skeleton: Skeleton,
     pub runtime: Arc<RuntimeSkeleton>,
-    pub mesh: Option<SkeletalMeshAsset>,
+    pub mesh: Option<Arc<SkeletalMeshAsset>>,
 }
 
 impl Rig {
     pub fn new(asset: &SkeletonAsset, mesh: Option<SkeletalMeshAsset>) -> Result<Self, String> {
         let skeleton = asset.skeleton();
-        let runtime = Arc::new(RuntimeSkeleton::new(asset.id.as_str(), &skeleton)?.with_mask_library(asset.masks.clone()));
-        Ok(Self { skeleton_ref: asset.id.to_ref(), skeleton, runtime, mesh })
+        let runtime = Arc::new(
+            RuntimeSkeleton::new(asset.id.as_str(), &skeleton)?
+                .with_mask_library(asset.masks.clone()),
+        );
+        Ok(Self {
+            skeleton_ref: asset.id.to_ref(),
+            skeleton,
+            runtime,
+            mesh: mesh.map(Arc::new),
+        })
     }
 }
 
@@ -375,6 +383,7 @@ pub fn load_rig(root: &Path, assets: &ProjectAssets, id: &str) -> Result<Rig, St
 /// Offscreen skinned rendering of a posed rig.
 pub struct SkinRenderer {
     gpu: crate::rendering::preview::Gpu,
+    skin_cache: crate::rendering::viewport::skinning::SkinCache,
     renderer: crate::rendering::viewport::renderer::ViewportRenderer,
 }
 
@@ -388,7 +397,11 @@ pub struct SkinFrame {
 impl SkinRenderer {
     /// `None` when the machine has no GPU adapter.
     pub fn new() -> Option<Self> {
-        Some(Self { gpu: crate::rendering::preview::Gpu::new()?, renderer: crate::rendering::viewport::renderer::ViewportRenderer::new() })
+        Some(Self {
+            gpu: crate::rendering::preview::Gpu::new()?,
+            skin_cache: Default::default(),
+            renderer: crate::rendering::viewport::renderer::ViewportRenderer::new(),
+        })
     }
 
     pub fn render(&mut self, rig: &Rig, pose: &Pose, palette: &crate::style::Palette, width: u32, height: u32) -> SkinFrame {
@@ -401,6 +414,7 @@ impl SkinRenderer {
         let world = world_of(rig, pose);
         let clip = crate::core::AnimationClip::bind_pose();
         let view = ViewOptions::default();
+        let prepared = self.skin_cache.get(rig.mesh.as_ref(), 0);
         let geo = build_scene(&SceneInput {
             skeleton: &rig.skeleton,
             sockets: None,
@@ -412,7 +426,10 @@ impl SkinRenderer {
             view,
             palette,
             tracers: None,
-            skin: rig.mesh.as_ref().map(|mesh| SkinInput { mesh, weights_of: None }),
+            skin: prepared.as_ref().map(|mesh| SkinInput {
+                mesh,
+                weights_of: None,
+            }),
             physics: None,
             transform_gizmo: None,
             world_override: Some(&world),
@@ -444,7 +461,7 @@ impl SkinRenderer {
                         uniforms: &uniforms,
                         mesh: &geo.mesh,
                         transform_gizmo: &geo.transform_gizmo_mesh,
-                        skin: &geo.skin,
+                        skin: geo.skin.as_ref(),
                         ghost: &geo.ghost,
                         ribbons: &geo.ribbons,
                         joints: &geo.joints,

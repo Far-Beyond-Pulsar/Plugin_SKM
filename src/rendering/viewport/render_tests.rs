@@ -30,6 +30,7 @@ fn render_shot(gpu: &Gpu, shot: Shot) -> Vec<u8> {
     let skeleton = skeleton_asset.skeleton();
     let clip = sample::run_animation(&skeleton);
     let mesh = sample::sample_mesh(&skeleton_asset);
+    let prepared = super::skinning::PreparedSkin::new(std::sync::Arc::new(mesh)).unwrap();
     let geo = build_scene(&SceneInput {
         skeleton: &skeleton,
         clip: &clip,
@@ -41,7 +42,7 @@ fn render_shot(gpu: &Gpu, shot: Shot) -> Vec<u8> {
         palette: &shot.palette,
         tracers: None,
         skin: shot.skin.then_some(SkinInput {
-            mesh: &mesh,
+            mesh: &prepared,
             weights_of: shot.selected,
         }),
         physics: None,
@@ -83,7 +84,7 @@ fn render_shot(gpu: &Gpu, shot: Shot) -> Vec<u8> {
                     uniforms: &uniforms,
                     mesh: &geo.mesh,
                     transform_gizmo: &geo.transform_gizmo_mesh,
-                    skin: &geo.skin,
+                    skin: geo.skin.as_ref(),
                     ghost: &geo.ghost,
                     ribbons: &geo.ribbons,
                     joints: &geo.joints,
@@ -275,7 +276,7 @@ fn render_viewport_in_motion() {
                     uniforms: &uniforms,
                     mesh: &geo.mesh,
                     transform_gizmo: &geo.transform_gizmo_mesh,
-                    skin: &geo.skin,
+                    skin: geo.skin.as_ref(),
                     ghost: &geo.ghost,
                     ribbons: &geo.ribbons,
                     joints: &geo.joints,
@@ -289,4 +290,125 @@ fn render_viewport_in_motion() {
     });
     preview::save("viewport_motion", w, h, &rgba);
     assert!(preview::coverage(&rgba) > 0.5);
+}
+
+#[test]
+#[ignore = "requires a wgpu adapter; explicitly run with --ignored --nocapture"]
+fn gpu_vertex_shader_render_matches_cpu_skinned_render() {
+    use super::{
+        skinning::{PreparedSkin, SkinFrame},
+        types::MeshVertex,
+    };
+    use crate::core::{
+        evaluate_world_transforms,
+        skinning::{bone_influence, joint_matrices, skin_lod},
+    };
+    use std::sync::Arc;
+    let gpu = Gpu::new().expect("render parity requires an adapter");
+    let errors = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let skeleton_asset = SkeletonAsset::new(sample::humanoid_skeleton());
+    let skeleton = skeleton_asset.skeleton();
+    let clip = sample::run_animation(&skeleton);
+    let mesh = PreparedSkin::new(Arc::new(sample::sample_mesh(&skeleton_asset))).unwrap();
+    let palette = Palette::test_dark();
+    let size = 384;
+    for (shot, time) in [0.0, 0.23, 0.71].into_iter().enumerate() {
+        let world = evaluate_world_transforms(&skeleton, &clip, time);
+        let posed = skin_lod(&mesh.asset.lods[0], &joint_matrices(&mesh.asset, &world));
+        for selected in [None, Some("thigh_r")] {
+            let skin =
+                SkinFrame::new(mesh.clone(), 0, &world, selected, [0.4, 0.5, 0.6, 1.0]).unwrap();
+            let influence = selected.map(|id| bone_influence(&mesh.asset, &mesh.asset.lods[0], id));
+            let cpu: Vec<_> = mesh.lods[0]
+                .indices
+                .iter()
+                .map(|&index| {
+                    let i = index as usize;
+                    MeshVertex {
+                        pos: posed[i].position.to_array(),
+                        normal: posed[i].normal.to_array(),
+                        color: influence
+                            .as_ref()
+                            .map_or(skin.uniforms.color, |w| super::scene::weight_color(w[i])),
+                        glow: 0.0,
+                    }
+                })
+                .collect();
+            let corners = mesh.lods[0].posed_bounds(&skin.joints).unwrap();
+            let (center, radius) = super::camera::bounding_sphere(&corners).unwrap();
+            let mut camera = OrbitCamera::default();
+            camera.frame_sphere(center, radius);
+            let uniforms = ViewportUniforms::new(
+                &palette,
+                camera.view_proj(1.0),
+                camera.eye().to_array(),
+                [size as f32; 2],
+                30.0,
+                [0.0; 4],
+            );
+            let draw = |skinned: bool| {
+                let mut renderer = ViewportRenderer::new();
+                gpu.render(size, size, |device, queue, view| {
+                    for _ in 0..12 {
+                        renderer.render_frame(
+                            device,
+                            queue,
+                            view,
+                            size,
+                            size,
+                            preview::TARGET_FORMAT,
+                            &SceneFrame {
+                                uniforms: &uniforms,
+                                mesh: if skinned { &[] } else { &cpu },
+                                transform_gizmo: &[],
+                                skin: skinned.then_some(&skin),
+                                ghost: &[],
+                                ribbons: &[],
+                                joints: &[],
+                                gizmo_ribbons: &[],
+                                gizmo_bubbles: &[],
+                                show_grid: false,
+                                xray: false,
+                            },
+                        );
+                    }
+                })
+            };
+            let expected = draw(false);
+            let actual = draw(true);
+            let total_error: usize = expected
+                .iter()
+                .zip(&actual)
+                .map(|(&a, &b)| a.abs_diff(b) as usize)
+                .sum();
+            let edge_pixels = expected
+                .chunks(4)
+                .zip(actual.chunks(4))
+                .filter(|(a, b)| a.iter().zip(b.iter()).any(|(&a, &b)| a.abs_diff(b) > 3))
+                .count();
+            // subpixel edge coverage can differ after fma, but interior shading should agree.
+            assert!(
+                (total_error as f64) / (actual.len() as f64) < 0.2,
+                "mean channel error too large: {total_error}"
+            );
+            assert!(
+                edge_pixels < (size * size) as usize / 200,
+                "too many different pixels: {edge_pixels}"
+            );
+            preview::save(
+                &format!("gpu_skin_pose_{shot}_weights_{}", selected.is_some()),
+                size,
+                size,
+                &actual,
+            );
+            preview::save(
+                &format!("cpu_skin_pose_{shot}_weights_{}", selected.is_some()),
+                size,
+                size,
+                &expected,
+            );
+            eprintln!("render parity: pose={time}, weights={}, mean byte error={:.6}, differing edge pixels={edge_pixels}",selected.is_some(), total_error as f64/actual.len() as f64);
+        }
+    }
+    assert!(smol::block_on(errors.pop()).is_none());
 }
