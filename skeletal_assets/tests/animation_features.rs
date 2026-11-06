@@ -640,7 +640,7 @@ fn extended_notify_schema_versions_round_trips_and_rejects_invalid_saves() {
         asset.features
     );
     let mut future = value.clone();
-    future["version"] = 5.into();
+    future["version"] = (skeletal_assets::assets::ANIMSEQ_FORMAT_VERSION + 1).into();
     assert!(AnimSeqAsset::parse(&future.to_string()).is_err());
     let old = r#"{"version":2,"duration":1.0,"fps":30.0,"tracks":[],"name":"old","notifies":[{"id":"old","name":"Old","time":0.5}]}"#;
     let old = AnimSeqAsset::parse(old).unwrap();

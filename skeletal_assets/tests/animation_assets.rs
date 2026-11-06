@@ -397,7 +397,7 @@ fn animseq_notify_states_and_payload_schemas_are_validated() {
 #[test]
 fn animseq_refuses_a_future_version() {
     let mut v: Value = serde_json::from_str(&fixture("v1/walk_v1.animseq")).unwrap();
-    v["version"] = 5.into();
+    v["version"] = (skeletal_assets::assets::ANIMSEQ_FORMAT_VERSION + 1).into();
     assert!(AnimSeqAsset::parse(&v.to_string()).is_err());
 }
 

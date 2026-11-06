@@ -1089,3 +1089,75 @@ fn phase5_sequence_notify_and_state_survive_edit_save_and_reopen(cx: &mut TestAp
         assert!(!e.is_dirty);
     });
 }
+
+#[gpui::test]
+fn cubic_clipboard_and_pose_key_insertion_retain_interpolation(cx: &mut TestAppContext) {
+    use crate::core::{AnimationClip, BoneTrack, KeyInterpolation, Keyframe};
+    cx.update(ui::init);
+    let (editor, cx) = editor_window(cx, SkeletalAnimEditorPanel::new);
+    editor.update_in(cx, |e, window, cx| {
+        e.mode = EditorMode::Sequence;
+        let bone = e.skeleton.bones[0].id.clone();
+        let mut a = Keyframe::linear(0.0, Transform::IDENTITY);
+        a.translation_interpolation = KeyInterpolation::CubicSpline;
+        a.rotation_interpolation = KeyInterpolation::CubicSpline;
+        a.rotation_quaternion = Some([0.0, 0.0, 0.0, 1.0]);
+        a.out_tangent.translation = [2.0, 1.0, -1.0];
+        let mut b = a.clone();
+        b.time = 1.0;
+        b.transform.translation.x = 1.0;
+        b.in_tangent.translation = [-1.0, 2.0, 0.0];
+        e.animation = AnimationClip {
+            name: "cubic".into(),
+            duration: 4.0,
+            fps: 30.0,
+            tracks: vec![BoneTrack {
+                bone_id: bone.clone(),
+                keyframes: vec![a.clone(), b],
+            }],
+        };
+        e.selected_bone = Some(bone.clone());
+        e.selected_keyframes = [(bone.clone(), 0)].into_iter().collect();
+        e.copy_selected_keyframes();
+        e.playback.time = 2.0;
+        e.paste_keyframes(window, cx);
+        let pasted = &e.animation.track(&bone).unwrap().keyframes[2];
+        assert_eq!(pasted.time, 2.0);
+        assert_eq!(
+            pasted.translation_interpolation,
+            KeyInterpolation::CubicSpline
+        );
+        assert_eq!(pasted.out_tangent.translation, a.out_tangent.translation);
+        assert_eq!(pasted.rotation_quaternion, a.rotation_quaternion);
+        let before = e.animation.track(&bone).unwrap().sample(0.25).unwrap();
+        e.playback.time = 0.5;
+        e.insert_keyframe(window, cx);
+        let after = e.animation.track(&bone).unwrap().sample(0.25).unwrap();
+        assert!(before.translation.sub(after.translation).length() < 1e-5);
+        let saved = assets::AnimSeqAsset::new(None, e.animation.clone()).to_text();
+        let reopened = assets::AnimSeqAsset::parse(&saved).unwrap();
+        assert_eq!(reopened.to_text(), saved);
+        // A paste must keep distinct authored times even inside the UI's
+        // ordinary near-key tolerance (1e-4 seconds).
+        let track = e.animation.track_mut(&bone).unwrap();
+        let mut close = track.keyframes[0].clone();
+        close.time = 0.000001;
+        track.keyframes.insert(1, close);
+        e.selected_keyframes = [(bone.clone(), 0), (bone.clone(), 1)].into_iter().collect();
+        e.copy_selected_keyframes();
+        e.playback.time = 3.0;
+        e.paste_keyframes(window, cx);
+        assert_eq!(e.selected_keyframes.len(), 2);
+        let times: Vec<_> = e
+            .animation
+            .track(&bone)
+            .unwrap()
+            .keyframes
+            .iter()
+            .filter(|k| k.time >= 3.0)
+            .map(|k| k.time)
+            .collect();
+        assert_eq!(times.len(), 2);
+        assert!(times[1] > times[0]);
+    });
+}
