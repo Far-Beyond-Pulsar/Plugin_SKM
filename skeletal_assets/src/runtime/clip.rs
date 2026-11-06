@@ -3,9 +3,11 @@
 //!
 //! Compiled clips are immutable and shared by every instance that plays them.
 
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec3, Vec4};
 
-use crate::animation::KeyInterpolation;
+use crate::animation::{
+    cubic_quaternion, hermite, normalize_quaternion, quaternion_from_euler, KeyInterpolation,
+};
 use crate::assets::AnimSeqAsset;
 use crate::curves::{AnimationCurve, CurveValue};
 use crate::root_motion::RootMotionSettings;
@@ -21,7 +23,8 @@ struct Key {
     scale: KeyInterpolation,
     in_tangent: crate::animation::KeyframeTangent,
     out_tangent: crate::animation::KeyframeTangent,
-    quaternion: Option<Quat>,
+    // Raw polynomial components, which need not be a unit quaternion.
+    quaternion: Option<Vec4>,
 }
 
 #[derive(Clone, Debug)]
@@ -67,18 +70,43 @@ impl CompiledClip {
                 orphan_tracks.push(track.bone_id.clone());
                 continue;
             };
+            // Endpoint values belong to incoming as well as outgoing segments.
+            // Use the old decomposition only when the entire track is legacy.
+            let legacy_linear = track.keyframes.iter().all(|k| {
+                k.rotation_quaternion.is_none()
+                    && k.translation_interpolation == KeyInterpolation::Linear
+                    && k.rotation_interpolation == KeyInterpolation::Linear
+                    && k.scale_interpolation == KeyInterpolation::Linear
+            });
             let mut keys: Vec<Key> = track
                 .keyframes
                 .iter()
                 .map(|k| Key {
                     time: k.time,
-                    value: BoneTransform::from_asset(&k.transform),
+                    value: {
+                        // Keep valid legacy Euler-linear decomposition and
+                        // blending conventions, including reflected scales.
+                        let legacy = (legacy_linear
+                            && k.transform.scale.to_array().iter().all(|v| *v != 0.0))
+                        .then(|| BoneTransform::from_asset(&k.transform));
+                        // Authored TRS channels must keep signed/zero scales.
+                        // A collapsed axis also needs this finite fallback.
+                        legacy.filter(BoneTransform::is_finite).unwrap_or_else(|| {
+                            BoneTransform::new(
+                                Vec3::from_array(k.transform.translation.to_array()),
+                                k.rotation_quaternion
+                                    .and_then(normalize_quaternion)
+                                    .unwrap_or_else(|| quaternion_from_euler(k.transform.rotation)),
+                                Vec3::from_array(k.transform.scale.to_array()),
+                            )
+                        })
+                    },
                     translation: k.translation_interpolation,
                     rotation: k.rotation_interpolation,
                     scale: k.scale_interpolation,
                     in_tangent: k.in_tangent,
                     out_tangent: k.out_tangent,
-                    quaternion: k.rotation_quaternion.map(|q| Quat::from_xyzw(q[0], q[1], q[2], q[3])),
+                    quaternion: k.rotation_quaternion.map(Vec4::from_array),
                 })
                 .collect();
             keys.sort_by(|a, b| a.time.total_cmp(&b.time));
@@ -119,47 +147,100 @@ impl CompiledClip {
     fn sample_track(keys: &[Key], time: f32) -> BoneTransform {
         let first = &keys[0];
         let last = &keys[keys.len() - 1];
-        if keys.len() == 1 || time <= first.time {
+        if keys.len() == 1 || time.is_nan() || time <= first.time {
             return first.value;
         }
         if time >= last.time {
             return last.value;
         }
-        let i = keys.partition_point(|k| k.time <= time).saturating_sub(1).min(keys.len() - 2);
+        let i = keys
+            .partition_point(|k| k.time <= time)
+            .saturating_sub(1)
+            .min(keys.len() - 2);
         let (a, b) = (&keys[i], &keys[i + 1]);
-        let span = (b.time - a.time).max(1e-6);
+        let span = b.time - a.time;
+        if !span.is_finite() || span <= 0.0 {
+            return a.value;
+        }
         let t = ((time - a.time) / span).clamp(0.0, 1.0);
 
         let translation = match a.translation {
             KeyInterpolation::Step => a.value.translation,
             KeyInterpolation::Linear => a.value.translation.lerp(b.value.translation, t),
             KeyInterpolation::CubicSpline => Vec3::new(
-                hermite(a.value.translation.x, b.value.translation.x, a.out_tangent.translation[0], b.in_tangent.translation[0], t, span),
-                hermite(a.value.translation.y, b.value.translation.y, a.out_tangent.translation[1], b.in_tangent.translation[1], t, span),
-                hermite(a.value.translation.z, b.value.translation.z, a.out_tangent.translation[2], b.in_tangent.translation[2], t, span),
+                hermite(
+                    a.value.translation.x,
+                    b.value.translation.x,
+                    a.out_tangent.translation[0],
+                    b.in_tangent.translation[0],
+                    t,
+                    span,
+                ),
+                hermite(
+                    a.value.translation.y,
+                    b.value.translation.y,
+                    a.out_tangent.translation[1],
+                    b.in_tangent.translation[1],
+                    t,
+                    span,
+                ),
+                hermite(
+                    a.value.translation.z,
+                    b.value.translation.z,
+                    a.out_tangent.translation[2],
+                    b.in_tangent.translation[2],
+                    t,
+                    span,
+                ),
             ),
         };
         let scale = match a.scale {
             KeyInterpolation::Step => a.value.scale,
             KeyInterpolation::Linear => a.value.scale.lerp(b.value.scale, t),
             KeyInterpolation::CubicSpline => Vec3::new(
-                hermite(a.value.scale.x, b.value.scale.x, a.out_tangent.scale[0], b.in_tangent.scale[0], t, span),
-                hermite(a.value.scale.y, b.value.scale.y, a.out_tangent.scale[1], b.in_tangent.scale[1], t, span),
-                hermite(a.value.scale.z, b.value.scale.z, a.out_tangent.scale[2], b.in_tangent.scale[2], t, span),
+                hermite(
+                    a.value.scale.x,
+                    b.value.scale.x,
+                    a.out_tangent.scale[0],
+                    b.in_tangent.scale[0],
+                    t,
+                    span,
+                ),
+                hermite(
+                    a.value.scale.y,
+                    b.value.scale.y,
+                    a.out_tangent.scale[1],
+                    b.in_tangent.scale[1],
+                    t,
+                    span,
+                ),
+                hermite(
+                    a.value.scale.z,
+                    b.value.scale.z,
+                    a.out_tangent.scale[2],
+                    b.in_tangent.scale[2],
+                    t,
+                    span,
+                ),
             ),
         };
-        let rotation = match (a.rotation, a.quaternion, b.quaternion) {
-            (KeyInterpolation::Step, ..) => a.value.rotation,
-            (KeyInterpolation::CubicSpline, Some(qa), Some(qb)) => {
-                let (qa, qb) = (qa.to_array(), qb.to_array());
-                let mut q = [0.0; 4];
-                for (n, v) in q.iter_mut().enumerate() {
-                    *v = hermite(qa[n], qb[n], a.out_tangent.rotation[n], b.in_tangent.rotation[n], t, span);
-                }
-                let q = Quat::from_array(q);
-                if q.length() > 1e-8 { q.normalize() } else { a.value.rotation }
-            }
-            _ => slerp_short(a.value.rotation, b.value.rotation, t),
+        let rotation = match a.rotation {
+            KeyInterpolation::Step => a.value.rotation,
+            KeyInterpolation::Linear => slerp_short(a.value.rotation, b.value.rotation, t),
+            KeyInterpolation::CubicSpline => a
+                .quaternion
+                .zip(b.quaternion)
+                .and_then(|(qa, qb)| {
+                    cubic_quaternion(
+                        qa.to_array(),
+                        qb.to_array(),
+                        a.out_tangent.rotation,
+                        b.in_tangent.rotation,
+                        t,
+                        span,
+                    )
+                })
+                .unwrap_or(a.value.rotation),
         };
         BoneTransform::new(translation, rotation, scale)
     }
@@ -310,12 +391,6 @@ fn motion_power(base: RootMotion, mut n: u64) -> RootMotion {
         n >>= 1;
     }
     result
-}
-
-fn hermite(a: f32, b: f32, outgoing: f32, incoming: f32, t: f32, span: f32) -> f32 {
-    let t2 = t * t;
-    let t3 = t2 * t;
-    (2.0 * t3 - 3.0 * t2 + 1.0) * a + (t3 - 2.0 * t2 + t) * span * outgoing + (-2.0 * t3 + 3.0 * t2) * b + (t3 - t2) * span * incoming
 }
 
 /// Wrap or clamp an unbounded play position into a clip. Returns the in-clip

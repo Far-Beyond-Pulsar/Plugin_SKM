@@ -31,7 +31,9 @@ pub const ANIMSEQ_EXTENSION: &str = "animseq";
 /// newer ones are refused rather than half-read.
 pub const FORMAT_VERSION: u32 = 1;
 /// version 2 protects sequence features; version 3 adds notify targets and fields.
-pub const ANIMSEQ_FORMAT_VERSION: u32 = 4;
+/// Version 5 protects per-channel interpolation, tangents and quaternion values
+/// from older readers which would otherwise silently play these as linear keys.
+pub const ANIMSEQ_FORMAT_VERSION: u32 = 5;
 
 fn current_version() -> u32 {
     FORMAT_VERSION
@@ -129,6 +131,9 @@ pub struct AnimSeqAsset {
 
 impl Serialize for AnimSeqAsset {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.clip
+            .validate_keys()
+            .map_err(serde::ser::Error::custom)?;
         #[derive(Serialize)]
         struct SequenceRecord<'a> {
             version: u32,
@@ -146,20 +151,29 @@ impl Serialize for AnimSeqAsset {
         let version = if self.features.is_empty() {
             self.version
         } else {
-            self.version.max(
-                if self.features.needs_v4() {
-                    4
-                } else if self
-                    .features
-                    .notifies
-                    .iter()
-                    .any(|n| !n.target.is_self() || !n.fields.is_empty())
-                {
-                    3
-                } else {
-                    2
-                },
-            )
+            self.version.max(if self.features.needs_v4() {
+                4
+            } else if self
+                .features
+                .notifies
+                .iter()
+                .any(|n| !n.target.is_self() || !n.fields.is_empty())
+            {
+                3
+            } else {
+                2
+            })
+        };
+        let version = if self
+            .clip
+            .tracks
+            .iter()
+            .flat_map(|t| &t.keyframes)
+            .any(crate::animation::Keyframe::has_interpolation_data)
+        {
+            version.max(5)
+        } else {
+            version
         };
         SequenceRecord {
             version,
@@ -202,6 +216,7 @@ impl AnimSeqAsset {
             return Err("Animation sequence format is newer than this editor supports".into());
         }
         let mut asset: Self = serde_json::from_value(value).map_err(|e| e.to_string())?;
+        asset.clip.validate_keys()?;
         asset.features.validate(asset.clip.duration)?;
         asset
             .features
@@ -257,6 +272,7 @@ pub fn load_animseq_asset(path: &Path) -> anyhow::Result<AnimSeqAsset> {
 }
 
 pub fn save_animseq_asset(path: &Path, asset: &AnimSeqAsset) -> anyhow::Result<()> {
+    asset.clip.validate_keys().map_err(anyhow::Error::msg)?;
     asset
         .features
         .validate(asset.clip.duration)

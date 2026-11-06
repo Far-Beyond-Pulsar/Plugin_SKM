@@ -662,7 +662,12 @@ impl<'a> Scene<'a> {
                 if xb - self.view.scroll_x < -4.0 || xa - self.view.scroll_x > w + 4.0 {
                     continue;
                 }
-                if a.transform == b.transform {
+                if a.transform == b.transform
+                    && a.translation_interpolation != KeyInterpolation::CubicSpline
+                    && a.rotation_interpolation != KeyInterpolation::CubicSpline
+                    && a.scale_interpolation != KeyInterpolation::CubicSpline
+                    && a.rotation_quaternion == b.rotation_quaternion
+                {
                     // Hold: the pose doesn't change between these keys.
                     r.push(
                         RectInstance::new([xa, cy - 3.0], [xb - xa, 6.0], with_alpha(p.info, 0.34))
@@ -718,7 +723,6 @@ impl<'a> Scene<'a> {
                         p.axis_x,
                     ),
                 ] {
-                    let _ = channel;
                     let show_in = prior.is_some_and(|prev| match channel {
                         0 => prev.translation_interpolation == KeyInterpolation::CubicSpline,
                         1 => prev.rotation_interpolation == KeyInterpolation::CubicSpline,
@@ -731,7 +735,7 @@ impl<'a> Scene<'a> {
                     }
                     let mut handle = |left: bool, slope: f32, span: f32| {
                         let dx = (span * pps * 0.25).clamp(7.0, 18.0);
-                        let dy = (-slope * span * 3.0).clamp(-5.0, 5.0);
+                        let dy = (slope * span * if left { 3.0 } else { -3.0 }).clamp(-5.0, 5.0);
                         let hx = x + if left { -dx } else { dx };
                         let hy = cy + lane + dy;
                         let start_x = x.min(hx);
@@ -1221,6 +1225,43 @@ mod tests {
             drag_guide: None,
             palette: Palette::test_dark(),
         }
+    }
+
+    #[test]
+    fn cubic_tangent_guides_show_opposite_sides_of_a_positive_derivative() {
+        use skeletal_assets::animation::{BoneTrack, Keyframe};
+        use skeletal_assets::math::Transform;
+        let mut a = Keyframe::linear(0.25, Transform::IDENTITY);
+        a.translation_interpolation = KeyInterpolation::CubicSpline;
+        a.out_tangent.translation[1] = 1.0;
+        let mut b = Keyframe::linear(0.75, Transform::IDENTITY);
+        b.in_tangent.translation[1] = 1.0;
+        let clip = AnimationClip {
+            name: "cubic".into(),
+            duration: 1.0,
+            fps: 30.0,
+            tracks: vec![BoneTrack {
+                bone_id: "root".into(),
+                keyframes: vec![a, b],
+            }],
+        };
+        let keys = HashSet::new();
+        let scene = scene_fixture(&clip, &[0], &keys);
+        let controls: Vec<_> = scene
+            .build_rects()
+            .into_iter()
+            .filter(|r| r.size == [4.0, 4.0] && r.border == 0.75)
+            .collect();
+        assert_eq!(controls.len(), 2);
+        let lane_y = scene.row_top(0) + ROW_HEIGHT * 0.5 - 5.0;
+        assert!(
+            controls[0].pos[1] + 2.0 < lane_y,
+            "outgoing positive slope goes up to the right"
+        );
+        assert!(
+            controls[1].pos[1] + 2.0 > lane_y,
+            "incoming positive slope comes from below to the left"
+        );
     }
 
     #[test]

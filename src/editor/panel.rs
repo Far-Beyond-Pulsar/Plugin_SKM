@@ -144,12 +144,12 @@ impl Default for ViewOptions {
 }
 
 /// One copied keyframe: its track, time relative to the earliest copied key,
-/// and pose.
+/// and complete interpolation data.
 #[derive(Clone)]
 pub struct ClipKey {
     pub bone_id: String,
     pub dt: f32,
-    pub transform: Transform,
+    pub keyframe: Keyframe,
 }
 
 /// Snapshot taken when a keyframe drag begins; every move is computed from it
@@ -1012,18 +1012,12 @@ impl SkeletalAnimEditorPanel {
             .position(|k| (k.time - time).abs() < KEYFRAME_EPS)
         {
             Some(i) => {
-                track.keyframes[i].transform = transform;
+                track.keyframes[i].set_transform(transform);
                 i
             }
             None => {
-                let pos = track
-                    .keyframes
-                    .iter()
-                    .position(|k| k.time > time)
-                    .unwrap_or(track.keyframes.len());
-                track
-                    .keyframes
-                    .insert(pos, Keyframe::linear(time, transform));
+                let pos = track.insert_keyframe(time, transform.clone());
+                track.keyframes[pos].set_transform(transform);
                 pos
             }
         };
@@ -1221,18 +1215,12 @@ impl SkeletalAnimEditorPanel {
             .position(|k| (k.time - time).abs() < KEYFRAME_EPS)
         {
             Some(i) => {
-                track.keyframes[i].transform = transform;
+                track.keyframes[i].set_transform(transform);
                 i
             }
             None => {
-                let pos = track
-                    .keyframes
-                    .iter()
-                    .position(|k| k.time > time)
-                    .unwrap_or(track.keyframes.len());
-                track
-                    .keyframes
-                    .insert(pos, Keyframe::linear(time, transform));
+                let pos = track.insert_keyframe(time, transform.clone());
+                track.keyframes[pos].set_transform(transform);
                 pos
             }
         }
@@ -1443,25 +1431,25 @@ impl SkeletalAnimEditorPanel {
 
     /// Copy the selected keys to the editor clipboard.
     pub fn copy_selected_keyframes(&mut self) {
-        let mut keys: Vec<(String, f32, Transform)> = self
+        let mut keys: Vec<(String, Keyframe)> = self
             .selected_keyframes
             .iter()
             .filter_map(|(bone, i)| {
                 let kf = self.animation.track(bone)?.keyframes.get(*i)?;
-                Some((bone.clone(), kf.time, kf.transform.clone()))
+                Some((bone.clone(), kf.clone()))
             })
             .collect();
         if keys.is_empty() {
             return;
         }
-        keys.sort_by(|a, b| a.1.total_cmp(&b.1));
-        let origin = keys[0].1;
+        keys.sort_by(|a, b| a.1.time.total_cmp(&b.1.time));
+        let origin = keys[0].1.time;
         self.clipboard = keys
             .into_iter()
-            .map(|(bone_id, time, transform)| ClipKey {
+            .map(|(bone_id, keyframe)| ClipKey {
                 bone_id,
-                dt: time - origin,
-                transform,
+                dt: keyframe.time - origin,
+                keyframe,
             })
             .collect();
     }
@@ -1487,7 +1475,21 @@ impl SkeletalAnimEditorPanel {
             .into_iter()
             .map(|key| {
                 let time = origin + key.dt;
-                self.upsert_key(&key.bone_id, time, key.transform);
+                if self.animation.track(&key.bone_id).is_none() {
+                    self.animation.tracks.push(BoneTrack {
+                        bone_id: key.bone_id.clone(),
+                        keyframes: Vec::new(),
+                    });
+                }
+                let track = self.animation.track_mut(&key.bone_id).unwrap();
+                let mut frame = key.keyframe;
+                frame.time = time;
+                let index = track.keyframes.partition_point(|k| k.time < time);
+                if track.keyframes.get(index).is_some_and(|k| k.time == time) {
+                    track.keyframes[index] = frame;
+                } else {
+                    track.keyframes.insert(index, frame);
+                }
                 (key.bone_id, time)
             })
             .collect();
@@ -1495,7 +1497,14 @@ impl SkeletalAnimEditorPanel {
         // Indices shift as keys are inserted, so resolve them at the end.
         let selection: HashSet<(String, usize)> = pasted
             .iter()
-            .filter_map(|(bone, time)| self.key_index_at(bone, *time).map(|i| (bone.clone(), i)))
+            .filter_map(|(bone, time)| {
+                self.animation
+                    .track(bone)?
+                    .keyframes
+                    .iter()
+                    .position(|k| k.time == *time)
+                    .map(|i| (bone.clone(), i))
+            })
             .collect();
         let last = pasted.iter().map(|(_, t)| *t).fold(0.0_f32, f32::max);
         if last > self.animation.duration {
@@ -1708,7 +1717,7 @@ impl SkeletalAnimEditorPanel {
         if let Some((bone_id, index)) = self.selected_keyframe.clone() {
             if let Some(track) = self.animation.track_mut(&bone_id) {
                 if let Some(kf) = track.keyframes.get_mut(index) {
-                    kf.transform = transform;
+                    kf.set_transform(transform);
                     self.is_dirty = true;
                 }
             }
@@ -1755,7 +1764,7 @@ impl SkeletalAnimEditorPanel {
                 .track_mut(bone)
                 .and_then(|t| t.keyframes.get_mut(*index))
             {
-                key.transform = transform;
+                key.set_transform(transform);
                 self.is_dirty = true;
             }
         }

@@ -16,6 +16,12 @@ pub enum KeyInterpolation {
     CubicSpline,
 }
 
+impl KeyInterpolation {
+    fn is_linear(&self) -> bool {
+        *self == Self::Linear
+    }
+}
+
 /// Per-second glTF spline tangents, stored as components so quaternion tangents
 /// survive the `.animseq` round trip without being converted to Euler angles.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -28,29 +34,45 @@ pub struct KeyframeTangent {
     pub scale: [f32; 3],
 }
 
+impl KeyframeTangent {
+    fn is_zero(&self) -> bool {
+        self.translation == [0.0; 3] && self.rotation == [0.0; 4] && self.scale == [0.0; 3]
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Keyframe {
     /// Time in seconds.
     pub time: f32,
     pub transform: Transform,
     /// Interpolation from this key to the next, independently per channel.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "KeyInterpolation::is_linear")]
     pub translation_interpolation: KeyInterpolation,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "KeyInterpolation::is_linear")]
     pub rotation_interpolation: KeyInterpolation,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "KeyInterpolation::is_linear")]
     pub scale_interpolation: KeyInterpolation,
     /// Cubic spline tangents. Linear/step keys ignore these values.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "KeyframeTangent::is_zero")]
     pub in_tangent: KeyframeTangent,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "KeyframeTangent::is_zero")]
     pub out_tangent: KeyframeTangent,
-    /// Original quaternion value for cubic rotation sampling.
-    #[serde(default)]
+    /// Quaternion components `[x, y, z, w]`. Cubic subdivision keys keep
+    /// the raw polynomial value: normalize only after interpolation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation_quaternion: Option<[f32; 4]>,
 }
 
 impl Keyframe {
+    pub(crate) fn has_interpolation_data(&self) -> bool {
+        self.translation_interpolation != KeyInterpolation::Linear
+            || self.rotation_interpolation != KeyInterpolation::Linear
+            || self.scale_interpolation != KeyInterpolation::Linear
+            || self.rotation_quaternion.is_some()
+            || !self.in_tangent.is_zero()
+            || !self.out_tangent.is_zero()
+    }
+
     pub fn linear(time: f32, transform: Transform) -> Self {
         Self {
             time,
@@ -63,6 +85,30 @@ impl Keyframe {
             rotation_quaternion: None,
         }
     }
+
+    /// Change an authored pose without leaving an imported quaternion stale.
+    /// Translation/scale edits retain the raw quaternion and all derivatives.
+    pub fn set_transform(&mut self, transform: Transform) {
+        if transform.rotation != self.transform.rotation {
+            if let Some(previous) = self.rotation_quaternion {
+                let mut q = quaternion_from_euler(transform.rotation);
+                // Keep the authored hemisphere; a sign flip changes a cubic.
+                if q.dot(glam::Quat::from_array(previous)) < 0.0 {
+                    q = -q;
+                }
+                self.rotation_quaternion = Some(q.to_array());
+            }
+        }
+        self.transform = transform;
+    }
+
+    fn sampled_transform(&self) -> Transform {
+        let mut transform = self.transform.clone();
+        if let Some(q) = self.rotation_quaternion.and_then(normalize_quaternion) {
+            transform.rotation = Transform::from_trs([0.0; 3], q.to_array(), [1.0; 3]).rotation;
+        }
+        transform
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -72,6 +118,111 @@ pub struct BoneTrack {
 }
 
 impl BoneTrack {
+    /// Insert a pose key without changing the curve on either side. Cubic
+    /// segments are split using their raw values and time derivatives.
+    pub fn insert_keyframe(&mut self, time: f32, fallback: Transform) -> usize {
+        let pos = self.keyframes.partition_point(|k| k.time < time);
+        if self.keyframes.get(pos).is_some_and(|k| k.time == time) {
+            return pos;
+        }
+        let mut key = Keyframe::linear(time, self.sample(time).unwrap_or(fallback));
+        if pos > 0 && pos < self.keyframes.len() {
+            let (a, b) = (&self.keyframes[pos - 1], &self.keyframes[pos]);
+            let span = b.time - a.time;
+            if span.is_finite() && span > 0.0 {
+                let t = (time - a.time) / span;
+                key.translation_interpolation = a.translation_interpolation;
+                key.rotation_interpolation = a.rotation_interpolation;
+                key.scale_interpolation = a.scale_interpolation;
+                for i in 0..3 {
+                    if a.translation_interpolation == KeyInterpolation::CubicSpline {
+                        key.in_tangent.translation[i] = hermite_derivative(
+                            a.transform.translation.to_array()[i],
+                            b.transform.translation.to_array()[i],
+                            a.out_tangent.translation[i],
+                            b.in_tangent.translation[i],
+                            t,
+                            span,
+                        );
+                    }
+                    if a.scale_interpolation == KeyInterpolation::CubicSpline {
+                        key.in_tangent.scale[i] = hermite_derivative(
+                            a.transform.scale.to_array()[i],
+                            b.transform.scale.to_array()[i],
+                            a.out_tangent.scale[i],
+                            b.in_tangent.scale[i],
+                            t,
+                            span,
+                        );
+                    }
+                }
+                if let (Some(qa), Some(qb)) = (a.rotation_quaternion, b.rotation_quaternion) {
+                    key.rotation_quaternion = Some(
+                        if a.rotation_interpolation == KeyInterpolation::CubicSpline {
+                            std::array::from_fn(|i| {
+                                hermite(
+                                    qa[i],
+                                    qb[i],
+                                    a.out_tangent.rotation[i],
+                                    b.in_tangent.rotation[i],
+                                    t,
+                                    span,
+                                )
+                            })
+                        } else {
+                            quaternion_from_euler(key.transform.rotation).to_array()
+                        },
+                    );
+                    if a.rotation_interpolation == KeyInterpolation::CubicSpline {
+                        key.in_tangent.rotation = std::array::from_fn(|i| {
+                            hermite_derivative(
+                                qa[i],
+                                qb[i],
+                                a.out_tangent.rotation[i],
+                                b.in_tangent.rotation[i],
+                                t,
+                                span,
+                            )
+                        });
+                    }
+                }
+                key.out_tangent = key.in_tangent;
+            }
+        } else {
+            // Extend the held endpoint. Linear/step keep their legacy modes;
+            // only a cubic's unused endpoint tangents must not extrapolate.
+            if let Some(last) = self.keyframes.last_mut().filter(|_| pos > 0) {
+                if last.translation_interpolation == KeyInterpolation::CubicSpline {
+                    last.translation_interpolation = KeyInterpolation::Step;
+                }
+                if last.rotation_interpolation == KeyInterpolation::CubicSpline {
+                    last.rotation_interpolation = KeyInterpolation::Step;
+                }
+                if last.scale_interpolation == KeyInterpolation::CubicSpline {
+                    last.scale_interpolation = KeyInterpolation::Step;
+                }
+                key.translation_interpolation = last.translation_interpolation;
+                key.rotation_interpolation = last.rotation_interpolation;
+                key.scale_interpolation = last.scale_interpolation;
+                key.rotation_quaternion = last.rotation_quaternion;
+            } else if let Some(first) = self.keyframes.first() {
+                key.rotation_quaternion = first.rotation_quaternion;
+                let held = |mode| {
+                    if mode == KeyInterpolation::CubicSpline {
+                        KeyInterpolation::Step
+                    } else {
+                        mode
+                    }
+                };
+                key.translation_interpolation = held(first.translation_interpolation);
+                key.rotation_interpolation = held(first.rotation_interpolation);
+                key.scale_interpolation = held(first.scale_interpolation);
+            }
+        }
+        self.keyframes.insert(pos, key);
+        pos
+    }
+
     /// Sample the track's transform at `time`, holding the nearest keyframe
     /// outside the track's range and applying each channel's interpolation
     /// mode between surrounding keys.
@@ -80,22 +231,27 @@ impl BoneTrack {
         if kfs.is_empty() {
             return None;
         }
-        if kfs.len() == 1 || time <= kfs[0].time {
-            return Some(kfs[0].transform.clone());
+        if kfs.len() == 1 || time.is_nan() || time <= kfs[0].time {
+            return Some(kfs[0].sampled_transform());
         }
         if time >= kfs[kfs.len() - 1].time {
-            return Some(kfs[kfs.len() - 1].transform.clone());
+            return Some(kfs[kfs.len() - 1].sampled_transform());
         }
-        for i in 0..kfs.len() - 1 {
-            let a = &kfs[i];
-            let b = &kfs[i + 1];
+        for pair in kfs.windows(2) {
+            let (a, b) = (&pair[0], &pair[1]);
             if time >= a.time && time <= b.time {
-                let span = (b.time - a.time).max(1e-6);
-                let t = (time - a.time) / span;
-                return Some(sample_pair(a, b, t, span));
+                if time == b.time {
+                    return Some(b.sampled_transform());
+                }
+                let span = b.time - a.time;
+                return Some(if span.is_finite() && span > 0.0 {
+                    sample_pair(a, b, (time - a.time) / span, span)
+                } else {
+                    a.sampled_transform()
+                });
             }
         }
-        Some(kfs[kfs.len() - 1].transform.clone())
+        Some(kfs[kfs.len() - 1].sampled_transform())
     }
 }
 
@@ -161,39 +317,98 @@ fn sample_pair(a: &Keyframe, b: &Keyframe, t: f32, span: f32) -> Transform {
             ),
         );
     }
-    if a.rotation_interpolation == KeyInterpolation::Step {
-        result.rotation = a.transform.rotation;
-    } else if a.rotation_interpolation == KeyInterpolation::CubicSpline {
-        if let (Some(qa), Some(qb)) = (a.rotation_quaternion, b.rotation_quaternion) {
-            let mut q = [0.0; 4];
-            for (i, value) in q.iter_mut().enumerate() {
-                *value = hermite(
-                    qa[i],
-                    qb[i],
-                    a.out_tangent.rotation[i],
-                    b.in_tangent.rotation[i],
-                    t,
-                    span,
-                );
-            }
-            let length = q.iter().map(|v| v * v).sum::<f32>().sqrt();
-            if length > 1e-8 {
-                q.iter_mut().for_each(|v| *v /= length);
-                result =
-                    Transform::from_trs(result.translation.to_array(), q, result.scale.to_array());
-            }
-        }
+    if let (Some(qa), Some(qb)) = (a.rotation_quaternion, b.rotation_quaternion) {
+        let fallback = || {
+            normalize_quaternion(qa).unwrap_or_else(|| quaternion_from_euler(a.transform.rotation))
+        };
+        let q = match a.rotation_interpolation {
+            KeyInterpolation::Step => fallback(),
+            KeyInterpolation::Linear => normalize_quaternion(qb)
+                .map(|qb| crate::runtime::pose::slerp_short(fallback(), qb, t))
+                .unwrap_or_else(fallback),
+            KeyInterpolation::CubicSpline => cubic_quaternion(
+                qa,
+                qb,
+                a.out_tangent.rotation,
+                b.in_tangent.rotation,
+                t,
+                span,
+            )
+            .unwrap_or_else(fallback),
+        };
+        result.rotation = Transform::from_trs([0.0; 3], q.to_array(), [1.0; 3]).rotation;
+    } else if a.rotation_interpolation == KeyInterpolation::Step
+        || a.rotation_interpolation == KeyInterpolation::CubicSpline
+    {
+        result.rotation = a.sampled_transform().rotation;
     }
     result
 }
 
-fn hermite(a: f32, b: f32, outgoing: f32, incoming: f32, t: f32, span: f32) -> f32 {
+/// Convert just the rotation: zero/negative scales must not affect it.
+pub(crate) fn quaternion_from_euler(rotation: Vec3) -> glam::Quat {
+    glam::Quat::from_mat4(&glam::Mat4::from_cols_array(
+        &Mat4::from_euler_xyz_deg(rotation).0,
+    ))
+}
+
+#[inline]
+pub(crate) fn normalize_quaternion(q: [f32; 4]) -> Option<glam::Quat> {
+    let value = glam::Quat::from_array(q);
+    let length = value.length();
+    if length.is_finite() {
+        return (length > 1e-8).then(|| value / length);
+    }
+    // Large finite components can overflow the squared length. Rescale only
+    // in that uncommon case; NaN/Inf inputs use the caller's fallback.
+    if value.is_finite() {
+        let largest = q.iter().map(|v| v.abs()).fold(0.0, f32::max);
+        return Some((value / largest).normalize());
+    }
+    None
+}
+
+#[inline]
+pub(crate) fn cubic_quaternion(
+    a: [f32; 4],
+    b: [f32; 4],
+    outgoing: [f32; 4],
+    incoming: [f32; 4],
+    t: f32,
+    span: f32,
+) -> Option<glam::Quat> {
+    // glTF specifies component-wise Hermite, followed by normalization.
+    // No hemisphere correction, slerp or tangent normalization here.
+    normalize_quaternion(std::array::from_fn(|i| {
+        hermite_value(a[i], b[i], outgoing[i], incoming[i], t, span)
+    }))
+}
+
+#[inline]
+pub(crate) fn hermite(a: f32, b: f32, outgoing: f32, incoming: f32, t: f32, span: f32) -> f32 {
+    let value = hermite_value(a, b, outgoing, incoming, t, span);
+    if value.is_finite() {
+        value
+    } else {
+        a
+    }
+}
+
+#[inline]
+fn hermite_value(a: f32, b: f32, outgoing: f32, incoming: f32, t: f32, span: f32) -> f32 {
     let t2 = t * t;
     let t3 = t2 * t;
     (2.0 * t3 - 3.0 * t2 + 1.0) * a
         + (t3 - 2.0 * t2 + t) * span * outgoing
         + (-2.0 * t3 + 3.0 * t2) * b
         + (t3 - t2) * span * incoming
+}
+
+fn hermite_derivative(a: f32, b: f32, outgoing: f32, incoming: f32, t: f32, span: f32) -> f32 {
+    let t2 = t * t;
+    ((6.0 * t2 - 6.0 * t) * a + (-6.0 * t2 + 6.0 * t) * b) / span
+        + (3.0 * t2 - 4.0 * t + 1.0) * outgoing
+        + (3.0 * t2 - 2.0 * t) * incoming
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -206,6 +421,38 @@ pub struct AnimationClip {
 }
 
 impl AnimationClip {
+    pub(crate) fn validate_keys(&self) -> Result<(), String> {
+        for track in &self.tracks {
+            for key in &track.keyframes {
+                let finite = key.time.is_finite()
+                    && key
+                        .transform
+                        .translation
+                        .to_array()
+                        .iter()
+                        .chain(&key.transform.rotation.to_array())
+                        .chain(&key.transform.scale.to_array())
+                        .chain(&key.in_tangent.translation)
+                        .chain(&key.in_tangent.rotation)
+                        .chain(&key.in_tangent.scale)
+                        .chain(&key.out_tangent.translation)
+                        .chain(&key.out_tangent.rotation)
+                        .chain(&key.out_tangent.scale)
+                        .all(|v| v.is_finite())
+                    && key
+                        .rotation_quaternion
+                        .is_none_or(|q| q.iter().all(|v| v.is_finite()));
+                if !finite {
+                    return Err(format!(
+                        "track '{}' has a non-finite key value, time or tangent",
+                        track.bone_id
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// A clip with no tracks: every bone holds its bind pose. What a skeleton
     /// or a skeletal mesh is shown with when nothing animates it.
     pub fn bind_pose() -> Self {
