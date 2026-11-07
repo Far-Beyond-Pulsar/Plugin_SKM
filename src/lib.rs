@@ -441,3 +441,8 @@ mod tests {
         assert_eq!(skeletal_assets::dependencies::extension_of(pulsar_reflection::AnimationMontageAssetKind::KIND), Some("montage"));
     }
 }
+
+
+/// The plugin's editor provider, submitted to the editor (origin-gated).
+#[cfg(feature = "builtin")]
+mod builtin_provider;

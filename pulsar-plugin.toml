@@ -1,0 +1,15 @@
+# The `pulsar.animation` plugin's descriptor. A project enables or disables it in
+# its Pulsar.toml (`[plugins]`); disabled, its editors and file types are
+# absent (see crates/core/pulsar_plugins). Its first module carries this file
+# (`pulsar_plugins::installed!`): the runtime module, `animation_component`.
+id = "pulsar.animation"
+name = "Animation"
+description = "Skeletons, the animator, skeletal meshes and animation assets (sequences, blend spaces, montages, graphs, IK rigs, retargets, pose databases) and their editors"
+enabled_by_default = true
+requires = []
+
+[modules]
+# What a game built for the project links.
+runtime = ["animation_component"]
+# What the editor links in addition.
+editor = ["skeletal_animation_plugin"]

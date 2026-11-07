@@ -14,6 +14,9 @@ name = "skeletal_animation_plugin"
 builtin = []
 
 [dependencies]
+# The plugin's descriptor and its editor provider's registration.
+pulsar_plugins = { workspace = true }
+plugin_manager = { workspace = true }
 gpui-ce = { workspace = true }
 ui      = { workspace = true }
 
