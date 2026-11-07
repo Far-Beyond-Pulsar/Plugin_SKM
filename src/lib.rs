@@ -441,3 +441,10 @@ mod tests {
         assert_eq!(skeletal_assets::dependencies::extension_of(pulsar_reflection::AnimationMontageAssetKind::KIND), Some("montage"));
     }
 }
+
+// This plugin's descriptor (`pulsar-plugin.toml`): linking the crate installs it.
+pulsar_plugins::installed!("pulsar-plugin.toml");
+
+/// The plugin's editor provider, submitted to the editor (origin-gated).
+#[cfg(feature = "builtin")]
+mod builtin_provider;
