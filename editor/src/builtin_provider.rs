@@ -1,5 +1,7 @@
 //! The plugin's editor provider: its file types and editors, offered to
-//! the editor while the plugin is enabled (`plugin_manager::PluginEditorProvider`).
+//! the editor while the plugin is enabled. The plugin's root crate
+//! (`skeletal_animation_plugin`, with its `editor` feature) submits it as a
+//! `plugin_manager::PluginEditorProvider`.
 
 use gpui::{App, Window};
 use plugin_editor_api::*;
@@ -8,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use ui::dock::PanelView;
 
-/// Wraps the skeletal_animation_plugin crate as a built-in editor provider.
+/// Wraps this crate's editors as a built-in editor provider.
 /// Opens `.skeleton`, `.skmesh` and `.animseq` files (and old `.skelanim`
 /// folders, which are converted) in the Skeleton, Skeletal Mesh and Animation
 /// Sequence editors, and each higher-level animation asset (`.blendspace`,
@@ -16,9 +18,19 @@ use ui::dock::PanelView;
 /// `.posedb`) in its own editor.
 pub struct SkeletalAnimationBuiltinProvider;
 
+impl SkeletalAnimationBuiltinProvider {
+    /// The provider's id ([`BuiltinEditorProvider::provider_id`]).
+    pub const ID: &'static str = "com.pulsar.skeletal-animation-editor";
+
+    /// The provider, as the root's registration creates it.
+    pub fn create() -> Arc<dyn BuiltinEditorProvider> {
+        Arc::new(Self)
+    }
+}
+
 impl BuiltinEditorProvider for SkeletalAnimationBuiltinProvider {
     fn provider_id(&self) -> &str {
-        "com.pulsar.skeletal-animation-editor"
+        Self::ID
     }
 
     fn file_types(&self) -> Vec<FileTypeDefinition> {
@@ -41,12 +53,7 @@ impl BuiltinEditorProvider for SkeletalAnimationBuiltinProvider {
         cx: &mut App,
     ) -> Result<Arc<dyn PanelView>, PluginError> {
         let undo = editor_context.services.undo.clone();
-        crate::SkeletalAnimationPlugin::create_editor_with_undo(
-            file_path,
-            Some(&undo),
-            window,
-            cx,
-        )
+        crate::SkeletalAnimationPlugin::create_editor_with_undo(file_path, Some(&undo), window, cx)
     }
 
     fn create_editor_for(
@@ -65,12 +72,5 @@ impl BuiltinEditorProvider for SkeletalAnimationBuiltinProvider {
             window,
             cx,
         )
-    }
-}
-
-plugin_manager::inventory::submit! {
-    plugin_manager::PluginEditorProvider {
-        origin: pulsar_plugins::origin!(),
-        create: || Arc::new(SkeletalAnimationBuiltinProvider),
     }
 }

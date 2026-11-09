@@ -2,52 +2,38 @@
 name = "skeletal_animation_plugin"
 version = "0.1.0"
 edition = "2021"
-description = "Skeletal animation editor for the Pulsar editor"
-
-[lib]
-crate-type = ["cdylib", "rlib"]
-name = "skeletal_animation_plugin"
+publish = false
+description = "Animation (`pulsar.animation`): the plugin's root crate, the one place it registers everything it contributes (runtime registrations always, the editor's with `editor`)"
+autoexamples = false
 
 [features]
-# Pulsar statically links this crate when it is used as a built-in editor.
-# Dynamic plugin builds keep the loader ABI exports by default.
-builtin = []
+# The editor's registration (the animation editors' provider) and the crates
+# it needs. A game links the root without it, so it takes no editor
+# dependency.
+editor = ["dep:skeletal_animation_editor", "dep:plugin_manager"]
 
 [dependencies]
-# The plugin's descriptor and its editor provider's registration.
+# The plugin gate and the registrations' collection.
 pulsar_plugins = { workspace = true }
-plugin_manager = { workspace = true }
-gpui-ce = { workspace = true }
-ui      = { workspace = true }
-
-plugin_editor_api = { workspace = true }
-skeletal_assets   = { workspace = true }
-ui_common         = { workspace = true }
-engine_fs         = { workspace = true }
-pulsar_reflection = { workspace = true }
-pulsar_physics = { workspace = true }
-
-# The animation graph editor draws and edits on the shared Graphy canvas.
-graphy-blueprint = { workspace = true }
-graphy = { workspace = true }
-graphy-render = { path = "../../../crates/third-party/graphy/crates/graphy-render" }
-graphy-gpui = { path = "../../../crates/third-party/graphy/crates/graphy-gpui", features = ["gpui"] }
-
-uuid       = { workspace = true }
-smol       = { workspace = true }
-log        = { workspace = true }
-tracing    = { workspace = true }
-serde      = { workspace = true }
-serde_json = { workspace = true }
-anyhow     = { workspace = true }
-wgpu       = { workspace = true }
-image      = { workspace = true }
-smallvec   = { workspace = true }
-bytemuck   = { workspace = true }
+inventory = { workspace = true }
+# The plugin's crates.
+animation_component = { workspace = true }
+skeletal_animation_editor = { workspace = true, optional = true }
+# The engine seams the plugin registers into (the game's slim feature set).
+engine_backend = { path = "../../../crates/core/engine_backend", default-features = false, features = ["render"] }
+helio_component = { workspace = true }
+pulsar_class = { workspace = true }
+pulsar_events = { workspace = true }
+pulsar_scenedb = { workspace = true }
+pulsar_world_registry = { workspace = true }
+# The editor's extension points.
+plugin_manager = { workspace = true, optional = true }
 
 [dev-dependencies]
-# exercise editor commands and panel rendering without a display server.
-gpui-ce = { workspace = true, features = ["test-support"] }
-tempfile = { workspace = true }
-# Validates the WGSL sources offline with the same front end wgpu uses.
-naga = { version = "30", features = ["wgsl-in"] }
+# The plugin's integration tests (`tests/`): the plugin as a game links it.
+pulsar_game = { path = "../../../crates/core/pulsar_game" }
+skeletal_assets = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

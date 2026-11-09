@@ -62,10 +62,10 @@ Run inside a current Pulsar-Native workspace with this plugin at
 `plugins/vendor/skm_editor`:
 
 ```sh
-cargo check -p skeletal_assets -p skeletal_animation_plugin --all-targets --locked
-cargo test -p skeletal_assets -p skeletal_animation_plugin --locked
-cargo clippy -p skeletal_assets -p skeletal_animation_plugin --all-targets --no-deps
-cargo test -p skeletal_animation_plugin --lib -- --ignored \
+cargo check -p skeletal_assets -p skeletal_animation_editor --all-targets --locked
+cargo test -p skeletal_assets -p skeletal_animation_editor --locked
+cargo clippy -p skeletal_assets -p skeletal_animation_editor --all-targets --no-deps
+cargo test -p skeletal_animation_editor --lib -- --ignored \
   --skip skinning_geometry_benchmark --skip skinning_render_benchmark \
   --nocapture --test-threads=1
 ```
@@ -90,12 +90,12 @@ assets remain outside the repository. Set `SKM_PREVIEW_DIR` to save render PNGs.
 For optimized benchmarks, select the two ignored benchmark tests separately:
 
 ```sh
-cargo test -p skeletal_animation_plugin \
-  --config 'profile.dev.package.skeletal_animation_plugin.opt-level=3' \
+cargo test -p skeletal_animation_editor \
+  --config 'profile.dev.package.skeletal_animation_editor.opt-level=3' \
   --config 'profile.dev.package.skeletal_assets.opt-level=3' \
   skinning_geometry_benchmark -- --ignored --nocapture
-cargo test -p skeletal_animation_plugin \
-  --config 'profile.dev.package.skeletal_animation_plugin.opt-level=3' \
+cargo test -p skeletal_animation_editor \
+  --config 'profile.dev.package.skeletal_animation_editor.opt-level=3' \
   --config 'profile.dev.package.skeletal_assets.opt-level=3' \
   skinning_render_benchmark -- --ignored --nocapture
 ```

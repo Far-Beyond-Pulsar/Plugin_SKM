@@ -6,17 +6,19 @@
 //!   of the skinned mesh it drives, raises the notifies its assets declare,
 //!   and shows its pose on that mesh
 //!   (`helio_component::skinning::SkinnedMeshAccess`, the meshes').
-//! - What the engine runs for it, each through a generic registration: the
-//!   animation phase and the notifies (`TickPhaseRegistration`,
-//!   `ComponentEventsRegistration`), the pose a physics rig reads and drives
-//!   (`helio_component::skinning::SkeletalPoseAccess`) and the record
-//!   migration that split the animator from the skinned mesh ([`records`]).
+//! - What the engine runs for it: the animation phase and the notifies
+//!   ([`run_animation_phase`], [`flush_animation_notifies`],
+//!   [`component_animation_notify_events`]), the pose a physics rig reads and
+//!   drives ([`AnimationComponent::apply_physics_bones`], [`show_pose`]) and
+//!   the record migration that split the animator from the skinned mesh
+//!   ([`records`]).
 //!
-//! Everything registers through `inventory` once the crate is linked.
-
-// The plugin's descriptor (`../pulsar-plugin.toml`): linking this crate
-// installs the plugin; a project enables it or not (`pulsar_plugins`).
-pulsar_plugins::installed!("../pulsar-plugin.toml");
+//! This crate registers no plugin contribution: the plugin's root crate
+//! (`skeletal_animation_plugin`) submits the component class, the tick phase,
+//! the notify catalog, the asset-change hook, the skeletal pose access and
+//! the record migration.
+//! Type attachments stay with the type (its handle ledger entry, reflected
+//! methods, scene-props applier and component events).
 
 pub mod anim_source;
 mod component;
@@ -24,81 +26,8 @@ pub mod records;
 
 pub use component::*;
 
-use pulsar_scenedb::World;
-
-// The animation: its phase before the game's systems (physics reads this
-// frame's pose), its notifies after the scripts.
-inventory::submit! {
-    engine_backend::scene::game_hooks::TickPhaseRegistration {
-        origin: pulsar_plugins::origin!(),
-        name: "skeletal_animation",
-        before_systems: Some(run_animation_phase),
-        after_scripts: Some(publish_animation_notifies),
-    }
-}
-
-fn publish_animation_notifies(
-    world: &mut World,
-    hub: &pulsar_events::EventHub,
-    resolve: engine_backend::scene::game_hooks::ScriptVariableResolver,
-) {
-    flush_animation_notifies(world, hub, resolve);
-}
-
-// A physics rig reads and drives the animated pose
-// (`helio_component::skinning`).
-inventory::submit! {
-    helio_component::skinning::SkeletalPoseAccess {
-        origin: pulsar_plugins::origin!(),
-        component: pulsar_scenedb::component_id::<AnimationComponent>,
-        pose: |world, instance| {
-            let animator = world.get::<AnimationComponent>(instance)?;
-            Some(helio_component::skinning::SkeletalPose {
-                mesh: animator.mesh.clone(),
-                bone_ids: animator.bone_ids.to_vec(),
-                bone_world_pose: animator.bone_world_pose.clone(),
-            })
-        },
-        drive_bones: |world, instance, bones| {
-            let driven = world
-                .get_mut::<AnimationComponent>(instance)
-                .is_some_and(|mut animator| animator.apply_physics_bones(bones));
-            show_pose(world, instance);
-            driven
-        },
-        release_bones: |world, instance| {
-            if let Some(mut animator) = world.get_mut::<AnimationComponent>(instance) {
-                animator.clear_physics_pose();
-            }
-            show_pose(world, instance);
-        },
-    }
-}
-
-// An animator's events are the notifies its animation assets declare.
-inventory::submit! {
-    engine_backend::scene::ComponentEventsRegistration {
-        origin: pulsar_plugins::origin!(),
-        class_name: ANIMATION_COMPONENT,
-        events: |root, assets| {
-            let catalog = component_animation_notify_events(root, assets);
-            engine_backend::scene::ComponentEventCatalog {
-                events: catalog.events,
-                diagnostics: catalog
-                    .diagnostics
-                    .into_iter()
-                    .map(|diagnostic| (diagnostic.path, diagnostic.error))
-                    .collect(),
-            }
-        },
-    }
-}
-
-// A changed animation asset file recompiles the running graphs that depend on it
-// (a sequence, Blend Space, rig or Montage the graph names).
-inventory::submit! {
-    engine_backend::scene::game_hooks::AssetChangedRegistration {
-        origin: pulsar_plugins::origin!(),
-        on_changed: animation_asset_changed,
-    }
-}
+// The unit tests attach animators to worlds, which takes a registered class.
+// A test build of this crate does not link the root crate, so it registers
+// the class itself; every other build gets it from the root only.
+#[cfg(test)]
+pulsar_world_registry::submit_world_component!(AnimationComponent);

@@ -1,0 +1,52 @@
+[package]
+name = "skeletal_animation_editor"
+version = "0.1.0"
+edition = "2021"
+description = "Animation (pulsar.animation): the editor crate -- the skeletal animation editors, over the plugin's component crate"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "skeletal_animation_editor"
+
+[features]
+# Pulsar statically links this crate when it is used as a built-in editor.
+# Dynamic plugin builds keep the loader ABI exports by default.
+builtin = []
+
+[dependencies]
+# The editor provider (`builtin_provider`; the root crate registers it).
+plugin_manager = { workspace = true }
+gpui-ce = { workspace = true }
+ui      = { workspace = true }
+
+plugin_editor_api = { workspace = true }
+skeletal_assets   = { workspace = true }
+ui_common         = { workspace = true }
+engine_fs         = { workspace = true }
+pulsar_reflection = { workspace = true }
+pulsar_physics = { workspace = true }
+
+# The animation graph editor draws and edits on the shared Graphy canvas.
+graphy-blueprint = { workspace = true }
+graphy = { workspace = true }
+graphy-render = { path = "../../../../crates/third-party/graphy/crates/graphy-render" }
+graphy-gpui = { path = "../../../../crates/third-party/graphy/crates/graphy-gpui", features = ["gpui"] }
+
+uuid       = { workspace = true }
+smol       = { workspace = true }
+log        = { workspace = true }
+tracing    = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+anyhow     = { workspace = true }
+wgpu       = { workspace = true }
+image      = { workspace = true }
+smallvec   = { workspace = true }
+bytemuck   = { workspace = true }
+
+[dev-dependencies]
+# exercise editor commands and panel rendering without a display server.
+gpui-ce = { workspace = true, features = ["test-support"] }
+tempfile = { workspace = true }
+# Validates the WGSL sources offline with the same front end wgpu uses.
+naga = { version = "30", features = ["wgsl-in"] }

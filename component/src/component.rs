@@ -31,8 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use engine_class_derive::{
-    engine_class, register_component_runtime, register_scene_props_applier,
-    register_world_component,
+    engine_class, register_component_runtime, register_scene_props_applier, world_component,
 };
 use pulsar_reflection::{
     AnimationGraphAssetKind, AnimationMontageAssetKind, AnimationSequenceAssetKind, AssetKind,
@@ -367,7 +366,8 @@ impl ScenePropsProjector for AnimationComponent {
     }
 }
 
-#[register_world_component(
+/// A `World` class; the plugin's root crate registers it.
+#[world_component(
     decode = decode_animation_component,
     property_written = animation_property_written
 )]

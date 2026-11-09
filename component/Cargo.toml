@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 description = "Animation (pulsar.animation): the animator component (graphs, Montages, notifies, root motion, the physics blend), its animation phase and the skeletal pose physics rigs read and drive."
 
-# Hosts (the editor through the plugin crate, the game) link it; everything
-# registers through `inventory` once the crate is linked.
+# The plugin's root crate (`skeletal_animation_plugin`) links it and registers
+# what it defines; this crate registers no plugin contribution.
 [lib]
 name = "animation_component"
 
@@ -16,14 +16,8 @@ default = ["gpu"]
 gpu = []
 
 [dependencies]
-# The plugin's descriptor and its registrations' origin.
-pulsar_plugins = { workspace = true }
-# The tick phase, component events (the game's slim feature set, as the
-# meshes' component).
-engine_backend = { path = "../../../../crates/core/engine_backend", default-features = false, features = ["render"] }
 # The skinned mesh it drives and the pose physics reads (`skinning`).
 helio_component = { workspace = true }
-inventory = { workspace = true }
 # The animation runtime and skeletal formats.
 skeletal_assets = { workspace = true }
 engine_class_derive = { workspace = true }
@@ -36,8 +30,6 @@ pulsar_scenedb_derive = { workspace = true }
 pulsar_world_registry = { workspace = true }
 pulsar_events = { workspace = true }
 pulsar_scene_model = { workspace = true }
-# The level record migration (`pulsar_class::records`).
-pulsar_class = { workspace = true }
 engine_fs = { workspace = true }
 engine_state = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -46,7 +38,6 @@ tracing = { workspace = true }
 glam = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
-pulsar_game = { path = "../../../../crates/core/pulsar_game" }
 tempfile = { workspace = true }
 
 [lints]
