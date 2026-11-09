@@ -7,7 +7,9 @@
 use std::sync::Arc;
 
 use pulsar_reflection::{AnimationSequenceAssetKind, AssetRef};
-use skeletal_assets::blend_space::{BlendAxis, BlendSample, BlendSpaceAsset, EdgePolicy, SampleLoop, SyncMode};
+use skeletal_assets::blend_space::{
+    BlendAxis, BlendSample, BlendSpaceAsset, EdgePolicy, SampleLoop, SyncMode,
+};
 use skeletal_assets::diagnostics::Diagnostic;
 use skeletal_assets::runtime::blendspace::CompiledBlendSpace;
 
@@ -42,19 +44,33 @@ pub struct PlotTransform {
 impl PlotTransform {
     pub fn for_asset(asset: &BlendSpaceAsset, width: f32, height: f32, pad: f32) -> Self {
         let (y_min, y_max) = asset.y_axis.as_ref().map_or((0.0, 1.0), |a| (a.min, a.max));
-        Self { width, height, pad, x_min: asset.x_axis.min, x_max: asset.x_axis.max, y_min, y_max }
+        Self {
+            width,
+            height,
+            pad,
+            x_min: asset.x_axis.min,
+            x_max: asset.x_axis.max,
+            y_min,
+            y_max,
+        }
     }
 
     pub fn to_plot(&self, x: f32, y: f32) -> (f32, f32) {
         let fx = (x - self.x_min) / (self.x_max - self.x_min);
         let fy = (y - self.y_min) / (self.y_max - self.y_min);
-        (self.pad + fx * (self.width - 2.0 * self.pad), self.height - self.pad - fy * (self.height - 2.0 * self.pad))
+        (
+            self.pad + fx * (self.width - 2.0 * self.pad),
+            self.height - self.pad - fy * (self.height - 2.0 * self.pad),
+        )
     }
 
     pub fn from_plot(&self, px: f32, py: f32) -> (f32, f32) {
         let fx = (px - self.pad) / (self.width - 2.0 * self.pad);
         let fy = (self.height - self.pad - py) / (self.height - 2.0 * self.pad);
-        (self.x_min + fx * (self.x_max - self.x_min), self.y_min + fy * (self.y_max - self.y_min))
+        (
+            self.x_min + fx * (self.x_max - self.x_min),
+            self.y_min + fy * (self.y_max - self.y_min),
+        )
     }
 }
 
@@ -68,10 +84,23 @@ pub struct BlendSpaceModel {
 }
 
 impl BlendSpaceModel {
-    pub fn open(store: Arc<dyn DocStore>, path: &std::path::Path, default_text: &str) -> Result<Self, String> {
+    pub fn open(
+        store: Arc<dyn DocStore>,
+        path: &std::path::Path,
+        default_text: &str,
+    ) -> Result<Self, String> {
         let doc = AnimDocument::<BlendSpaceAsset>::open(store, path, default_text)?;
-        let input = (doc.value().x_axis.min, doc.value().y_axis.as_ref().map_or(0.0, |a| a.min));
-        Ok(Self { doc, selection: AnimSelection::None, input, snap_to_grid: true, preview_cache: None })
+        let input = (
+            doc.value().x_axis.min,
+            doc.value().y_axis.as_ref().map_or(0.0, |a| a.min),
+        );
+        Ok(Self {
+            doc,
+            selection: AnimSelection::None,
+            input,
+            snap_to_grid: true,
+            preview_cache: None,
+        })
     }
 
     pub fn asset(&self) -> &BlendSpaceAsset {
@@ -119,11 +148,21 @@ impl BlendSpaceModel {
 
     /// Add a sample at `(x, y)` (axis values), snapped and clamped. A position
     /// already occupied is nudged one grid step so no two samples coincide.
-    pub fn add_sample(&mut self, x: f32, y: f32, sequence: Option<AssetRef<AnimationSequenceAssetKind>>) -> String {
-        let (mut sx, mut sy) = (self.snapped(x, &self.asset().x_axis), self.asset().y_axis.as_ref().map(|a| self.snapped(y, a)));
+    pub fn add_sample(
+        &mut self,
+        x: f32,
+        y: f32,
+        sequence: Option<AssetRef<AnimationSequenceAssetKind>>,
+    ) -> String {
+        let (mut sx, mut sy) = (
+            self.snapped(x, &self.asset().x_axis),
+            self.asset().y_axis.as_ref().map(|a| self.snapped(y, a)),
+        );
         let two_d = self.asset().is_2d();
         let step_x = self.asset().x_axis.span() / self.asset().x_axis.grid_divisions.max(1) as f32;
-        let taken = |s: &BlendSpaceAsset, x: f32, y: Option<f32>| s.samples.iter().any(|o| o.x == x && o.y == y);
+        let taken = |s: &BlendSpaceAsset, x: f32, y: Option<f32>| {
+            s.samples.iter().any(|o| o.x == x && o.y == y)
+        };
         let mut guard = 0;
         while taken(self.asset(), sx, sy) && guard < 1000 {
             sx += step_x;
@@ -145,11 +184,19 @@ impl BlendSpaceModel {
     /// Drag a sample. Consecutive moves of one sample are one undo step until
     /// [`end_gesture`](Self::end_gesture).
     pub fn move_sample(&mut self, id: &str, x: f32, y: f32) -> bool {
-        let Some(index) = self.sample_index(id) else { return false };
+        let Some(index) = self.sample_index(id) else {
+            return false;
+        };
         let nx = self.snapped(x, &self.asset().x_axis);
         let ny = self.asset().y_axis.as_ref().map(|a| self.snapped(y, a));
         // refuse a move onto another sample, which would make weights ambiguous
-        if self.asset().samples.iter().enumerate().any(|(i, o)| i != index && o.x == nx && o.y == ny) {
+        if self
+            .asset()
+            .samples
+            .iter()
+            .enumerate()
+            .any(|(i, o)| i != index && o.x == nx && o.y == ny)
+        {
             return false;
         }
         let key = format!("move:{id}");
@@ -167,14 +214,27 @@ impl BlendSpaceModel {
     }
 
     /// Set a sample's coordinate exactly (typed in the inspector), without snapping.
-    pub fn set_sample_position(&mut self, id: &str, x: Option<f32>, y: Option<f32>) -> Result<(), String> {
+    pub fn set_sample_position(
+        &mut self,
+        id: &str,
+        x: Option<f32>,
+        y: Option<f32>,
+    ) -> Result<(), String> {
         let index = self.sample_index(id).ok_or("no such sample")?;
         let asset = self.asset();
-        let (nx, ny) = (x.unwrap_or(asset.samples[index].x), y.or(asset.samples[index].y));
+        let (nx, ny) = (
+            x.unwrap_or(asset.samples[index].x),
+            y.or(asset.samples[index].y),
+        );
         if !nx.is_finite() || ny.is_some_and(|v| !v.is_finite()) {
             return Err("position must be a number".into());
         }
-        if asset.samples.iter().enumerate().any(|(i, o)| i != index && o.x == nx && o.y == ny) {
+        if asset
+            .samples
+            .iter()
+            .enumerate()
+            .any(|(i, o)| i != index && o.x == nx && o.y == ny)
+        {
             return Err("another sample is already at that position".into());
         }
         let two_d = asset.is_2d();
@@ -188,8 +248,14 @@ impl BlendSpaceModel {
         Ok(())
     }
 
-    pub fn set_sample_sequence(&mut self, id: &str, sequence: Option<AssetRef<AnimationSequenceAssetKind>>) -> bool {
-        let Some(index) = self.sample_index(id) else { return false };
+    pub fn set_sample_sequence(
+        &mut self,
+        id: &str,
+        sequence: Option<AssetRef<AnimationSequenceAssetKind>>,
+    ) -> bool {
+        let Some(index) = self.sample_index(id) else {
+            return false;
+        };
         self.doc.edit("Set sample sequence", None, |a| {
             let changed = a.samples[index].sequence != sequence;
             a.samples[index].sequence = sequence;
@@ -224,7 +290,9 @@ impl BlendSpaceModel {
     }
 
     pub fn set_sample_loop(&mut self, id: &str, looping: SampleLoop) -> bool {
-        let Some(index) = self.sample_index(id) else { return false };
+        let Some(index) = self.sample_index(id) else {
+            return false;
+        };
         self.doc.edit("Set sample looping", None, |a| {
             let changed = a.samples[index].looping != looping;
             a.samples[index].looping = looping;
@@ -233,7 +301,9 @@ impl BlendSpaceModel {
     }
 
     pub fn set_sample_sync_group(&mut self, id: &str, group: Option<String>) -> bool {
-        let Some(index) = self.sample_index(id) else { return false };
+        let Some(index) = self.sample_index(id) else {
+            return false;
+        };
         let group = group.filter(|g| !g.trim().is_empty());
         self.doc.edit("Set sync group", None, |a| {
             let changed = a.samples[index].sync_group != group;
@@ -243,7 +313,9 @@ impl BlendSpaceModel {
     }
 
     pub fn delete_sample(&mut self, id: &str) -> bool {
-        let Some(index) = self.sample_index(id) else { return false };
+        let Some(index) = self.sample_index(id) else {
+            return false;
+        };
         self.doc.apply("Delete sample", |a| {
             a.samples.remove(index);
             if a.sync.leader.as_deref() == Some(id) {
@@ -257,18 +329,30 @@ impl BlendSpaceModel {
     }
 
     /// Edit an axis. Rejected edits leave the document untouched.
-    pub fn set_axis(&mut self, vertical: bool, edit: impl FnOnce(&mut BlendAxis)) -> Result<(), String> {
+    pub fn set_axis(
+        &mut self,
+        vertical: bool,
+        edit: impl FnOnce(&mut BlendAxis),
+    ) -> Result<(), String> {
         if vertical && !self.asset().is_2d() {
             return Err("this is a 1D blend space".into());
         }
         let mut candidate = self.asset().clone();
         {
-            let axis = if vertical { candidate.y_axis.as_mut() } else { Some(&mut candidate.x_axis) };
+            let axis = if vertical {
+                candidate.y_axis.as_mut()
+            } else {
+                Some(&mut candidate.x_axis)
+            };
             edit(axis.ok_or("no vertical axis")?);
         }
         candidate.validate_structure().or_else(|e| {
             // Samples left outside a narrowed axis are a diagnostic, not a refusal.
-            if e.contains("outside") { Ok(()) } else { Err(e) }
+            if e.contains("outside") {
+                Ok(())
+            } else {
+                Err(e)
+            }
         })?;
         let key = format!("axis:{vertical}");
         self.doc.edit("Edit axis", Some(&key), |a| {
@@ -290,22 +374,31 @@ impl BlendSpaceModel {
         if self.asset().is_2d() == two_d {
             return false;
         }
-        self.doc.apply(if two_d { "Make 2D" } else { "Make 1D" }, |a| {
-            if two_d {
-                let y = BlendAxis { name: "Direction".into(), min: -180.0, max: 180.0, ..BlendAxis::default() };
-                let min = y.min;
-                a.y_axis = Some(y);
-                for (i, s) in a.samples.iter_mut().enumerate() {
-                    // spread new coordinates so the samples do not coincide
-                    s.y = Some(min + (i as f32) * 360.0 / a.x_axis.grid_divisions.max(1) as f32 % 360.0);
+        self.doc
+            .apply(if two_d { "Make 2D" } else { "Make 1D" }, |a| {
+                if two_d {
+                    let y = BlendAxis {
+                        name: "Direction".into(),
+                        min: -180.0,
+                        max: 180.0,
+                        ..BlendAxis::default()
+                    };
+                    let min = y.min;
+                    a.y_axis = Some(y);
+                    for (i, s) in a.samples.iter_mut().enumerate() {
+                        // spread new coordinates so the samples do not coincide
+                        s.y = Some(
+                            min + (i as f32) * 360.0 / a.x_axis.grid_divisions.max(1) as f32
+                                % 360.0,
+                        );
+                    }
+                } else {
+                    a.y_axis = None;
+                    for s in &mut a.samples {
+                        s.y = None;
+                    }
                 }
-            } else {
-                a.y_axis = None;
-                for s in &mut a.samples {
-                    s.y = None;
-                }
-            }
-        });
+            });
         if !two_d && matches!(self.selection, AnimSelection::BlendAxis { vertical: true }) {
             self.selection = AnimSelection::None;
         }
@@ -365,22 +458,47 @@ impl BlendSpaceModel {
 
     fn compute_preview(&self) -> BlendPreview {
         let asset = self.asset();
-        let Some(space) = CompiledBlendSpace::layout(asset) else { return BlendPreview::default() };
-        let id_of = |i: usize| asset.samples.get(i).map(|s| s.id.clone()).unwrap_or_default();
+        let Some(space) = CompiledBlendSpace::layout(asset) else {
+            return BlendPreview::default();
+        };
+        let id_of = |i: usize| {
+            asset
+                .samples
+                .get(i)
+                .map(|s| s.id.clone())
+                .unwrap_or_default()
+        };
         BlendPreview {
-            weights: space.solve(self.input.0, self.input.1).into_iter().map(|w| (id_of(w.sample), w.weight)).collect(),
-            triangles: space.triangles().iter().map(|t| [id_of(t[0]), id_of(t[1]), id_of(t[2])]).collect(),
+            weights: space
+                .solve(self.input.0, self.input.1)
+                .into_iter()
+                .map(|w| (id_of(w.sample), w.weight))
+                .collect(),
+            triangles: space
+                .triangles()
+                .iter()
+                .map(|t| [id_of(t[0]), id_of(t[1]), id_of(t[2])])
+                .collect(),
             clamped_input: space.clamp_input(self.input.0, self.input.1),
         }
     }
 
     /// Sample under a plot position, nearest first, within `radius` pixels.
-    pub fn hit_sample(&self, transform: &PlotTransform, px: f32, py: f32, radius: f32) -> Option<String> {
+    pub fn hit_sample(
+        &self,
+        transform: &PlotTransform,
+        px: f32,
+        py: f32,
+        radius: f32,
+    ) -> Option<String> {
         self.asset()
             .samples
             .iter()
             .map(|s| {
-                let (sx, sy) = transform.to_plot(s.x, s.y.unwrap_or(0.5 * (transform.y_min + transform.y_max)));
+                let (sx, sy) = transform.to_plot(
+                    s.x,
+                    s.y.unwrap_or(0.5 * (transform.y_min + transform.y_max)),
+                );
                 (((sx - px).powi(2) + (sy - py).powi(2)).sqrt(), s)
             })
             .filter(|(d, _)| *d <= radius)
@@ -411,7 +529,12 @@ mod tests {
 
     fn model() -> (BlendSpaceModel, MemStore) {
         let store = MemStore::default();
-        let m = BlendSpaceModel::open(Arc::new(store.clone()), std::path::Path::new("l.blendspace"), &BlendSpaceAsset::default().to_text().unwrap()).unwrap();
+        let m = BlendSpaceModel::open(
+            Arc::new(store.clone()),
+            std::path::Path::new("l.blendspace"),
+            &BlendSpaceAsset::default().to_text().unwrap(),
+        )
+        .unwrap();
         (m, store)
     }
 
@@ -427,10 +550,18 @@ mod tests {
         assert_eq!(m.asset().samples[0].x, 0.25, "snapped to the grid");
         assert_eq!(m.selection, AnimSelection::BlendSample { id: a.clone() });
         let b = m.add_sample(0.26, 0.0, seq());
-        assert_ne!(m.asset().samples.iter().find(|s| s.id == b).unwrap().x, 0.25, "never on top of another sample");
+        assert_ne!(
+            m.asset().samples.iter().find(|s| s.id == b).unwrap().x,
+            0.25,
+            "never on top of another sample"
+        );
         m.snap_to_grid = false;
         let c = m.add_sample(5.0, 0.0, seq());
-        assert_eq!(m.asset().samples.iter().find(|s| s.id == c).unwrap().x, 1.0, "clamped to the axis");
+        assert_eq!(
+            m.asset().samples.iter().find(|s| s.id == c).unwrap().x,
+            1.0,
+            "clamped to the axis"
+        );
     }
 
     #[test]
@@ -444,7 +575,10 @@ mod tests {
         }
         m.end_gesture();
         assert_eq!(m.asset().samples[0].x, 0.4);
-        assert!(!m.move_sample(&a, 1.0, 0.0), "cannot land on another sample");
+        assert!(
+            !m.move_sample(&a, 1.0, 0.0),
+            "cannot land on another sample"
+        );
         assert!(m.doc.undo());
         assert_eq!(m.asset().samples[0].x, 0.0, "the whole drag undone at once");
     }
@@ -454,19 +588,33 @@ mod tests {
         let (mut m, _) = model();
         m.set_two_dimensional(true);
         m.snap_to_grid = false;
-        let ids: Vec<_> = [(0.0, -180.0), (1.0, -180.0), (0.5, 180.0)].into_iter().map(|(x, y)| m.add_sample(x, y, seq())).collect();
+        let ids: Vec<_> = [(0.0, -180.0), (1.0, -180.0), (0.5, 180.0)]
+            .into_iter()
+            .map(|(x, y)| m.add_sample(x, y, seq()))
+            .collect();
         m.set_input(0.5, 0.0);
         let p = m.preview();
         assert_eq!(p.triangles.len(), 1);
         let total: f32 = p.weights.iter().map(|(_, w)| w).sum();
         assert!((total - 1.0).abs() < 1e-4);
-        assert_eq!(p.weights.len(), 3, "inside the triangle all three contribute");
+        assert_eq!(
+            p.weights.len(),
+            3,
+            "inside the triangle all three contribute"
+        );
         m.set_input(0.0, -180.0);
-        assert_eq!(m.preview().weights, vec![(ids[0].clone(), 1.0)], "on a vertex only that sample contributes");
+        assert_eq!(
+            m.preview().weights,
+            vec![(ids[0].clone(), 1.0)],
+            "on a vertex only that sample contributes"
+        );
 
         let t = PlotTransform::for_asset(m.asset(), 400.0, 300.0, 20.0);
         let (px, py) = t.to_plot(1.0, -180.0);
-        assert_eq!(m.hit_sample(&t, px + 3.0, py - 2.0, 8.0), Some(ids[1].clone()));
+        assert_eq!(
+            m.hit_sample(&t, px + 3.0, py - 2.0, 8.0),
+            Some(ids[1].clone())
+        );
         assert_eq!(m.hit_sample(&t, px + 60.0, py, 8.0), None);
         let (x, y) = t.from_plot(px, py);
         assert!((x - 1.0).abs() < 1e-4 && (y + 180.0).abs() < 1e-3);
@@ -489,7 +637,10 @@ mod tests {
     #[test]
     fn axis_edits_are_validated_and_dimension_switch_round_trips() {
         let (mut m, _) = model();
-        assert!(m.set_axis(false, |a| a.max = a.min).is_err(), "min must stay below max");
+        assert!(
+            m.set_axis(false, |a| a.max = a.min).is_err(),
+            "min must stay below max"
+        );
         assert!(m.set_axis(true, |_| {}).is_err(), "no vertical axis in 1D");
         m.set_axis(false, |a| {
             a.name = "Speed".into();
@@ -513,7 +664,10 @@ mod tests {
         assert!(m.set_sample_phase(&a, 1.0).is_err());
         assert!(m.set_sample_phase(&a, 0.25).is_ok());
         assert!(m.set_sample_loop(&a, SampleLoop::Loop));
-        assert!(m.set_sample_sync_group(&a, Some("  ".into())) == false, "blank group is no group");
+        assert!(
+            m.set_sample_sync_group(&a, Some("  ".into())) == false,
+            "blank group is no group"
+        );
         assert!(m.set_sample_sync_group(&a, Some("walk".into())));
         assert!(m.set_sync_leader(Some("ghost".into())).is_err());
         m.set_sync_leader(Some(a.clone())).unwrap();
@@ -527,12 +681,18 @@ mod tests {
         let (mut m, _) = model();
         let a = m.add_sample(0.0, 0.0, None);
         let v = m.validation();
-        let empty = v.iter().find(|d| d.code == "blendspace.empty_sample").expect("empty sample reported");
+        let empty = v
+            .iter()
+            .find(|d| d.code == "blendspace.empty_sample")
+            .expect("empty sample reported");
         assert_eq!(empty.severity, Severity::Error);
         assert_eq!(empty.location.as_deref(), Some(a.as_str()));
         assert!(empty.repair.is_some());
         m.set_sample_sequence(&a, seq());
-        assert!(!m.validation().iter().any(|d| d.code == "blendspace.empty_sample"));
+        assert!(!m
+            .validation()
+            .iter()
+            .any(|d| d.code == "blendspace.empty_sample"));
     }
 
     #[test]
@@ -551,14 +711,35 @@ mod tests {
         m.set_edge_policy(true, EdgePolicy::Wrap).unwrap();
         m.rename("Locomotion 2D");
         assert!(m.doc.is_dirty());
-        assert_eq!(m.save().unwrap(), super::super::document::SaveOutcome::Saved);
-        let reopened = BlendSpaceModel::open(Arc::new(store), std::path::Path::new("l.blendspace"), "").unwrap();
+        assert_eq!(
+            m.save().unwrap(),
+            super::super::document::SaveOutcome::Saved
+        );
+        let reopened =
+            BlendSpaceModel::open(Arc::new(store), std::path::Path::new("l.blendspace"), "")
+                .unwrap();
         let r = reopened.asset();
         let sample = &r.samples[0];
-        assert_eq!((sample.x, sample.y, sample.play_rate, sample.phase_offset), (0.4, Some(10.0), 1.25, 0.5));
-        assert_eq!((sample.looping, sample.sync_group.as_deref(), sample.sequence.clone()), (SampleLoop::Once, Some("feet"), s));
-        assert_eq!((r.sync.mode, r.sync.leader.clone()), (SyncMode::Markers, Some(a)));
-        assert_eq!((r.y_axis.as_ref().unwrap().edge, r.name.as_str()), (EdgePolicy::Wrap, "Locomotion 2D"));
+        assert_eq!(
+            (sample.x, sample.y, sample.play_rate, sample.phase_offset),
+            (0.4, Some(10.0), 1.25, 0.5)
+        );
+        assert_eq!(
+            (
+                sample.looping,
+                sample.sync_group.as_deref(),
+                sample.sequence.clone()
+            ),
+            (SampleLoop::Once, Some("feet"), s)
+        );
+        assert_eq!(
+            (r.sync.mode, r.sync.leader.clone()),
+            (SyncMode::Markers, Some(a))
+        );
+        assert_eq!(
+            (r.y_axis.as_ref().unwrap().edge, r.name.as_str()),
+            (EdgePolicy::Wrap, "Locomotion 2D")
+        );
     }
 
     #[test]

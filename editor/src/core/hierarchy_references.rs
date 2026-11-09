@@ -86,7 +86,7 @@ pub(crate) fn check(
                 .extension()
                 .is_some_and(|e| e.eq_ignore_ascii_case("physasset"))
             {
-                let asset: pulsar_physics::skeletal::SkeletalPhysicsAsset =
+                let asset: physics_api::SkeletalPhysicsAsset =
                     serde_json::from_str(&read_text(path).map_err(|e| e.to_string())?)
                         .map_err(|e| format!("Cannot check {}: {e}", path.display()))?;
                 if mesh_ids.contains(&asset.skeletal_mesh)
@@ -210,10 +210,8 @@ mod tests {
         let mut mesh = sample::sample_mesh(&skeleton);
         mesh.joints.clear();
         skmesh::save_skmesh_asset(&dir.path().join("body.skmesh"), &mesh).unwrap();
-        let physics = pulsar_physics::skeletal::SkeletalPhysicsAsset::from_skeleton(
-            mesh.id,
-            &skeleton.skeleton(),
-        );
+        let physics =
+            physics_api::SkeletalPhysicsAsset::from_skeleton(mesh.id, &skeleton.skeleton());
         let path = dir.path().join("body.physasset");
         std::fs::write(&path, serde_json::to_string(&physics).unwrap()).unwrap();
         assert!(check(
@@ -256,10 +254,8 @@ mod hidden_asset_tests {
                 .contains("joints"));
             mesh.joints.clear();
             skmesh::save_skmesh_asset(&mesh_path, &mesh).unwrap();
-            let physics = pulsar_physics::skeletal::SkeletalPhysicsAsset::from_skeleton(
-                mesh.id,
-                &skeleton.skeleton(),
-            );
+            let physics =
+                physics_api::SkeletalPhysicsAsset::from_skeleton(mesh.id, &skeleton.skeleton());
             let physics_path = assets_dir.join(".hidden.physasset");
             std::fs::write(&physics_path, serde_json::to_string(&physics).unwrap()).unwrap();
             assert!(check(root, &skeleton.id, &affected, false)

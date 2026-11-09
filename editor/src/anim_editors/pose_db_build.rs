@@ -69,25 +69,47 @@ impl BuildJob {
     /// Compile every enabled source into search clips (a blend space expands to
     /// its samples) and run the real index builder. `progress` receives
     /// `(done, expected)` poses and returns `false` to cancel.
-    pub fn run(&self, progress: &mut dyn FnMut(usize, usize) -> bool) -> Result<BuildOutput, Vec<Diagnostic>> {
-        let runtime = RuntimeSkeleton::new("posedb", &self.skeleton).map_err(|e| vec![Diagnostic::error("posedb.skeleton", e)])?;
+    pub fn run(
+        &self,
+        progress: &mut dyn FnMut(usize, usize) -> bool,
+    ) -> Result<BuildOutput, Vec<Diagnostic>> {
+        let runtime = RuntimeSkeleton::new("posedb", &self.skeleton)
+            .map_err(|e| vec![Diagnostic::error("posedb.skeleton", e)])?;
         let mut clips = Vec::new();
         let mut missing = Vec::new();
         for s in self.asset.sources.iter().filter(|s| s.enabled) {
             let mut add = |source_id: String, asset: AnimSeqAsset, clips: &mut Vec<SearchClip>| {
-                clips.push(SearchClip { source_id, clip: Arc::new(CompiledClip::compile(&asset, &runtime)), mirrored: s.mirrored, looping: s.looping, exclusions: s.exclusions.clone(), cost_bias: s.cost_bias });
+                clips.push(SearchClip {
+                    source_id,
+                    clip: Arc::new(CompiledClip::compile(&asset, &runtime)),
+                    mirrored: s.mirrored,
+                    looping: s.looping,
+                    exclusions: s.exclusions.clone(),
+                    cost_bias: s.cost_bias,
+                });
             };
             match &s.source {
-                PoseSource::Sequence { sequence } => match self.sources.sequence(sequence.as_str()) {
+                PoseSource::Sequence { sequence } => match self.sources.sequence(sequence.as_str())
+                {
                     Some(a) => add(s.id.clone(), a, &mut clips),
                     None => missing.push(format!("Sequence {}", short(sequence.as_str()))),
                 },
-                PoseSource::BlendSpace { blend_space } => match self.sources.blend_space(blend_space.as_str()) {
+                PoseSource::BlendSpace { blend_space } => match self
+                    .sources
+                    .blend_space(blend_space.as_str())
+                {
                     Some(space) => {
                         for sample in &space.samples {
-                            match sample.sequence.as_ref().and_then(|q| self.sources.sequence(q.as_str())) {
+                            match sample
+                                .sequence
+                                .as_ref()
+                                .and_then(|q| self.sources.sequence(q.as_str()))
+                            {
                                 Some(a) => add(format!("{}:{}", s.id, sample.id), a, &mut clips),
-                                None => missing.push(format!("a sample of Blend Space {}", short(blend_space.as_str()))),
+                                None => missing.push(format!(
+                                    "a sample of Blend Space {}",
+                                    short(blend_space.as_str())
+                                )),
                             }
                         }
                     }
@@ -95,9 +117,17 @@ impl BuildJob {
                 },
             }
         }
-        let mirror = clips.iter().any(|c| c.mirrored).then(|| MirrorTable::from_names(&runtime));
-        let index = PoseIndex::build_with(&self.asset, &runtime, &clips, mirror.as_ref(), progress)?;
-        Ok(BuildOutput { index, clips, missing })
+        let mirror = clips
+            .iter()
+            .any(|c| c.mirrored)
+            .then(|| MirrorTable::from_names(&runtime));
+        let index =
+            PoseIndex::build_with(&self.asset, &runtime, &clips, mirror.as_ref(), progress)?;
+        Ok(BuildOutput {
+            index,
+            clips,
+            missing,
+        })
     }
 }
 
@@ -112,7 +142,11 @@ pub struct BuildHandle {
 impl BuildHandle {
     /// The callback to give [`BuildJob::run`].
     pub fn reporter(&self) -> impl FnMut(usize, usize) -> bool + Send + 'static {
-        let (done, expected, cancel) = (self.done.clone(), self.expected.clone(), self.cancel.clone());
+        let (done, expected, cancel) = (
+            self.done.clone(),
+            self.expected.clone(),
+            self.cancel.clone(),
+        );
         move |d, e| {
             done.store(d, Ordering::Relaxed);
             expected.store(e, Ordering::Relaxed);
@@ -131,7 +165,8 @@ impl BuildHandle {
     /// Fraction done in `[0, 1]`, or `None` before the first pose.
     pub fn fraction(&self) -> Option<f32> {
         let expected = self.expected.load(Ordering::Relaxed);
-        (expected > 0).then(|| (self.done.load(Ordering::Relaxed) as f32 / expected as f32).clamp(0.0, 1.0))
+        (expected > 0)
+            .then(|| (self.done.load(Ordering::Relaxed) as f32 / expected as f32).clamp(0.0, 1.0))
     }
 }
 

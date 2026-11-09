@@ -21,10 +21,7 @@ helio_component = { workspace = true }
 # The animation runtime and skeletal formats.
 skeletal_assets = { workspace = true }
 engine_class_derive = { workspace = true }
-# Enum properties get a dropdown editor: the derive names GPUI (as the meshes'
-# component).
-pulsar_reflection = { workspace = true, features = ["prims-gpui"] }
-gpui-ce = { workspace = true }
+pulsar_reflection = { workspace = true }
 pulsar_scenedb = { workspace = true }
 pulsar_scenedb_derive = { workspace = true }
 pulsar_world_registry = { workspace = true }

@@ -6,11 +6,13 @@
 
 use std::collections::HashSet;
 
+use crate::anim_editors::notify_edit::{
+    lane_layout, LaneEntry, LaneMetrics, LanePlacement, NotifyKind,
+};
 use crate::core::{AnimationClip, KeyInterpolation};
 use crate::style::{mix, with_alpha, Palette};
-use crate::anim_editors::notify_edit::{lane_layout, LaneEntry, LaneMetrics, LanePlacement, NotifyKind};
-use skeletal_assets::notify_schema::AnimationNotifyState;
 use skeletal_assets::notifies::AnimationNotify;
+use skeletal_assets::notify_schema::AnimationNotifyState;
 
 use super::types::*;
 
@@ -211,15 +213,27 @@ pub fn ruler_ticks(view: &TimelineView, fps: f32, canvas_w: f32, mode: RulerMode
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Hit {
     Ruler,
-    Key { track: usize, index: usize },
-    SummaryKey { time: f32 },
+    Key {
+        track: usize,
+        index: usize,
+    },
+    SummaryKey {
+        time: f32,
+    },
     SummaryRow,
-    Notify { index: usize },
+    Notify {
+        index: usize,
+    },
     /// A ranged notify state: its body slides it, its ends resize it.
-    State { index: usize, part: StatePart },
+    State {
+        index: usize,
+        part: StatePart,
+    },
     NotifyRow,
     Scrollbar,
-    Row { track: usize },
+    Row {
+        track: usize,
+    },
     Empty,
 }
 
@@ -333,7 +347,10 @@ impl<'a> Scene<'a> {
                 overflow += 1;
             }
         }
-        NotifyLane { placements, overflow }
+        NotifyLane {
+            placements,
+            overflow,
+        }
     }
 
     /// Top of a lane row in canvas px.
@@ -346,11 +363,18 @@ impl<'a> Scene<'a> {
         let row = ((lane_y / NOTIFY_ROW_HEIGHT).floor().max(0.0) as usize).min(NOTIFY_ROWS - 1);
         let wx = x + self.view.scroll_x;
         let mut best: Option<(f32, Hit)> = None;
-        for p in self.notify_lane().placements.iter().filter(|p| p.row == row) {
+        for p in self
+            .notify_lane()
+            .placements
+            .iter()
+            .filter(|p| p.row == row)
+        {
             let hit = match p.kind {
                 NotifyKind::Notify => {
                     // the head and the label to its right
-                    if wx < p.anchor - NOTIFY_HIT_RADIUS || wx > p.x1.max(p.anchor + NOTIFY_HIT_RADIUS) {
+                    if wx < p.anchor - NOTIFY_HIT_RADIUS
+                        || wx > p.x1.max(p.anchor + NOTIFY_HIT_RADIUS)
+                    {
                         continue;
                     }
                     self.notifies
@@ -363,9 +387,13 @@ impl<'a> Scene<'a> {
                     if wx < p.anchor - STATE_EDGE_PX || wx > end + STATE_EDGE_PX {
                         continue;
                     }
-                    let part = if (wx - p.anchor).abs() <= STATE_EDGE_PX && (end - p.anchor) > STATE_EDGE_PX * 2.0 {
+                    let part = if (wx - p.anchor).abs() <= STATE_EDGE_PX
+                        && (end - p.anchor) > STATE_EDGE_PX * 2.0
+                    {
                         StatePart::Start
-                    } else if (wx - end).abs() <= STATE_EDGE_PX && (end - p.anchor) > STATE_EDGE_PX * 2.0 {
+                    } else if (wx - end).abs() <= STATE_EDGE_PX
+                        && (end - p.anchor) > STATE_EDGE_PX * 2.0
+                    {
                         StatePart::End
                     } else {
                         StatePart::Body
@@ -1032,7 +1060,11 @@ impl<'a> Scene<'a> {
                     } else {
                         p.success
                     };
-                    let size = if selected { marker_h + 1.0 } else { marker_h - 1.0 };
+                    let size = if selected {
+                        marker_h + 1.0
+                    } else {
+                        marker_h - 1.0
+                    };
                     let mut marker = RectInstance::new(
                         [sx - size * 0.5, top + (marker_h + 1.0 - size) * 0.5],
                         [size, size],
@@ -1069,10 +1101,11 @@ impl<'a> Scene<'a> {
                         hue
                     };
                     let width = (ex - sx).max(3.0);
-                    let mut body = RectInstance::new([sx, top], [width, marker_h], with_alpha(hue, alpha))
-                        .radius(2.5)
-                        .outline(edge, if selected { 1.6 } else { 1.0 })
-                        .fixed();
+                    let mut body =
+                        RectInstance::new([sx, top], [width, marker_h], with_alpha(hue, alpha))
+                            .radius(2.5)
+                            .outline(edge, if selected { 1.6 } else { 1.0 })
+                            .fixed();
                     if selected {
                         body.glow = 6.0;
                     }
@@ -1080,9 +1113,13 @@ impl<'a> Scene<'a> {
                     if width > STATE_EDGE_PX * 3.0 {
                         for hx in [sx, ex - 3.0] {
                             r.push(
-                                RectInstance::new([hx, top + 2.0], [3.0, marker_h - 4.0], with_alpha(edge, 0.9))
-                                    .radius(1.0)
-                                    .fixed(),
+                                RectInstance::new(
+                                    [hx, top + 2.0],
+                                    [3.0, marker_h - 4.0],
+                                    with_alpha(edge, 0.9),
+                                )
+                                .radius(1.0)
+                                .fixed(),
                             );
                         }
                     }
@@ -1388,21 +1425,51 @@ mod tests {
         let lane = scene.notify_lane();
         assert_eq!(lane.placements.len(), 4);
         let rows_used: HashSet<_> = lane.placements.iter().map(|p| p.row).collect();
-        assert!(rows_used.len() >= 3, "overlapping markers use separate rows: {rows_used:?}");
+        assert!(
+            rows_used.len() >= 3,
+            "overlapping markers use separate rows: {rows_used:?}"
+        );
         // each marker is reachable at its own row, at its own anchor
         for (index, n) in notifies.iter().enumerate() {
             let p = lane.placements.iter().find(|p| p.id == n.id).unwrap();
             let y = Scene::notify_row_top(p.row) + NOTIFY_ROW_HEIGHT * 0.5;
-            assert_eq!(scene.hit_test(scene.view.time_to_x(n.time), y), Hit::Notify { index });
+            assert_eq!(
+                scene.hit_test(scene.view.time_to_x(n.time), y),
+                Hit::Notify { index }
+            );
         }
-        let sp = lane.placements.iter().find(|p| p.id == states[0].id).unwrap();
+        let sp = lane
+            .placements
+            .iter()
+            .find(|p| p.id == states[0].id)
+            .unwrap();
         let y = Scene::notify_row_top(sp.row) + NOTIFY_ROW_HEIGHT * 0.5;
         let (sx, ex) = (scene.view.time_to_x(0.30), scene.view.time_to_x(0.90));
-        assert_eq!(scene.hit_test(sx + 1.0, y), Hit::State { index: 0, part: StatePart::Start });
-        assert_eq!(scene.hit_test(ex - 1.0, y), Hit::State { index: 0, part: StatePart::End });
-        assert_eq!(scene.hit_test((sx + ex) * 0.5, y), Hit::State { index: 0, part: StatePart::Body });
+        assert_eq!(
+            scene.hit_test(sx + 1.0, y),
+            Hit::State {
+                index: 0,
+                part: StatePart::Start
+            }
+        );
+        assert_eq!(
+            scene.hit_test(ex - 1.0, y),
+            Hit::State {
+                index: 0,
+                part: StatePart::End
+            }
+        );
+        assert_eq!(
+            scene.hit_test((sx + ex) * 0.5, y),
+            Hit::State {
+                index: 0,
+                part: StatePart::Body
+            }
+        );
         let rects = scene.build_rects();
-        assert!(rects.iter().all(|r| r.pos.iter().chain(r.size.iter()).all(|v| v.is_finite())));
+        assert!(rects
+            .iter()
+            .all(|r| r.pos.iter().chain(r.size.iter()).all(|v| v.is_finite())));
     }
 
     #[test]

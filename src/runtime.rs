@@ -112,6 +112,7 @@ inventory::submit! {
         entries: Some(records::split_animator),
         from_props: None,
         stale_props: &[],
+        retired_fields: &[],
     }
 }
 

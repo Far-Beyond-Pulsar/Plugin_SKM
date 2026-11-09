@@ -18,9 +18,12 @@ use std::sync::Arc;
 
 use serde_json::json;
 use skeletal_assets::anim_graph::catalogue::ParamType;
-use skeletal_assets::anim_graph::{data_connection, instantiate_node, refresh_node_pins, AnimationGraphAsset};
+use skeletal_assets::anim_graph::{
+    data_connection, instantiate_node, refresh_node_pins, AnimationGraphAsset,
+};
 use skeletal_assets::assets::{AnimSeqAsset, SkeletonAsset};
 use skeletal_assets::blend_space::BlendSpaceAsset;
+use skeletal_assets::diagnostics::{has_errors, Diagnostic};
 use skeletal_assets::ik_retarget::IkRetargetAsset;
 use skeletal_assets::ik_rig::IkRigAsset;
 use skeletal_assets::montage::AnimationMontageAsset;
@@ -31,7 +34,6 @@ use skeletal_assets::runtime::clip::CompiledClip;
 use skeletal_assets::runtime::graph::compile::{compile_graph, AssetSource};
 use skeletal_assets::runtime::montage::CompiledMontage;
 use skeletal_assets::runtime::pose::{Pose, RuntimeSkeleton};
-use skeletal_assets::diagnostics::{has_errors, Diagnostic};
 use skeletal_assets::skeleton::Skeleton;
 use skeletal_assets::skmesh::SkeletalMeshAsset;
 
@@ -107,10 +109,21 @@ impl AssetSource for OverlaySource<'_> {
     }
 }
 
-fn add(asset: &mut AnimationGraphAsset, id: &str, ty: &str, x: f32, props: &[(&str, serde_json::Value)]) -> Result<(), String> {
-    let params: Vec<(String, ParamType)> = asset.parameters.iter().map(|p| (p.name.clone(), p.ty)).collect();
+fn add(
+    asset: &mut AnimationGraphAsset,
+    id: &str,
+    ty: &str,
+    x: f32,
+    props: &[(&str, serde_json::Value)],
+) -> Result<(), String> {
+    let params: Vec<(String, ParamType)> = asset
+        .parameters
+        .iter()
+        .map(|p| (p.name.clone(), p.ty))
+        .collect();
     let lookup = |name: &str| params.iter().find(|p| p.0 == name).map(|p| p.1);
-    let mut node = instantiate_node(id, ty, (x, 0.0), &lookup).ok_or_else(|| format!("unknown node type {ty}"))?;
+    let mut node = instantiate_node(id, ty, (x, 0.0), &lookup)
+        .ok_or_else(|| format!("unknown node type {ty}"))?;
     for (key, value) in props {
         node.properties.insert((*key).to_string(), value.clone());
     }
@@ -119,18 +132,31 @@ fn add(asset: &mut AnimationGraphAsset, id: &str, ty: &str, x: f32, props: &[(&s
     asset.main.add_node(node)
 }
 
-fn wire(asset: &mut AnimationGraphAsset, from: (&str, &str), to: (&str, &str)) -> Result<(), String> {
-    asset.main.add_connection(data_connection(from.0, from.1, to.0, to.1))
+fn wire(
+    asset: &mut AnimationGraphAsset,
+    from: (&str, &str),
+    to: (&str, &str),
+) -> Result<(), String> {
+    asset
+        .main
+        .add_connection(data_connection(from.0, from.1, to.0, to.1))
 }
 
-fn finish(asset: &AnimationGraphAsset, source: &dyn AssetSource) -> Result<AnimInstance, Vec<Diagnostic>> {
+fn finish(
+    asset: &AnimationGraphAsset,
+    source: &dyn AssetSource,
+) -> Result<AnimInstance, Vec<Diagnostic>> {
     let output = compile_graph(asset, source);
-    let Some(graph) = output.graph else { return Err(output.diagnostics) };
+    let Some(graph) = output.graph else {
+        return Err(output.diagnostics);
+    };
     if has_errors(&output.diagnostics) {
         return Err(output.diagnostics);
     }
     let mut instance = AnimInstance::new(graph.skeleton.clone());
-    instance.set_graph(graph).map_err(|e| vec![Diagnostic::error("preview.instance", e)])?;
+    instance
+        .set_graph(graph)
+        .map_err(|e| vec![Diagnostic::error("preview.instance", e)])?;
     Ok(instance)
 }
 
@@ -145,7 +171,11 @@ pub struct MontagePreview {
 impl MontagePreview {
     /// A graph with one Slot per slot the Montage uses, chained over the
     /// reference pose, with the Montage compiled against the same skeleton.
-    pub fn build(asset: &AnimationMontageAsset, rig: &Rig, source: &dyn AssetSource) -> Result<Self, Vec<Diagnostic>> {
+    pub fn build(
+        asset: &AnimationMontageAsset,
+        rig: &Rig,
+        source: &dyn AssetSource,
+    ) -> Result<Self, Vec<Diagnostic>> {
         let err = |code: &'static str, message: String| vec![Diagnostic::error(code, message)];
         let mut slots: Vec<(String, String)> = Vec::new();
         for t in &asset.tracks {
@@ -154,7 +184,10 @@ impl MontagePreview {
             }
         }
         if slots.is_empty() {
-            return Err(err("preview.no_tracks", "The Montage has no track to play".into()));
+            return Err(err(
+                "preview.no_tracks",
+                "The Montage has no track to play".into(),
+            ));
         }
         let mut graph = AnimationGraphAsset::default();
         let step = |r: Result<(), String>| r.map_err(|m| err("preview.graph", m));
@@ -162,11 +195,25 @@ impl MontagePreview {
         let mut previous = ("ref".to_string(), "pose".to_string());
         for (i, (slot, group)) in slots.iter().enumerate() {
             let id = format!("slot{i}");
-            step(add(&mut graph, &id, "anim.slot", 100.0 + 100.0 * i as f32, &[("slot", json!(slot)), ("group", json!(group))]))?;
-            step(wire(&mut graph, (&previous.0, &previous.1), (&id, "source")))?;
+            step(add(
+                &mut graph,
+                &id,
+                "anim.slot",
+                100.0 + 100.0 * i as f32,
+                &[("slot", json!(slot)), ("group", json!(group))],
+            ))?;
+            step(wire(
+                &mut graph,
+                (&previous.0, &previous.1),
+                (&id, "source"),
+            ))?;
             previous = (id, "pose".to_string());
         }
-        step(wire(&mut graph, (&previous.0, &previous.1), ("output", "pose")))?;
+        step(wire(
+            &mut graph,
+            (&previous.0, &previous.1),
+            ("output", "pose"),
+        ))?;
         let mut instance = finish_with_skeleton(&graph, rig, source)?;
 
         let mut cache: HashMap<String, Arc<CompiledClip>> = HashMap::new();
@@ -174,15 +221,25 @@ impl MontagePreview {
             if let Some(hit) = cache.get(id) {
                 return Some(hit.clone());
             }
-            let clip = Arc::new(CompiledClip::compile_shared(&source.sequence(id)?, &rig.runtime));
+            let clip = Arc::new(CompiledClip::compile_shared(
+                &source.sequence(id)?,
+                &rig.runtime,
+            ));
             cache.insert(id.to_string(), clip.clone());
             Some(clip)
         })
         .map_err(|m| err("preview.montage", m))?;
         let montage = Arc::new(compiled);
-        instance.play_montage(montage.clone(), 1.0, None).map_err(|e| err("preview.play", format!("{e:?}")))?;
+        instance
+            .play_montage(montage.clone(), 1.0, None)
+            .map_err(|e| err("preview.play", format!("{e:?}")))?;
         let length = montage.length;
-        Ok(Self { instance, montage, position: 0.0, length })
+        Ok(Self {
+            instance,
+            montage,
+            position: 0.0,
+            length,
+        })
     }
 
     /// The pose at `time` seconds into the Montage. Moving forward advances the
@@ -203,7 +260,8 @@ impl MontagePreview {
         }
         let dt = time - self.position;
         self.position = time;
-        self.instance.advance(dt, TimeStep::Variable, UpdateMode::Scrub)
+        self.instance
+            .advance(dt, TimeStep::Variable, UpdateMode::Scrub)
     }
 
     pub fn instance(&self) -> &AnimInstance {
@@ -257,7 +315,11 @@ pub struct FallbackPreview {
 }
 
 impl FallbackPreview {
-    pub fn build(db: &PoseDbAsset, rig: &Rig, source: &dyn AssetSource) -> Result<Self, Vec<Diagnostic>> {
+    pub fn build(
+        db: &PoseDbAsset,
+        rig: &Rig,
+        source: &dyn AssetSource,
+    ) -> Result<Self, Vec<Diagnostic>> {
         let err = |m: String| vec![Diagnostic::error("preview.graph", m)];
         let sequence = db
             .sources
@@ -270,28 +332,53 @@ impl FallbackPreview {
             .ok_or_else(|| vec![Diagnostic::error("preview.no_fallback_source", "Add an enabled Sequence source: it is what plays when the database cannot be used")])?;
         let mut graph = AnimationGraphAsset::default();
         graph.skeleton = Some(rig.skeleton_ref.clone());
-        add(&mut graph, "fallback", "anim.sequence_player", 0.0, &[("sequence", json!(sequence)), ("looping", json!("loop"))]).map_err(err)?;
-        add(&mut graph, "search", "anim.pose_search", 200.0, &[("database", json!(db.id.as_str()))]).map_err(err)?;
+        add(
+            &mut graph,
+            "fallback",
+            "anim.sequence_player",
+            0.0,
+            &[("sequence", json!(sequence)), ("looping", json!("loop"))],
+        )
+        .map_err(err)?;
+        add(
+            &mut graph,
+            "search",
+            "anim.pose_search",
+            200.0,
+            &[("database", json!(db.id.as_str()))],
+        )
+        .map_err(err)?;
         wire(&mut graph, ("fallback", "pose"), ("search", "fallback")).map_err(err)?;
         wire(&mut graph, ("search", "pose"), ("output", "pose")).map_err(err)?;
         let hidden = WithoutPoseDb(source);
         let output = compile_graph(&graph, &hidden);
-        let Some(compiled) = output.graph else { return Err(output.diagnostics) };
+        let Some(compiled) = output.graph else {
+            return Err(output.diagnostics);
+        };
         if has_errors(&output.diagnostics) {
             return Err(output.diagnostics);
         }
         let mut instance = AnimInstance::new(compiled.skeleton.clone());
-        instance.set_graph(compiled).map_err(|e| vec![Diagnostic::error("preview.instance", e)])?;
-        Ok(Self { instance, diagnostics: output.diagnostics, sequence })
+        instance
+            .set_graph(compiled)
+            .map_err(|e| vec![Diagnostic::error("preview.instance", e)])?;
+        Ok(Self {
+            instance,
+            diagnostics: output.diagnostics,
+            sequence,
+        })
     }
 
     /// Whether the compiler said the node falls back.
     pub fn falls_back(&self) -> bool {
-        self.diagnostics.iter().any(|d| d.code == "graph.pose_search_fallback")
+        self.diagnostics
+            .iter()
+            .any(|d| d.code == "graph.pose_search_fallback")
     }
 
     pub fn advance(&mut self, dt: f32) -> Arc<Pose> {
-        self.instance.advance(dt, TimeStep::Variable, UpdateMode::Scrub)
+        self.instance
+            .advance(dt, TimeStep::Variable, UpdateMode::Scrub)
     }
 }
 
@@ -302,19 +389,60 @@ pub struct BlendSpacePreview {
 }
 
 impl BlendSpacePreview {
-    pub fn build(asset: &BlendSpaceAsset, rig: &Rig, source: &dyn AssetSource) -> Result<Self, Vec<Diagnostic>> {
+    pub fn build(
+        asset: &BlendSpaceAsset,
+        rig: &Rig,
+        source: &dyn AssetSource,
+    ) -> Result<Self, Vec<Diagnostic>> {
         let err = |m: String| vec![Diagnostic::error("preview.graph", m)];
         let mut graph = AnimationGraphAsset::default();
-        graph.parameters.push(skeletal_assets::anim_graph::GraphParameter::new("X", ParamType::Float));
-        graph.parameters.push(skeletal_assets::anim_graph::GraphParameter::new("Y", ParamType::Float));
-        add(&mut graph, "x", "anim.get_parameter", 0.0, &[("parameter", json!("X"))]).map_err(err)?;
-        add(&mut graph, "y", "anim.get_parameter", 0.0, &[("parameter", json!("Y"))]).map_err(err)?;
-        add(&mut graph, "player", "anim.blend_space_player", 200.0, &[("blend_space", json!(asset.id.as_str())), ("looping", json!("loop"))]).map_err(err)?;
+        graph
+            .parameters
+            .push(skeletal_assets::anim_graph::GraphParameter::new(
+                "X",
+                ParamType::Float,
+            ));
+        graph
+            .parameters
+            .push(skeletal_assets::anim_graph::GraphParameter::new(
+                "Y",
+                ParamType::Float,
+            ));
+        add(
+            &mut graph,
+            "x",
+            "anim.get_parameter",
+            0.0,
+            &[("parameter", json!("X"))],
+        )
+        .map_err(err)?;
+        add(
+            &mut graph,
+            "y",
+            "anim.get_parameter",
+            0.0,
+            &[("parameter", json!("Y"))],
+        )
+        .map_err(err)?;
+        add(
+            &mut graph,
+            "player",
+            "anim.blend_space_player",
+            200.0,
+            &[
+                ("blend_space", json!(asset.id.as_str())),
+                ("looping", json!("loop")),
+            ],
+        )
+        .map_err(err)?;
         wire(&mut graph, ("x", "value"), ("player", "x")).map_err(err)?;
         wire(&mut graph, ("y", "value"), ("player", "y")).map_err(err)?;
         wire(&mut graph, ("player", "pose"), ("output", "pose")).map_err(err)?;
         let instance = finish_with_skeleton(&graph, rig, source)?;
-        Ok(Self { instance, input: (0.0, 0.0) })
+        Ok(Self {
+            instance,
+            input: (0.0, 0.0),
+        })
     }
 
     pub fn set_input(&mut self, x: f32, y: f32) {
@@ -330,7 +458,8 @@ impl BlendSpacePreview {
 
     /// Run the player forward by `dt` seconds and return the pose.
     pub fn advance(&mut self, dt: f32) -> Arc<Pose> {
-        self.instance.advance(dt, TimeStep::Variable, UpdateMode::Scrub)
+        self.instance
+            .advance(dt, TimeStep::Variable, UpdateMode::Scrub)
     }
 
     pub fn instance(&self) -> &AnimInstance {
@@ -338,7 +467,11 @@ impl BlendSpacePreview {
     }
 }
 
-fn finish_with_skeleton(graph: &AnimationGraphAsset, rig: &Rig, source: &dyn AssetSource) -> Result<AnimInstance, Vec<Diagnostic>> {
+fn finish_with_skeleton(
+    graph: &AnimationGraphAsset,
+    rig: &Rig,
+    source: &dyn AssetSource,
+) -> Result<AnimInstance, Vec<Diagnostic>> {
     // The preview graph names no skeleton of its own; the rig is the skeleton.
     let mut graph = graph.clone();
     graph.skeleton = Some(rig.skeleton_ref.clone());
@@ -359,7 +492,9 @@ pub fn world_of(rig: &Rig, pose: &Pose) -> HashMap<String, Mat4> {
 
 /// Where a bone sits in the pose, for the tests and readouts.
 pub fn bone_position(rig: &Rig, pose: &Pose, bone: &str) -> Option<Vec3> {
-    world_of(rig, pose).get(bone).map(|m| m.transform_point(Vec3::ZERO))
+    world_of(rig, pose)
+        .get(bone)
+        .map(|m| m.transform_point(Vec3::ZERO))
 }
 
 /// Load the rig of skeleton `id` from the project, with the mesh the skeleton
@@ -367,12 +502,23 @@ pub fn bone_position(rig: &Rig, pose: &Pose, bone: &str) -> Option<Vec3> {
 pub fn load_rig(root: &Path, assets: &ProjectAssets, id: &str) -> Result<Rig, String> {
     use crate::anim_editors::refs::{ProjectRefIndex, RefIndex};
     use pulsar_reflection::{AssetKind, SkeletalMeshAssetKind};
-    let skeleton = assets.skeleton(id).ok_or("The skeleton could not be loaded")?;
+    let skeleton = assets
+        .skeleton(id)
+        .ok_or("The skeleton could not be loaded")?;
     let index = ProjectRefIndex::new(root);
-    let preferred = skeleton.preview_mesh.as_ref().map(|m| m.as_str().to_string());
+    let preferred = skeleton
+        .preview_mesh
+        .as_ref()
+        .map(|m| m.as_str().to_string());
     let mesh = preferred
         .into_iter()
-        .chain(index.candidates(SkeletalMeshAssetKind::KIND).into_iter().filter(|c| c.primary_skeleton.as_deref() == Some(id)).map(|c| c.id))
+        .chain(
+            index
+                .candidates(SkeletalMeshAssetKind::KIND)
+                .into_iter()
+                .filter(|c| c.primary_skeleton.as_deref() == Some(id))
+                .map(|c| c.id),
+        )
         .find_map(|mesh_id| {
             let path = index.locate_path(SkeletalMeshAssetKind::KIND, &mesh_id)?;
             skeletal_assets::skmesh::load_skmesh_asset(&path).ok()
@@ -404,7 +550,14 @@ impl SkinRenderer {
         })
     }
 
-    pub fn render(&mut self, rig: &Rig, pose: &Pose, palette: &crate::style::Palette, width: u32, height: u32) -> SkinFrame {
+    pub fn render(
+        &mut self,
+        rig: &Rig,
+        pose: &Pose,
+        palette: &crate::style::Palette,
+        width: u32,
+        height: u32,
+    ) -> SkinFrame {
         use crate::editor::panel::ViewOptions;
         use crate::rendering::viewport::camera::OrbitCamera;
         use crate::rendering::viewport::renderer::SceneFrame;
@@ -473,7 +626,11 @@ impl SkinRenderer {
                 );
             }
         });
-        SkinFrame { width, height, rgba }
+        SkinFrame {
+            width,
+            height,
+            rgba,
+        }
     }
 }
 

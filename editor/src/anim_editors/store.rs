@@ -52,10 +52,17 @@ mod memory {
 
     impl MemStore {
         pub fn put(&self, path: &str, text: &str) {
-            self.0.lock().unwrap().insert(PathBuf::from(path), text.as_bytes().to_vec());
+            self.0
+                .lock()
+                .unwrap()
+                .insert(PathBuf::from(path), text.as_bytes().to_vec());
         }
         pub fn text(&self, path: &str) -> Option<String> {
-            self.0.lock().unwrap().get(Path::new(path)).map(|b| String::from_utf8_lossy(b).into_owned())
+            self.0
+                .lock()
+                .unwrap()
+                .get(Path::new(path))
+                .map(|b| String::from_utf8_lossy(b).into_owned())
         }
     }
 
@@ -64,7 +71,10 @@ mod memory {
             Ok(self.0.lock().unwrap().get(path).cloned())
         }
         fn write_atomic(&self, path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
-            self.0.lock().unwrap().insert(path.to_path_buf(), bytes.to_vec());
+            self.0
+                .lock()
+                .unwrap()
+                .insert(path.to_path_buf(), bytes.to_vec());
             Ok(())
         }
     }

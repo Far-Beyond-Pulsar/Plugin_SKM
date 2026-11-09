@@ -1,0 +1,41 @@
+# The skm_editor plugin's rows of the SceneDB closure ledger (Pulsar-Native#1035):
+# its classes, GPU schemas, buffers, pass crates and call sites. A plugin owns
+# the rows of what it ships (Pulsar-Native#1606); `cargo test -p scene_inventory`
+# in a Pulsar-Native checkout recomputes every fact column, checks the human
+# columns, and fails on a missing, stale or misplaced row. The columns are
+# described in Pulsar-Native's crates/core/scene_inventory/ledger.toml.
+
+# ── Exposed component classes ───────────────────────────────────
+
+[[class]]
+name = "AnimationComponent"
+category = "Animation"
+world_registered = true
+own_gpu_columns = false
+owner = "animation_component::component"
+disposition = "gameplay: the animator. It plays an animation graph (or an old scene's single sequence), Montages and root motion on the skeleton of the skinned mesh it drives, raises its assets' notifies and shows its pose on that mesh; a physics rig reads and drives the pose (helio_component::skinning::SkeletalPoseAccess)"
+target_contract = "SceneDB#84; 07-assets-and-runtime-lifecycle.md"
+test = "plugins/vendor/skm_editor/component/src/component.rs (animation_runtime_tests) and the phase3/phase5/state_event/net/unified suites beside it"
+status = "verified"
+
+# ── Lifecycle call sites ────────────────────────────────────────
+
+[[site]]
+pattern = "asset-kind"
+file = "plugins/vendor/skm_editor/component/src/component.rs"
+count = 3
+owner = "animation_component::component (register_animation_assets)"
+disposition = "keep: the skeleton, animation sequence and animation graph kinds. Their loaders decode the asset files on a SceneDB worker; a missing or corrupt file fails the asset and its animators show no pose"
+target_contract = "SceneDB#84; 07-assets-and-runtime-lifecycle.md"
+test = "plugins/vendor/skm_editor/component/src/component.rs (animation_runtime_tests)"
+status = "unverified"
+
+[[site]]
+pattern = "asset-binding"
+file = "plugins/vendor/skm_editor/component/src/component.rs"
+count = 3
+owner = "animation_component::component (register_animation_assets)"
+disposition = "keep: binds a loaded skeleton, sequence or graph into AnimationComponent and refreshes its pose; the world calls them for every animator naming the asset, on load and on reload"
+target_contract = "SceneDB#84; 07-assets-and-runtime-lifecycle.md"
+test = "plugins/vendor/skm_editor/component/src/component.rs (animation_runtime_tests)"
+status = "unverified"

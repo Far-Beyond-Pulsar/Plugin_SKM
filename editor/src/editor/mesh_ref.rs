@@ -15,7 +15,7 @@ use gpui::*;
 use ui::button::{Button, ButtonVariants};
 use ui::popover::Popover;
 use ui::{h_flex, ActiveTheme, Disableable, Icon, IconName, Sizable};
-use ui_common::{AssetPickedEvent, AssetQuery, MeshAssetPicker};
+use ui_common::{AssetPickedEvent, AssetPicker, AssetQuery};
 
 use crate::core::mesh_library;
 use crate::core::skmesh::{self, SKMESH_EXTENSION};
@@ -145,7 +145,7 @@ impl SkeletalAnimEditorPanel {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<Entity<MeshAssetPicker>> {
+    ) -> Option<Entity<AssetPicker>> {
         if self.project_root.as_os_str().is_empty() {
             return None;
         }
@@ -155,7 +155,7 @@ impl SkeletalAnimEditorPanel {
                 self.project_root.clone(),
             );
             let picker = cx.new(|cx| {
-                MeshAssetPicker::new(
+                AssetPicker::new(
                     selected,
                     Vec::new(),
                     Some(root),
@@ -201,7 +201,7 @@ impl SkeletalAnimEditorPanel {
             .tooltip(state.tooltip.clone())
             .disabled(picker.is_none());
         let field: AnyElement = match picker {
-            Some(picker) => Popover::<MeshAssetPicker>::new("preview-mesh-popover")
+            Some(picker) => Popover::<AssetPicker>::new("preview-mesh-popover")
                 .anchor(Corner::BottomLeft)
                 .trigger(trigger)
                 .content(move |_, _| picker.clone())

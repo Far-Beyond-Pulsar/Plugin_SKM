@@ -3,7 +3,6 @@
 
 use gpui::*;
 
-
 pub fn pt(x: f32, y: f32) -> Point<Pixels> {
     point(px(x), px(y))
 }

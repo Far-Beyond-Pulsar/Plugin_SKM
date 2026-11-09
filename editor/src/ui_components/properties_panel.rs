@@ -704,8 +704,11 @@ impl Render for BonePropertiesPanel {
             .as_ref()
             .filter(|m| m.end.is_some())
             .map(|m| m.id.clone());
-        self.state_inputs
-            .retain(|key, _| state_id.as_ref().is_some_and(|id| key.starts_with(&format!("{id}:"))));
+        self.state_inputs.retain(|key, _| {
+            state_id
+                .as_ref()
+                .is_some_and(|id| key.starts_with(&format!("{id}:")))
+        });
         if let Some(marker) = self.notify.clone().filter(|m| m.end.is_some()) {
             let end = marker.end.unwrap_or(marker.time);
             self.state_input(
@@ -1163,7 +1166,12 @@ impl BonePropertiesPanel {
                 col.child(
                     v_flex()
                         .gap_1()
-                        .child(div().text_xs().text_color(theme.muted_foreground).child("End"))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("End"),
+                        )
                         .when_some(end_input, |c, input| {
                             c.child(NumberInput::new(&input).small().suffix(seconds(&theme)))
                         })
@@ -1190,7 +1198,11 @@ impl BonePropertiesPanel {
                 )
                 .child(
                     Button::new("notify-state-disabled")
-                        .label(if disabled { "Disabled — click to enable" } else { "Enabled — click to disable" })
+                        .label(if disabled {
+                            "Disabled — click to enable"
+                        } else {
+                            "Enabled — click to disable"
+                        })
                         .ghost()
                         .small()
                         .tooltip("A disabled state stays in the asset but never dispatches events")
@@ -1283,7 +1295,11 @@ impl BonePropertiesPanel {
             )
             .child(
                 Button::new("notify-delete")
-                    .label(if is_state { "Delete state" } else { "Delete notify" })
+                    .label(if is_state {
+                        "Delete state"
+                    } else {
+                        "Delete notify"
+                    })
                     .ghost()
                     .small()
                     .on_click(move |_, _, cx| {

@@ -116,7 +116,10 @@ impl SkeletalAnimEditorPanel {
                     }
                     // a burst overran the channel: the files may have changed, rescan
                     Err(error) if !error.to_string().contains("closed") => {
-                        if this.update(cx, |this, cx| this.rescan_after_lag(cx)).is_err() {
+                        if this
+                            .update(cx, |this, cx| this.rescan_after_lag(cx))
+                            .is_err()
+                        {
                             break;
                         }
                     }
@@ -172,14 +175,26 @@ mod tests {
     fn the_linked_skeleton_rescans() {
         let w = sequence("/p/hero.skeleton", "/p/hero.skmesh");
         let r = w.react(Path::new("/p/hero.skeleton"));
-        assert_eq!(r, Reaction { rescan: true, reload_preview: false });
+        assert_eq!(
+            r,
+            Reaction {
+                rescan: true,
+                reload_preview: false
+            }
+        );
     }
 
     #[test]
     fn the_linked_preview_mesh_reloads_even_though_it_is_the_same_file() {
         let w = sequence("/p/hero.skeleton", "/p/hero.skmesh");
         let r = w.react(Path::new("/p/hero.skmesh"));
-        assert_eq!(r, Reaction { rescan: true, reload_preview: true });
+        assert_eq!(
+            r,
+            Reaction {
+                rescan: true,
+                reload_preview: true
+            }
+        );
     }
 
     #[test]
@@ -204,12 +219,18 @@ mod tests {
         w.preview_unresolved = true;
         assert_eq!(
             w.react(Path::new("/p/new.skeleton")),
-            Reaction { rescan: true, reload_preview: false }
+            Reaction {
+                rescan: true,
+                reload_preview: false
+            }
         );
         // a new mesh may be the missing preview, but nothing is loaded to refresh
         assert_eq!(
             w.react(Path::new("/p/new.skmesh")),
-            Reaction { rescan: true, reload_preview: false }
+            Reaction {
+                rescan: true,
+                reload_preview: false
+            }
         );
         assert_eq!(w.react(Path::new("/p/rock.png")), Reaction::default());
     }

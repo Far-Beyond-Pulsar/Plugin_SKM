@@ -7,7 +7,8 @@ use std::sync::Arc;
 use gpui::*;
 use plugin_editor_api::{PluginError, UndoService};
 use pulsar_reflection::{
-    AnimationGraphAssetKind, AnimationMontageAssetKind, AssetKind, BlendSpaceAssetKind, IkRetargeterAssetKind, IkRigAssetKind, PoseDatabaseAssetKind, RetargetProfileAssetKind,
+    AnimationGraphAssetKind, AnimationMontageAssetKind, AssetKind, BlendSpaceAssetKind,
+    IkRetargeterAssetKind, IkRigAssetKind, PoseDatabaseAssetKind, RetargetProfileAssetKind,
 };
 use serde_json::Value;
 use skeletal_assets::anim_graph::AnimationGraphAsset;
@@ -117,7 +118,9 @@ impl AnimationAssetEditorKind {
             Self::BlendSpace => BlendSpaceAsset::default().to_text(),
             Self::Montage => AnimationMontageAsset::default().to_text(),
             Self::Graph => AnimationGraphAsset::default().to_text(),
-            Self::RetargetProfile => RetargetProfileAsset::new("New Retarget Profile", None, None).to_text(),
+            Self::RetargetProfile => {
+                RetargetProfileAsset::new("New Retarget Profile", None, None).to_text()
+            }
             Self::IkRig => IkRigAsset::new("New IK Rig", None).to_text(),
             Self::IkRetarget => IkRetargetAsset::new("New IK Retargeter", None, None).to_text(),
             Self::PoseDb => PoseDbAsset::new("New Pose Database", None).to_text(),
@@ -131,13 +134,22 @@ impl AnimationAssetEditorKind {
     }
 }
 
-
 impl AnimationAssetEditorKind {
     /// Open an editor for the file at `path`. Each kind has its own purpose-built
     /// editor; with the host's undo service, edits join the document's shared history.
-    pub fn open(self, path: PathBuf, undo: Option<&UndoService>, window: &mut Window, cx: &mut App) -> Result<Arc<dyn PanelView>, PluginError> {
+    pub fn open(
+        self,
+        path: PathBuf,
+        undo: Option<&UndoService>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<Arc<dyn PanelView>, PluginError> {
         use super::views::{
-            anim_graph_view::AnimGraphEditor, blend_space_view::BlendSpaceEditor, ik_rig_view::IkRigEditor, montage_view::MontageEditor, pose_db_view::PoseDbEditor,
+            anim_graph_view::AnimGraphEditor,
+            blend_space_view::BlendSpaceEditor,
+            ik_rig_view::IkRigEditor,
+            montage_view::MontageEditor,
+            pose_db_view::PoseDbEditor,
             retarget_view::{IkRetargetEditor, RetargetProfileEditor},
         };
         macro_rules! open {
@@ -168,7 +180,9 @@ impl AnimationAssetEditorKind {
             Self::BlendSpace => BlendSpaceAsset::parse_text(text).map(|(a, _)| a.asset_id()),
             Self::Montage => AnimationMontageAsset::parse_text(text).map(|(a, _)| a.asset_id()),
             Self::Graph => AnimationGraphAsset::parse_text(text).map(|(a, _)| a.asset_id()),
-            Self::RetargetProfile => RetargetProfileAsset::parse_text(text).map(|(a, _)| a.asset_id()),
+            Self::RetargetProfile => {
+                RetargetProfileAsset::parse_text(text).map(|(a, _)| a.asset_id())
+            }
             Self::IkRig => IkRigAsset::parse_text(text).map(|(a, _)| a.asset_id()),
             Self::IkRetarget => IkRetargetAsset::parse_text(text).map(|(a, _)| a.asset_id()),
             Self::PoseDb => PoseDbAsset::parse_text(text).map(|(a, _)| a.asset_id()),

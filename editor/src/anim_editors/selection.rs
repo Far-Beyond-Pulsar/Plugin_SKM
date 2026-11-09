@@ -10,28 +10,73 @@ pub enum AnimSelection {
     None,
     /// The asset itself (its own properties).
     Asset,
-    Bone { id: String },
-    Key { track: String, index: usize },
-    Curve { name: String },
-    Notify { id: String },
-    NotifyState { id: String },
-    BlendSample { id: String },
-    BlendAxis { vertical: bool },
-    MontageSegment { track: String, id: String },
-    MontageSlot { track: String },
-    MontageSection { id: String },
-    GraphNode { id: String },
-    GraphParameter { name: String },
-    RetargetChain { name: String },
-    IkChain { name: String },
-    IkGoal { name: String },
-    IkSolver { index: usize },
-    JointLimit { bone: String },
-    PoseSource { id: String },
-    PoseChannel { index: usize },
-    PoseResult { index: usize },
+    Bone {
+        id: String,
+    },
+    Key {
+        track: String,
+        index: usize,
+    },
+    Curve {
+        name: String,
+    },
+    Notify {
+        id: String,
+    },
+    NotifyState {
+        id: String,
+    },
+    BlendSample {
+        id: String,
+    },
+    BlendAxis {
+        vertical: bool,
+    },
+    MontageSegment {
+        track: String,
+        id: String,
+    },
+    MontageSlot {
+        track: String,
+    },
+    MontageSection {
+        id: String,
+    },
+    GraphNode {
+        id: String,
+    },
+    GraphParameter {
+        name: String,
+    },
+    RetargetChain {
+        name: String,
+    },
+    IkChain {
+        name: String,
+    },
+    IkGoal {
+        name: String,
+    },
+    IkSolver {
+        index: usize,
+    },
+    JointLimit {
+        bone: String,
+    },
+    PoseSource {
+        id: String,
+    },
+    PoseChannel {
+        index: usize,
+    },
+    PoseResult {
+        index: usize,
+    },
     /// A referenced asset in a dependency list.
-    Reference { kind: String, id: String },
+    Reference {
+        kind: String,
+        id: String,
+    },
 }
 
 impl AnimSelection {

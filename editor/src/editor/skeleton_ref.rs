@@ -12,7 +12,7 @@ use ui::button::{Button, ButtonVariants};
 use ui::popover::Popover;
 use ui::tag::Tag;
 use ui::{h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable};
-use ui_common::{AssetPickedEvent, AssetQuery, MeshAssetPicker};
+use ui_common::{AssetPickedEvent, AssetPicker, AssetQuery};
 
 use crate::core::assets::SKELETON_EXTENSION;
 use crate::core::library::{self, Library};
@@ -205,7 +205,7 @@ impl SkeletalAnimEditorPanel {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<Entity<MeshAssetPicker>> {
+    ) -> Option<Entity<AssetPicker>> {
         if self.project_root.as_os_str().is_empty() {
             return None;
         }
@@ -215,7 +215,7 @@ impl SkeletalAnimEditorPanel {
                 self.project_root.clone(),
             );
             let picker = cx.new(|cx| {
-                MeshAssetPicker::new(
+                AssetPicker::new(
                     selected,
                     Vec::new(),
                     Some(root),
@@ -265,7 +265,7 @@ impl SkeletalAnimEditorPanel {
             .tooltip(state.tooltip.clone())
             .disabled(picker.is_none());
         let field: AnyElement = match picker {
-            Some(picker) => Popover::<MeshAssetPicker>::new("skeleton-ref-popover")
+            Some(picker) => Popover::<AssetPicker>::new("skeleton-ref-popover")
                 .anchor(Corner::BottomLeft)
                 .trigger(trigger)
                 .content(move |_, _| picker.clone())

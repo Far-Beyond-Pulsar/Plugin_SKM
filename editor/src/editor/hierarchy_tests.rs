@@ -703,10 +703,8 @@ fn hidden_references_block_both_delete_commands_and_saves(cx: &mut TestAppContex
                 mesh.joints.clear();
                 crate::core::skmesh::save_skmesh_asset(&hidden.join(".hidden.skmesh"), &mesh)
                     .unwrap();
-                let physics = pulsar_physics::skeletal::SkeletalPhysicsAsset::from_skeleton(
-                    mesh.id,
-                    &skeleton.skeleton(),
-                );
+                let physics =
+                    physics_api::SkeletalPhysicsAsset::from_skeleton(mesh.id, &skeleton.skeleton());
                 std::fs::write(
                     hidden.join(".hidden.physasset"),
                     serde_json::to_string(&physics).unwrap(),
@@ -1016,7 +1014,11 @@ fn sequence_notifies_and_states_are_edited_selected_and_saved(cx: &mut TestAppCo
         (n, s)
     });
     editor.read_with(cx, |e, _| {
-        assert_eq!(e.selected_notify.as_deref(), Some(state.as_str()), "a new state is selected");
+        assert_eq!(
+            e.selected_notify.as_deref(),
+            Some(state.as_str()),
+            "a new state is selected"
+        );
         assert_eq!(e.animation_features.notify_states.len(), 1);
     });
     editor.update(cx, |e, _| {
@@ -1038,8 +1040,14 @@ fn sequence_notifies_and_states_are_edited_selected_and_saved(cx: &mut TestAppCo
     let saved = assets::load_animseq_asset(&path).unwrap().features;
     assert_eq!(saved.notifies.len(), 1);
     let s = &saved.notify_states[0];
-    assert_eq!((s.name.as_str(), s.disabled, s.tick_interval), ("Trail", true, Some(0.05)));
-    assert!((s.start - 0.2).abs() < 0.05 && (s.end - 0.5).abs() < 0.05, "{s:?}");
+    assert_eq!(
+        (s.name.as_str(), s.disabled, s.tick_interval),
+        ("Trail", true, Some(0.05))
+    );
+    assert!(
+        (s.start - 0.2).abs() < 0.05 && (s.end - 0.5).abs() < 0.05,
+        "{s:?}"
+    );
     assert_eq!(s.fields[0].value, NotifyValue::Float(0.75));
     editor.read_with(cx, |e, _| assert!(!e.is_dirty, "saving clears dirty"));
 
@@ -1064,7 +1072,9 @@ fn phase5_sequence_notify_and_state_survive_edit_save_and_reopen(cx: &mut TestAp
     let path = dir.path().join("walk.animseq");
     assets::save_animseq_asset(&path, &sequence).unwrap();
 
-    let (editor, cx) = editor_window(cx, |window, cx| SkeletalAnimEditorPanel::new_with_path(path.clone(), window, cx).unwrap());
+    let (editor, cx) = editor_window(cx, |window, cx| {
+        SkeletalAnimEditorPanel::new_with_path(path.clone(), window, cx).unwrap()
+    });
     let (notify, state) = editor.update(cx, |e, _| {
         assert_eq!(e.mode, EditorMode::Sequence);
         let n = e.add_notify(0.2).unwrap();
@@ -1075,17 +1085,33 @@ fn phase5_sequence_notify_and_state_survive_edit_save_and_reopen(cx: &mut TestAp
         e.save().unwrap();
         (n, s)
     });
-    let ids_before = editor.read_with(cx, |e, _| (e.animation_features.notifies[0].id.clone(), e.animation_features.notify_states[0].id.clone()));
+    let ids_before = editor.read_with(cx, |e, _| {
+        (
+            e.animation_features.notifies[0].id.clone(),
+            e.animation_features.notify_states[0].id.clone(),
+        )
+    });
     assert_eq!(ids_before, (notify, state));
     drop(editor);
 
     // a fresh editor on the same file shows the same notify and state with the same ids and payload
-    let (reopened, cx) = editor_window(cx, |window, cx| SkeletalAnimEditorPanel::new_with_path(path.clone(), window, cx).unwrap());
+    let (reopened, cx) = editor_window(cx, |window, cx| {
+        SkeletalAnimEditorPanel::new_with_path(path.clone(), window, cx).unwrap()
+    });
     reopened.read_with(cx, |e, _| {
-        assert_eq!((e.animation_features.notifies[0].id.clone(), e.animation_features.notify_states[0].id.clone()), ids_before);
+        assert_eq!(
+            (
+                e.animation_features.notifies[0].id.clone(),
+                e.animation_features.notify_states[0].id.clone()
+            ),
+            ids_before
+        );
         assert_eq!(e.animation_features.notifies[0].name, "Footstep");
         let s = &e.animation_features.notify_states[0];
-        assert_eq!((s.name.as_str(), s.fields[0].value.clone()), ("Window", NotifyValue::Int(7)));
+        assert_eq!(
+            (s.name.as_str(), s.fields[0].value.clone()),
+            ("Window", NotifyValue::Int(7))
+        );
         assert!(!e.is_dirty);
     });
 }

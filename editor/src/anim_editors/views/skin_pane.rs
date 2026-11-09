@@ -27,9 +27,14 @@ pub struct SkinPane {
 impl SkinPane {
     /// The rig of `skeleton` (loaded once per skeleton), or why there is none.
     pub fn rig(&mut self, root: &Path, skeleton: Option<&str>) -> Result<&Rig, String> {
-        let Some(id) = skeleton else { return Err("Pick a skeleton to preview.".into()) };
+        let Some(id) = skeleton else {
+            return Err("Pick a skeleton to preview.".into());
+        };
         if self.rig.as_ref().is_none_or(|(loaded, _)| loaded != id) {
-            self.rig = Some((id.to_string(), load_rig(root, &ProjectAssets::new(root), id)));
+            self.rig = Some((
+                id.to_string(),
+                load_rig(root, &ProjectAssets::new(root), id),
+            ));
             self.image = None;
             self.drawn_key = None;
         }
@@ -52,7 +57,9 @@ impl SkinPane {
             return;
         }
         let renderer = self.renderer.get_or_insert_with(SkinRenderer::new);
-        let (Some(renderer), Some((_, Ok(rig)))) = (renderer.as_mut(), self.rig.as_ref()) else { return };
+        let (Some(renderer), Some((_, Ok(rig)))) = (renderer.as_mut(), self.rig.as_ref()) else {
+            return;
+        };
         let frame = renderer.render(rig, pose, palette, WIDTH, HEIGHT);
         // gpui images are BGRA
         let mut bgra = frame.rgba;
@@ -60,7 +67,9 @@ impl SkinPane {
             px.swap(0, 2);
         }
         if let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, bgra) {
-            self.image = Some(Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)])));
+            self.image = Some(Arc::new(RenderImage::new(smallvec::smallvec![
+                image::Frame::new(buffer)
+            ])));
             self.drawn_key = Some(key);
         }
     }
@@ -76,19 +85,49 @@ impl SkinPane {
     /// The frame, or the reason there is none.
     pub fn element(&self, problem: Option<&str>, cx: &App) -> AnyElement {
         let theme = cx.theme();
-        let message = problem.map(str::to_string).or_else(|| (!self.has_gpu()).then(|| "No GPU adapter: the skinned preview needs one.".to_string())).or_else(|| {
-            matches!(&self.rig, Some((_, Ok(rig))) if rig.mesh.is_none()).then(|| "No skeletal mesh is built for this skeleton; the bones are drawn instead.".to_string())
-        });
+        let message = problem
+            .map(str::to_string)
+            .or_else(|| {
+                (!self.has_gpu())
+                    .then(|| "No GPU adapter: the skinned preview needs one.".to_string())
+            })
+            .or_else(|| {
+                matches!(&self.rig, Some((_, Ok(rig))) if rig.mesh.is_none()).then(|| {
+                    "No skeletal mesh is built for this skeleton; the bones are drawn instead."
+                        .to_string()
+                })
+            });
         let frame = match &self.image {
-            Some(image) => img(ImageSource::Render(image.clone())).w(px(WIDTH as f32)).h(px(HEIGHT as f32)).into_any_element(),
-            None => div().w(px(WIDTH as f32)).h(px(HEIGHT as f32)).bg(theme.muted).into_any_element(),
+            Some(image) => img(ImageSource::Render(image.clone()))
+                .w(px(WIDTH as f32))
+                .h(px(HEIGHT as f32))
+                .into_any_element(),
+            None => div()
+                .w(px(WIDTH as f32))
+                .h(px(HEIGHT as f32))
+                .bg(theme.muted)
+                .into_any_element(),
         };
         v_flex()
             .w_full()
             .items_center()
             .gap_1()
-            .child(div().rounded(px(6.0)).overflow_hidden().border_1().border_color(theme.border).child(frame))
-            .when_some(message, |col, text| col.child(div().text_xs().text_color(theme.muted_foreground).child(text)))
+            .child(
+                div()
+                    .rounded(px(6.0))
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(frame),
+            )
+            .when_some(message, |col, text| {
+                col.child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(text),
+                )
+            })
             .into_any_element()
     }
 }

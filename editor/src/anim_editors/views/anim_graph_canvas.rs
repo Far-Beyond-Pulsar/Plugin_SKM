@@ -10,21 +10,30 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use graphy::core::GraphComment;
-use graphy::{Compatibility, DataType, GraphDescription, NodeInstance, PinInstance, Position, StructuralResolver, TypeResolver};
+use graphy::{
+    Compatibility, DataType, GraphDescription, NodeInstance, PinInstance, Position,
+    StructuralResolver, TypeResolver,
+};
 #[cfg(test)]
 use graphy_blueprint as authored;
 use graphy_gpui::{CatalogEntry, GraphProfile, MacroTarget};
 use graphy_render::geom::rgba;
-use graphy_render::presenter::{default_pin_style, prettify, CommentPresentation, NodePresentation, PinStyle, Presenter};
+use graphy_render::presenter::{
+    default_pin_style, prettify, CommentPresentation, NodePresentation, PinStyle, Presenter,
+};
 use graphy_render::{PinShape, PinSide};
 use serde_json::Value;
-use skeletal_assets::anim_graph::catalogue::{node_def, AnimPinType, GraphKind, ParamType, PropKind, CATALOGUE};
+use skeletal_assets::anim_graph::catalogue::{
+    node_def, AnimPinType, GraphKind, ParamType, PropKind, CATALOGUE,
+};
 use skeletal_assets::anim_graph::{instantiate_node, AnimationGraphAsset};
 
 // ---- authored <-> canvas ---------------------------------------------------
 
 /// The conversion is Graphy's, shared with the Blueprint editor.
-pub use graphy::authored::{from_authored as to_canvas, node_from_authored as node_in, to_authored};
+pub use graphy::authored::{
+    from_authored as to_canvas, node_from_authored as node_in, to_authored,
+};
 
 // ---- the profile -----------------------------------------------------------
 
@@ -86,10 +95,19 @@ pub struct AnimResolver;
 
 impl TypeResolver for AnimResolver {
     fn compatibility(&self, from: &DataType, to: &DataType) -> Compatibility {
-        let (DataType::Data(a), DataType::Data(b)) = (from, to) else { return StructuralResolver.compatibility(from, to) };
-        match (AnimPinType::from_type_name(&a.type_string), AnimPinType::from_type_name(&b.type_string)) {
+        let (DataType::Data(a), DataType::Data(b)) = (from, to) else {
+            return StructuralResolver.compatibility(from, to);
+        };
+        match (
+            AnimPinType::from_type_name(&a.type_string),
+            AnimPinType::from_type_name(&b.type_string),
+        ) {
             (Some(x), Some(y)) if x.connects_to(y) => Compatibility::Exact,
-            (Some(x), Some(y)) => Compatibility::Incompatible(format!("{} cannot connect to {}", x.type_name(), y.type_name())),
+            (Some(x), Some(y)) => Compatibility::Incompatible(format!(
+                "{} cannot connect to {}",
+                x.type_name(),
+                y.type_name()
+            )),
             _ => Compatibility::Incompatible("unknown pin type".into()),
         }
     }
@@ -104,7 +122,9 @@ impl Presenter for AnimPresenter {
             p.shape = graphy_render::NodeShape::Reroute;
             return p;
         }
-        let Some(def) = node_def(&node.node_type) else { return NodePresentation::card(prettify(&node.node_type), rgba(0x4a, 0x55, 0x68, 1.0)) };
+        let Some(def) = node_def(&node.node_type) else {
+            return NodePresentation::card(prettify(&node.node_type), rgba(0x4a, 0x55, 0x68, 1.0));
+        };
         let mut title = def.title.to_string();
         let mut subtitle = None;
         match node.node_type.as_str() {
@@ -114,8 +134,22 @@ impl Presenter for AnimPresenter {
                 }
                 subtitle = Some("State \u{b7} double-click to open".to_string());
             }
-            "sm.transition" => subtitle = Some(format!("{} s \u{b7} priority {}", node.properties.get("duration").and_then(Value::as_f64).unwrap_or(0.0), node.properties.get("priority").and_then(Value::as_i64).unwrap_or(0))),
-            "anim.state_machine" | "anim.layer" => subtitle = Some("double-click to open".to_string()),
+            "sm.transition" => {
+                subtitle = Some(format!(
+                    "{} s \u{b7} priority {}",
+                    node.properties
+                        .get("duration")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.0),
+                    node.properties
+                        .get("priority")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0)
+                ))
+            }
+            "anim.state_machine" | "anim.layer" => {
+                subtitle = Some("double-click to open".to_string())
+            }
             _ => {}
         }
         let mut p = NodePresentation::card(title, category_accent(def.category));
@@ -126,7 +160,9 @@ impl Presenter for AnimPresenter {
 
     fn pin(&self, _node: &NodeInstance, pin: &PinInstance, _side: PinSide) -> PinStyle {
         match pin.data_type() {
-            DataType::Data(info) => AnimPinType::from_type_name(&info.type_string).map(pin_look).unwrap_or_else(|| default_pin_style(pin.data_type())),
+            DataType::Data(info) => AnimPinType::from_type_name(&info.type_string)
+                .map(pin_look)
+                .unwrap_or_else(|| default_pin_style(pin.data_type())),
             other => default_pin_style(other),
         }
     }
@@ -136,7 +172,9 @@ impl Presenter for AnimPresenter {
     }
 
     fn comment(&self, _index: usize, comment: &GraphComment) -> CommentPresentation {
-        CommentPresentation { accent: comment.color }
+        CommentPresentation {
+            accent: comment.color,
+        }
     }
 }
 
@@ -150,7 +188,12 @@ pub struct AnimProfile {
 
 impl AnimProfile {
     pub fn new(params: ParamTypes, kind: Arc<RwLock<GraphKind>>) -> Self {
-        Self { presenter: AnimPresenter, resolver: AnimResolver, params, kind }
+        Self {
+            presenter: AnimPresenter,
+            resolver: AnimResolver,
+            params,
+            kind,
+        }
     }
 
     fn graph_kind(&self) -> GraphKind {
@@ -190,8 +233,15 @@ impl GraphProfile for AnimProfile {
     }
 
     fn create_node(&self, definition: &str, id: &str, pos: Position) -> Option<NodeInstance> {
-        let params = self.params.read().unwrap_or_else(|e| e.into_inner()).clone();
-        instantiate_node(id, definition, (pos.x as f32, pos.y as f32), &|p| params.get(p).copied()).map(|n| node_in(&n))
+        let params = self
+            .params
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        instantiate_node(id, definition, (pos.x as f32, pos.y as f32), &|p| {
+            params.get(p).copied()
+        })
+        .map(|n| node_in(&n))
     }
 
     fn is_deletable(&self, node: &NodeInstance) -> bool {
@@ -200,7 +250,14 @@ impl GraphProfile for AnimProfile {
 
     fn macro_target(&self, node: &NodeInstance) -> Option<MacroTarget> {
         let def = node_def(&node.node_type)?;
-        def.props.iter().find(|p| matches!(p.kind, PropKind::SubGraph(_))).and_then(|p| node.properties.get(p.name)?.as_str()).filter(|id| !id.is_empty()).map(|id| MacroTarget { graph_id: id.to_string() })
+        def.props
+            .iter()
+            .find(|p| matches!(p.kind, PropKind::SubGraph(_)))
+            .and_then(|p| node.properties.get(p.name)?.as_str())
+            .filter(|id| !id.is_empty())
+            .map(|id| MacroTarget {
+                graph_id: id.to_string(),
+            })
     }
 }
 
@@ -227,9 +284,12 @@ mod tests {
 
     fn asset_with_wire() -> AnimationGraphAsset {
         let mut a = AnimationGraphAsset::default();
-        let player = instantiate_node("player", "anim.sequence_player", (-300.0, 20.5), &|_| None).unwrap();
+        let player =
+            instantiate_node("player", "anim.sequence_player", (-300.0, 20.5), &|_| None).unwrap();
         a.main.add_node(player).unwrap();
-        a.main.add_connection(data_connection("player", "pose", "output", "pose")).unwrap();
+        a.main
+            .add_connection(data_connection("player", "pose", "output", "pose"))
+            .unwrap();
         a
     }
 
@@ -241,15 +301,30 @@ mod tests {
         assert_eq!(canvas.connections.len(), 1);
         let back = to_authored(&canvas);
         assert_eq!(back.nodes.len(), 2);
-        assert_eq!(back.connections[0].id, a.main.connections[0].id, "connection ids survive");
+        assert_eq!(
+            back.connections[0].id, a.main.connections[0].id,
+            "connection ids survive"
+        );
         let pin = |g: &authored::GraphDescription, n: &str, p: &str, out: bool| {
             let node = &g.nodes[n];
             let pins = if out { &node.outputs } else { &node.inputs };
-            pins.iter().find(|x| x.id == p).unwrap().pin.connected_to.clone()
+            pins.iter()
+                .find(|x| x.id == p)
+                .unwrap()
+                .pin
+                .connected_to
+                .clone()
         };
-        assert_eq!(pin(&back, "player", "pose", true), pin(&a.main, "player", "pose", true), "back-links are rebuilt");
+        assert_eq!(
+            pin(&back, "player", "pose", true),
+            pin(&a.main, "player", "pose", true),
+            "back-links are rebuilt"
+        );
         assert_eq!(back.nodes["player"].position.y, 20.5);
-        assert_eq!(back.nodes["player"].properties, a.main.nodes["player"].properties);
+        assert_eq!(
+            back.nodes["player"].properties,
+            a.main.nodes["player"].properties
+        );
         // the result is a valid asset graph
         let mut b = a.clone();
         b.main = back;
@@ -260,9 +335,21 @@ mod tests {
     fn the_resolver_demands_exact_pin_types() {
         let r = AnimResolver;
         let t = |ty: AnimPinType| DataType::typed(ty.type_name());
-        assert!(matches!(r.compatibility(&t(AnimPinType::Pose), &t(AnimPinType::Pose)), Compatibility::Exact));
-        assert!(matches!(r.compatibility(&t(AnimPinType::Float), &t(AnimPinType::Pose)), Compatibility::Incompatible(_)));
-        assert!(matches!(r.compatibility(&t(AnimPinType::Int), &t(AnimPinType::Float)), Compatibility::Incompatible(_)), "no implicit widening");
+        assert!(matches!(
+            r.compatibility(&t(AnimPinType::Pose), &t(AnimPinType::Pose)),
+            Compatibility::Exact
+        ));
+        assert!(matches!(
+            r.compatibility(&t(AnimPinType::Float), &t(AnimPinType::Pose)),
+            Compatibility::Incompatible(_)
+        ));
+        assert!(
+            matches!(
+                r.compatibility(&t(AnimPinType::Int), &t(AnimPinType::Float)),
+                Compatibility::Incompatible(_)
+            ),
+            "no implicit widening"
+        );
     }
 
     #[test]
@@ -271,29 +358,49 @@ mod tests {
         let p = AnimProfile::new(Default::default(), kind.clone());
         let names: Vec<_> = p.catalog().iter().map(|e| e.definition.clone()).collect();
         assert!(names.contains(&"anim.sequence_player".to_string()));
-        assert!(!names.contains(&"anim.output_pose".to_string()), "the terminal is not offered");
+        assert!(
+            !names.contains(&"anim.output_pose".to_string()),
+            "the terminal is not offered"
+        );
         assert!(!names.contains(&"sm.state".to_string()));
         *kind.write().unwrap() = GraphKind::StateMachine;
         let names: Vec<_> = p.catalog().iter().map(|e| e.definition.clone()).collect();
-        assert!(names.contains(&"sm.state".to_string()) && names.contains(&"sm.transition".to_string()));
+        assert!(
+            names.contains(&"sm.state".to_string()) && names.contains(&"sm.transition".to_string())
+        );
         assert!(!names.contains(&"sm.entry".to_string()));
     }
 
     #[test]
     fn the_factory_builds_catalogue_nodes_with_their_pins_and_protects_terminals() {
         let p = AnimProfile::new(Default::default(), Arc::new(RwLock::new(GraphKind::Main)));
-        let n = p.create_node("anim.blend_multi", "b", Position::new(1.0, 2.0)).unwrap();
-        assert!(n.inputs.iter().any(|i| i.id.starts_with("pose_")), "dynamic pose pins exist");
-        assert!(p.create_node("anim.nope", "x", Position::new(0.0, 0.0)).is_none());
-        let out = p.create_node("anim.output_pose", "o", Position::new(0.0, 0.0)).unwrap();
+        let n = p
+            .create_node("anim.blend_multi", "b", Position::new(1.0, 2.0))
+            .unwrap();
+        assert!(
+            n.inputs.iter().any(|i| i.id.starts_with("pose_")),
+            "dynamic pose pins exist"
+        );
+        assert!(p
+            .create_node("anim.nope", "x", Position::new(0.0, 0.0))
+            .is_none());
+        let out = p
+            .create_node("anim.output_pose", "o", Position::new(0.0, 0.0))
+            .unwrap();
         assert!(!p.is_deletable(&out));
         assert!(p.is_deletable(&n));
         let state = {
-            let mut s = p.create_node("anim.state_machine", "m", Position::new(0.0, 0.0)).unwrap();
+            let mut s = p
+                .create_node("anim.state_machine", "m", Position::new(0.0, 0.0))
+                .unwrap();
             assert!(p.macro_target(&s).is_none(), "no graph yet");
-            s.properties.insert("machine".into(), serde_json::json!("machine_1"));
+            s.properties
+                .insert("machine".into(), serde_json::json!("machine_1"));
             s
         };
-        assert_eq!(p.macro_target(&state).map(|t| t.graph_id), Some("machine_1".into()));
+        assert_eq!(
+            p.macro_target(&state).map(|t| t.graph_id),
+            Some("machine_1".into())
+        );
     }
 }

@@ -12,7 +12,7 @@ use crate::core::{
 };
 use crate::editor::panel::ViewOptions;
 use crate::style::{mix, with_alpha, Palette};
-use pulsar_physics::{SkeletalPhysicsAsset, SkeletalShape};
+use physics_api::{SkeletalPhysicsAsset, SkeletalShape};
 use std::sync::Arc;
 
 use super::camera::{OrbitCamera, ViewAxis};

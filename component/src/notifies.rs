@@ -1628,12 +1628,7 @@ mod tests {
     fn two_animators_never_share_a_mesh() {
         // hero and horse each have an animator; the saddle (hero) and the
         // mane (horse) are unclaimed and go to the animator on their skeleton
-        let meshes = [
-            Some("hero"),
-            Some("horse"),
-            Some("hero"),
-            Some("horse"),
-        ];
+        let meshes = [Some("hero"), Some("horse"), Some("hero"), Some("horse")];
         let first = assign_meshes(&meshes, 0, 2);
         let second = assign_meshes(&meshes, 1, 2);
         assert_eq!(first, (Some(0), vec![0, 2]));
@@ -1658,7 +1653,10 @@ mod tests {
         p.note_driven_meshes(&[a]);
         assert!(p.take_shown_pose().is_none(), "same set: nothing to repeat");
         p.note_driven_meshes(&[a, b]);
-        assert!(p.take_shown_pose().is_some(), "the added mesh needs the pose");
+        assert!(
+            p.take_shown_pose().is_some(),
+            "the added mesh needs the pose"
+        );
     }
 
     fn player() -> AnimationComponent {
@@ -2127,7 +2125,7 @@ mod tests {
                 move |_| *wrong.lock().unwrap() += 1,
             ));
         }
-        hub.flush(FlushPoint::AfterPhysics);
+        hub.flush(FlushPoint::AfterSystems);
         assert!(received.lock().unwrap().is_empty());
         flush_animation_notifies(&mut world, &hub, |source, variable| {
             assert_eq!(source, owner);

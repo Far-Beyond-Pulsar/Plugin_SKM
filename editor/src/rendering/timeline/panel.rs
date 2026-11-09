@@ -851,13 +851,24 @@ impl TimelinePanel {
                     let Some(n) = features.notifies.iter().find(|n| n.id == placement.id) else {
                         continue;
                     };
-                    (n.name.clone(), false, left + 9.0, (placement.x1 - placement.anchor - 9.0).max(8.0))
+                    (
+                        n.name.clone(),
+                        false,
+                        left + 9.0,
+                        (placement.x1 - placement.anchor - 9.0).max(8.0),
+                    )
                 }
                 NotifyKind::State => {
-                    let Some(s) = features.notify_states.iter().find(|s| s.id == placement.id) else {
+                    let Some(s) = features.notify_states.iter().find(|s| s.id == placement.id)
+                    else {
                         continue;
                     };
-                    (s.name.clone(), s.disabled, left + 6.0, (placement.x1 - placement.anchor - 6.0).max(8.0))
+                    (
+                        s.name.clone(),
+                        s.disabled,
+                        left + 6.0,
+                        (placement.x1 - placement.anchor - 6.0).max(8.0),
+                    )
                 }
             };
             let selected = editor.selected_notify.as_deref() == Some(placement.id.as_str());

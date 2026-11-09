@@ -20,7 +20,9 @@ use ui::button::{Button, ButtonVariants};
 use ui::input::{InputEvent, InputState, TextInput};
 use ui::popover::Popover;
 use ui::tag::Tag;
-use ui::{h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, StyledExt};
+use ui::{
+    h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, StyledExt,
+};
 
 use crate::anim_editors::document::SaveOutcome;
 use crate::anim_editors::refs::{self, DepNode, DepState, ProjectRefIndex, RefIndex, RefStatus};
@@ -72,7 +74,9 @@ macro_rules! editor_model {
                 $crate::anim_editors::document::AnimAsset::asset_name(self.doc.value())
             }
             fn asset_text(&self) -> Vec<u8> {
-                $crate::anim_editors::document::AnimAsset::to_text(self.doc.value()).unwrap_or_default().into_bytes()
+                $crate::anim_editors::document::AnimAsset::to_text(self.doc.value())
+                    .unwrap_or_default()
+                    .into_bytes()
             }
             fn is_dirty(&self) -> bool {
                 self.doc.is_dirty()
@@ -117,7 +121,10 @@ macro_rules! editor_model {
                 &self.selection
             }
             fn adopt_undo(&self, service: &plugin_editor_api::UndoService) {
-                service.adopt(&plugin_editor_api::DocumentId::for_path(self.doc.path()), &self.doc.history());
+                service.adopt(
+                    &plugin_editor_api::DocumentId::for_path(self.doc.path()),
+                    &self.doc.history(),
+                );
             }
             fn clear_selection(&mut self) {
                 self.selection = $crate::anim_editors::selection::AnimSelection::None;
@@ -130,7 +137,11 @@ macro_rules! editor_model {
 pub fn fmt_f32(v: f32) -> String {
     let s = format!("{v:.4}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() || s == "-" { "0".into() } else { s.to_string() }
+    if s.is_empty() || s == "-" {
+        "0".into()
+    } else {
+        s.to_string()
+    }
 }
 
 pub fn parse_f32(text: &str) -> Option<f32> {
@@ -143,9 +154,21 @@ pub fn parse_f32(text: &str) -> Option<f32> {
 pub trait EditorHost: Sized + 'static {
     fn widgets(&mut self) -> &mut Widgets;
     /// A text field was committed (Enter or blur) with changed text.
-    fn commit_field(&mut self, key: &str, text: String, window: &mut Window, cx: &mut Context<Self>);
+    fn commit_field(
+        &mut self,
+        key: &str,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    );
     /// A reference was chosen (`None` clears it).
-    fn pick_ref(&mut self, key: &str, id: Option<String>, window: &mut Window, cx: &mut Context<Self>);
+    fn pick_ref(
+        &mut self,
+        key: &str,
+        id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    );
 }
 
 #[derive(Default)]
@@ -169,7 +192,13 @@ impl Widgets {
     }
 
     /// The text input `key`, showing `current` unless it is being typed in.
-    pub fn input<V: EditorHost>(&mut self, key: &str, current: &str, window: &mut Window, cx: &mut Context<V>) -> Entity<InputState> {
+    pub fn input<V: EditorHost>(
+        &mut self,
+        key: &str,
+        current: &str,
+        window: &mut Window,
+        cx: &mut Context<V>,
+    ) -> Entity<InputState> {
         if let Some(input) = self.fields.get(key).cloned() {
             let focused = input.read(cx).focus_handle(cx).contains_focused(window, cx);
             if !focused && input.read(cx).value().as_ref() != current {
@@ -183,23 +212,38 @@ impl Widgets {
         let input = cx.new(|cx| InputState::new(window, cx).default_value(current.to_string()));
         self.shown.insert(key.to_string(), current.to_string());
         let owned = key.to_string();
-        let sub = cx.subscribe_in(&input, window, move |this: &mut V, input, event: &InputEvent, window, cx| {
-            if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                let text = input.read(cx).value().to_string();
-                if this.widgets().changed(&owned, &text) {
-                    this.commit_field(&owned, text, window, cx);
+        let sub = cx.subscribe_in(
+            &input,
+            window,
+            move |this: &mut V, input, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                    let text = input.read(cx).value().to_string();
+                    if this.widgets().changed(&owned, &text) {
+                        this.commit_field(&owned, text, window, cx);
+                    }
                 }
-            }
-        });
+            },
+        );
         self._subscriptions.push(sub);
         self.fields.insert(key.to_string(), input.clone());
         input
     }
 
     /// A labelled single-line field.
-    pub fn text_field<V: EditorHost>(&mut self, key: &str, label: &str, current: &str, window: &mut Window, cx: &mut Context<V>) -> AnyElement {
+    pub fn text_field<V: EditorHost>(
+        &mut self,
+        key: &str,
+        label: &str,
+        current: &str,
+        window: &mut Window,
+        cx: &mut Context<V>,
+    ) -> AnyElement {
         let input = self.input(key, current, window, cx);
-        labelled(label, div().w(px(150.0)).child(TextInput::new(&input).small()), cx)
+        labelled(
+            label,
+            div().w(px(150.0)).child(TextInput::new(&input).small()),
+            cx,
+        )
     }
 
     /// A reference picker for `key`: shows the stored reference's status and
@@ -221,9 +265,13 @@ impl Widgets {
             None => {
                 let list = cx.new(|cx| RefList::new(root.to_path_buf(), kind, cx));
                 let owned = key.to_string();
-                let sub = cx.subscribe_in(&list, window, move |this: &mut V, _list, event: &RefPicked, window, cx| {
-                    this.pick_ref(&owned, event.0.clone(), window, cx);
-                });
+                let sub = cx.subscribe_in(
+                    &list,
+                    window,
+                    move |this: &mut V, _list, event: &RefPicked, window, cx| {
+                        this.pick_ref(&owned, event.0.clone(), window, cx);
+                    },
+                );
                 self._subscriptions.push(sub);
                 self.refs.insert(key.to_string(), list.clone());
                 list
@@ -237,14 +285,25 @@ impl Widgets {
         let (text, color) = match status {
             RefStatus::Unset => ("None".to_string(), theme.muted_foreground),
             RefStatus::Ok { name } => (name.clone(), theme.foreground),
-            RefStatus::Missing => (format!("Missing {}", current.as_deref().map(short_id).unwrap_or("")), theme.danger),
+            RefStatus::Missing => (
+                format!("Missing {}", current.as_deref().map(short_id).unwrap_or("")),
+                theme.danger,
+            ),
             RefStatus::Ambiguous { count } => (format!("Ambiguous ({count} files)"), theme.danger),
-            RefStatus::Incompatible { name, .. } => (format!("{name} (other skeleton)"), theme.warning),
+            RefStatus::Incompatible { name, .. } => {
+                (format!("{name} (other skeleton)"), theme.warning)
+            }
         };
         let refresh = list.clone();
-        let trigger = Button::new(SharedString::from(format!("ref-{key}"))).label(text).small().outline().dropdown_caret(true).text_color(color).on_click(move |_, _, cx| {
-            refresh.update(cx, |l, _| l.refresh());
-        });
+        let trigger = Button::new(SharedString::from(format!("ref-{key}")))
+            .label(text)
+            .small()
+            .outline()
+            .dropdown_caret(true)
+            .text_color(color)
+            .on_click(move |_, _, cx| {
+                refresh.update(cx, |l, _| l.refresh());
+            });
         let popover = Popover::<RefList>::new(SharedString::from(format!("refpop-{key}")))
             .anchor(Corner::BottomLeft)
             .trigger(trigger)
@@ -268,7 +327,12 @@ pub fn labelled(label: &str, control: impl IntoElement, cx: &App) -> AnyElement 
         .gap_2()
         .items_center()
         .justify_between()
-        .child(div().text_xs().text_color(cx.theme().muted_foreground).child(label.to_string()))
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(label.to_string()),
+        )
         .child(control)
         .into_any_element()
 }
@@ -288,12 +352,23 @@ pub struct RefList {
 
 impl RefList {
     fn new(root: PathBuf, kind: &'static str, cx: &mut Context<Self>) -> Self {
-        Self { root, kind, skeleton: None, current: None, entries: Vec::new(), focus: Some(cx.focus_handle()) }
+        Self {
+            root,
+            kind,
+            skeleton: None,
+            current: None,
+            entries: Vec::new(),
+            focus: Some(cx.focus_handle()),
+        }
     }
 
     /// Read the project's assets of this kind, narrowed to the owner's skeleton.
     pub fn refresh(&mut self) {
-        self.entries = refs::picker_entries(&ProjectRefIndex::new(&self.root), self.kind, self.skeleton.as_deref());
+        self.entries = refs::picker_entries(
+            &ProjectRefIndex::new(&self.root),
+            self.kind,
+            self.skeleton.as_deref(),
+        );
     }
 }
 
@@ -309,15 +384,34 @@ impl EventEmitter<DismissEvent> for RefList {}
 impl Render for RefList {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let mut list = v_flex().w(px(300.0)).max_h(px(320.0)).overflow_y_scroll().p_1().gap_0p5().bg(theme.background).border_1().border_color(theme.border).rounded(px(6.0));
+        let mut list = v_flex()
+            .w(px(300.0))
+            .max_h(px(320.0))
+            .overflow_y_scroll()
+            .p_1()
+            .gap_0p5()
+            .bg(theme.background)
+            .border_1()
+            .border_color(theme.border)
+            .rounded(px(6.0));
         list = list.child(
-            Button::new("ref-clear").label("None (clear)").ghost().small().on_click(cx.listener(|_, _, _, cx| {
-                cx.emit(RefPicked(None));
-                cx.emit(DismissEvent);
-            })),
+            Button::new("ref-clear")
+                .label("None (clear)")
+                .ghost()
+                .small()
+                .on_click(cx.listener(|_, _, _, cx| {
+                    cx.emit(RefPicked(None));
+                    cx.emit(DismissEvent);
+                })),
         );
         if self.entries.is_empty() {
-            list = list.child(div().p_2().text_xs().text_color(theme.muted_foreground).child("No assets of this kind in the project."));
+            list = list.child(
+                div()
+                    .p_2()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("No assets of this kind in the project."),
+            );
         }
         for (i, entry) in self.entries.iter().enumerate() {
             let id = entry.candidate.id.clone();
@@ -331,7 +425,11 @@ impl Render for RefList {
                     .small()
                     .selected(selected)
                     .disabled(incompatible)
-                    .tooltip(if incompatible { "This asset is for a different skeleton".to_string() } else { entry.candidate.path.clone() })
+                    .tooltip(if incompatible {
+                        "This asset is for a different skeleton".to_string()
+                    } else {
+                        entry.candidate.path.clone()
+                    })
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.emit(RefPicked(Some(id.clone())));
                         cx.emit(DismissEvent);
@@ -361,16 +459,31 @@ pub struct Aux {
 
 impl Aux {
     pub fn new() -> Self {
-        Self { tab: AuxTab::Problems, diagnostics: Vec::new(), used_by: Vec::new(), deps: Vec::new() }
+        Self {
+            tab: AuxTab::Problems,
+            diagnostics: Vec::new(),
+            used_by: Vec::new(),
+            deps: Vec::new(),
+        }
     }
 
     /// Recompute from the project index and the document.
-    pub fn refresh(&mut self, root: &Path, kind: &str, id: &str, bytes: &[u8], model: Vec<Diagnostic>) {
+    pub fn refresh(
+        &mut self,
+        root: &Path,
+        kind: &str,
+        id: &str,
+        bytes: &[u8],
+        model: Vec<Diagnostic>,
+    ) {
         let mut diagnostics = model;
         if let Some(source) = ProjectAssetSource::open(root) {
             for d in asset_report(&source, kind, bytes) {
                 // closure problems are the project's; the model already reports its own
-                if !diagnostics.iter().any(|m| m.code == d.code && m.location == d.location && m.message == d.message) {
+                if !diagnostics
+                    .iter()
+                    .any(|m| m.code == d.code && m.location == d.location && m.message == d.message)
+                {
                     diagnostics.push(d);
                 }
             }
@@ -407,7 +520,14 @@ fn kind_label(kind: &str) -> &str {
     }
 }
 
-fn dep_rows(nodes: &[DepNode], depth: usize, index: &ProjectRefIndex, theme: &ui::Theme, out: &mut Vec<AnyElement>, counter: &mut usize) {
+fn dep_rows(
+    nodes: &[DepNode],
+    depth: usize,
+    index: &ProjectRefIndex,
+    theme: &ui::Theme,
+    out: &mut Vec<AnyElement>,
+    counter: &mut usize,
+) {
     for node in nodes {
         *counter += 1;
         let (note, color, path) = match &node.state {
@@ -433,12 +553,26 @@ fn dep_rows(nodes: &[DepNode], depth: usize, index: &ProjectRefIndex, theme: &ui
                 .items_center()
                 .text_xs()
                 .text_color(color)
-                .when(target.is_some(), |row| row.cursor_pointer().hover(|s| s.bg(theme.secondary)))
+                .when(target.is_some(), |row| {
+                    row.cursor_pointer().hover(|s| s.bg(theme.secondary))
+                })
                 .child(name)
-                .child(div().text_color(theme.muted_foreground).child(kind_label(&node.kind).to_string()))
-                .child(div().text_color(theme.muted_foreground).child(node.via.clone()))
-                .when(!note.is_empty(), |row| row.child(Tag::warning().small().child(note)))
-                .when_some(target, |row, path| row.on_click(move |_, window, cx| open_asset(path.clone(), window, cx)))
+                .child(
+                    div()
+                        .text_color(theme.muted_foreground)
+                        .child(kind_label(&node.kind).to_string()),
+                )
+                .child(
+                    div()
+                        .text_color(theme.muted_foreground)
+                        .child(node.via.clone()),
+                )
+                .when(!note.is_empty(), |row| {
+                    row.child(Tag::warning().small().child(note))
+                })
+                .when_some(target, |row, path| {
+                    row.on_click(move |_, window, cx| open_asset(path.clone(), window, cx))
+                })
                 .into_any_element(),
         );
         dep_rows(&node.children, depth + 1, index, theme, out, counter);
@@ -451,7 +585,16 @@ pub fn aux_panel<V: EditorBody>(this: &mut V, cx: &mut Context<V>) -> AnyElement
     let chrome = this.chrome();
     let tab = chrome.aux.tab;
     let root = chrome.root.clone();
-    let counts = (chrome.aux.diagnostics.len(), chrome.aux.used_by.len(), chrome.aux.deps.iter().map(|d| d.flatten().len()).sum::<usize>());
+    let counts = (
+        chrome.aux.diagnostics.len(),
+        chrome.aux.used_by.len(),
+        chrome
+            .aux
+            .deps
+            .iter()
+            .map(|d| d.flatten().len())
+            .sum::<usize>(),
+    );
     let tab_button = |label: String, which: AuxTab, cx: &mut Context<V>| {
         Button::new(SharedString::from(format!("aux-{which:?}")))
             .label(label)
@@ -473,15 +616,39 @@ pub fn aux_panel<V: EditorBody>(this: &mut V, cx: &mut Context<V>) -> AnyElement
         .bg(theme.secondary)
         .border_b_1()
         .border_color(theme.border)
-        .child(tab_button(format!("Problems ({})", counts.0), AuxTab::Problems, cx))
-        .child(tab_button(format!("Used By ({})", counts.1), AuxTab::UsedBy, cx))
-        .child(tab_button(format!("Dependencies ({})", counts.2), AuxTab::Dependencies, cx));
-    let mut body = v_flex().w_full().flex_1().min_h_0().overflow_y_scroll().p_1().gap_0p5();
+        .child(tab_button(
+            format!("Problems ({})", counts.0),
+            AuxTab::Problems,
+            cx,
+        ))
+        .child(tab_button(
+            format!("Used By ({})", counts.1),
+            AuxTab::UsedBy,
+            cx,
+        ))
+        .child(tab_button(
+            format!("Dependencies ({})", counts.2),
+            AuxTab::Dependencies,
+            cx,
+        ));
+    let mut body = v_flex()
+        .w_full()
+        .flex_1()
+        .min_h_0()
+        .overflow_y_scroll()
+        .p_1()
+        .gap_0p5();
     match tab {
         AuxTab::Problems => {
             let chrome = this.chrome();
             if chrome.aux.diagnostics.is_empty() {
-                body = body.child(div().p_2().text_xs().text_color(theme.success).child("No problems found."));
+                body = body.child(
+                    div()
+                        .p_2()
+                        .text_xs()
+                        .text_color(theme.success)
+                        .child("No problems found."),
+                );
             }
             for (i, d) in chrome.aux.diagnostics.iter().enumerate() {
                 let color = match d.severity {
@@ -509,8 +676,20 @@ pub fn aux_panel<V: EditorBody>(this: &mut V, cx: &mut Context<V>) -> AnyElement
                         .child(
                             v_flex()
                                 .flex_1()
-                                .child(div().text_xs().text_color(theme.foreground).child(d.message.clone()))
-                                .when_some(d.repair.clone(), |c, r| c.child(div().text_xs().text_color(theme.muted_foreground).child(format!("Fix: {r}")))),
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme.foreground)
+                                        .child(d.message.clone()),
+                                )
+                                .when_some(d.repair.clone(), |c, r| {
+                                    c.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child(format!("Fix: {r}")),
+                                    )
+                                }),
                         )
                         .on_click(cx.listener(move |this, _, window, cx| {
                             if let Some(at) = &location {
@@ -523,10 +702,21 @@ pub fn aux_panel<V: EditorBody>(this: &mut V, cx: &mut Context<V>) -> AnyElement
         AuxTab::UsedBy => {
             let chrome = this.chrome();
             if chrome.aux.used_by.is_empty() {
-                body = body.child(div().p_2().text_xs().text_color(theme.muted_foreground).child("Nothing in the project references this asset."));
+                body = body.child(
+                    div()
+                        .p_2()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child("Nothing in the project references this asset."),
+                );
             }
             for (i, r) in chrome.aux.used_by.iter().enumerate() {
-                let name = r.path.strip_prefix(&root).unwrap_or(&r.path).display().to_string();
+                let name = r
+                    .path
+                    .strip_prefix(&root)
+                    .unwrap_or(&r.path)
+                    .display()
+                    .to_string();
                 let path = r.path.clone();
                 body = body.child(
                     h_flex()
@@ -539,9 +729,19 @@ pub fn aux_panel<V: EditorBody>(this: &mut V, cx: &mut Context<V>) -> AnyElement
                         .cursor_pointer()
                         .hover(|s| s.bg(theme.secondary))
                         .child(div().text_color(theme.foreground).child(name))
-                        .child(div().text_color(theme.muted_foreground).child(kind_label(&r.kind).to_string()))
-                        .child(div().text_color(theme.muted_foreground).child(r.via.clone()))
-                        .when(r.hint, |row| row.child(Tag::secondary().small().child("hint")))
+                        .child(
+                            div()
+                                .text_color(theme.muted_foreground)
+                                .child(kind_label(&r.kind).to_string()),
+                        )
+                        .child(
+                            div()
+                                .text_color(theme.muted_foreground)
+                                .child(r.via.clone()),
+                        )
+                        .when(r.hint, |row| {
+                            row.child(Tag::secondary().small().child("hint"))
+                        })
                         .on_click(move |_, window, cx| open_asset(path.clone(), window, cx)),
                 );
             }
@@ -550,14 +750,35 @@ pub fn aux_panel<V: EditorBody>(this: &mut V, cx: &mut Context<V>) -> AnyElement
             let index = ProjectRefIndex::new(&root);
             let mut rows = Vec::new();
             let mut counter = 0;
-            dep_rows(&this.chrome().aux.deps, 0, &index, &theme, &mut rows, &mut counter);
+            dep_rows(
+                &this.chrome().aux.deps,
+                0,
+                &index,
+                &theme,
+                &mut rows,
+                &mut counter,
+            );
             if rows.is_empty() {
-                body = body.child(div().p_2().text_xs().text_color(theme.muted_foreground).child("This asset references nothing."));
+                body = body.child(
+                    div()
+                        .p_2()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child("This asset references nothing."),
+                );
             }
             body = body.children(rows);
         }
     }
-    v_flex().w_full().h(px(150.0)).flex_shrink_0().border_t_1().border_color(theme.border).child(header).child(body).into_any_element()
+    v_flex()
+        .w_full()
+        .h(px(150.0))
+        .flex_shrink_0()
+        .border_t_1()
+        .border_color(theme.border)
+        .child(header)
+        .child(body)
+        .into_any_element()
 }
 
 // ---- frame -----------------------------------------------------------------
@@ -611,7 +832,12 @@ pub trait EditorBody: EditorHost {
 }
 
 /// Run `edit`, then refresh derived data. Every edit in a view goes through this.
-pub fn edit<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Context<V>, edit: impl FnOnce(&mut V::Model) -> Result<(), String>) {
+pub fn edit<V: EditorBody>(
+    this: &mut V,
+    window: &mut Window,
+    cx: &mut Context<V>,
+    edit: impl FnOnce(&mut V::Model) -> Result<(), String>,
+) {
     match edit(this.model_mut()) {
         Ok(()) => this.chrome().status = None,
         Err(message) => this.chrome().status = Some(message),
@@ -625,13 +851,19 @@ pub fn save<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Context<V
         Ok(SaveOutcome::Saved) => {
             this.chrome().status = None;
             this.chrome().external_change = false;
-            let (root, path) = (this.chrome().root.clone(), this.model().path().to_path_buf());
+            let (root, path) = (
+                this.chrome().root.clone(),
+                this.model().path().to_path_buf(),
+            );
             asset_index::record_asset(&root, &path);
             this.chrome().aux_generation = None;
         }
         Ok(SaveOutcome::Conflict { .. }) => {
             this.chrome().external_change = true;
-            this.chrome().status = Some("The file changed on disk since it was opened. Keep your version or reload theirs.".into());
+            this.chrome().status = Some(
+                "The file changed on disk since it was opened. Keep your version or reload theirs."
+                    .into(),
+            );
         }
         Err(error) => this.chrome().status = Some(format!("Could not save: {error}")),
     }
@@ -644,7 +876,10 @@ pub fn overwrite<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Cont
         Ok(()) => {
             this.chrome().status = None;
             this.chrome().external_change = false;
-            let (root, path) = (this.chrome().root.clone(), this.model().path().to_path_buf());
+            let (root, path) = (
+                this.chrome().root.clone(),
+                this.model().path().to_path_buf(),
+            );
             asset_index::record_asset(&root, &path);
             this.chrome().aux_generation = None;
         }
@@ -688,14 +923,27 @@ pub fn section(title: &str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
         .w_full()
         .gap_1()
         .pb_2()
-        .child(div().text_xs().font_semibold().text_color(theme.muted_foreground).child(title.to_uppercase()))
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(theme.muted_foreground)
+                .child(title.to_uppercase()),
+        )
         .children(rows)
         .into_any_element()
 }
 
 /// A read-only value row.
 pub fn value_row(label: &str, value: impl Into<SharedString>, cx: &App) -> AnyElement {
-    labelled(label, div().text_xs().text_color(cx.theme().foreground).child(value.into()), cx)
+    labelled(
+        label,
+        div()
+            .text_xs()
+            .text_color(cx.theme().foreground)
+            .child(value.into()),
+        cx,
+    )
 }
 
 pub fn empty_inspector(selection: &AnimSelection, hint: &str, cx: &App) -> AnyElement {
@@ -703,17 +951,38 @@ pub fn empty_inspector(selection: &AnimSelection, hint: &str, cx: &App) -> AnyEl
     v_flex()
         .p_3()
         .gap_1()
-        .child(div().text_sm().font_semibold().text_color(theme.foreground).child(selection.title()))
-        .child(div().text_xs().text_color(theme.muted_foreground).child(hint.to_string()))
+        .child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .text_color(theme.foreground)
+                .child(selection.title()),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(hint.to_string()),
+        )
         .into_any_element()
 }
 
 /// Lays out the toolbar, the three columns and the auxiliary panel.
-pub fn frame<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Context<V>) -> impl IntoElement {
+pub fn frame<V: EditorBody>(
+    this: &mut V,
+    window: &mut Window,
+    cx: &mut Context<V>,
+) -> impl IntoElement {
     // derived data follows the document
     let generation = this.model().generation();
     if this.chrome().aux_generation != Some(generation) {
-        let (root, kind, id, bytes, diags) = (this.chrome().root.clone(), this.model().kind(), this.model().asset_id(), this.model().asset_text(), this.model().validation());
+        let (root, kind, id, bytes, diags) = (
+            this.chrome().root.clone(),
+            this.model().kind(),
+            this.model().asset_id(),
+            this.model().asset_text(),
+            this.model().validation(),
+        );
         this.chrome().aux.refresh(&root, kind, &id, &bytes, diags);
         this.chrome().aux_generation = Some(generation);
         let external = this.model().changed_on_disk();
@@ -722,12 +991,36 @@ pub fn frame<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Context<
     let theme = cx.theme().clone();
     let dirty = this.model().is_dirty();
     let (can_undo, can_redo) = (this.model().can_undo(), this.model().can_redo());
-    let undo_tip = this.model().undo_label().filter(|l| !l.is_empty()).map_or("Undo (Ctrl+Z)".to_string(), |l| format!("Undo {l} (Ctrl+Z)"));
-    let redo_tip = this.model().redo_label().filter(|l| !l.is_empty()).map_or("Redo (Ctrl+Shift+Z)".to_string(), |l| format!("Redo {l} (Ctrl+Shift+Z)"));
+    let undo_tip = this
+        .model()
+        .undo_label()
+        .filter(|l| !l.is_empty())
+        .map_or("Undo (Ctrl+Z)".to_string(), |l| {
+            format!("Undo {l} (Ctrl+Z)")
+        });
+    let redo_tip = this
+        .model()
+        .redo_label()
+        .filter(|l| !l.is_empty())
+        .map_or("Redo (Ctrl+Shift+Z)".to_string(), |l| {
+            format!("Redo {l} (Ctrl+Shift+Z)")
+        });
     let name = this.model().asset_name();
     let crumbs = refs::breadcrumb(&this.chrome_ref().root, this.model().path());
-    let errors = this.chrome().aux.diagnostics.iter().filter(|d| d.severity == Severity::Error).count();
-    let warnings = this.chrome().aux.diagnostics.iter().filter(|d| d.severity == Severity::Warning).count();
+    let errors = this
+        .chrome()
+        .aux
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .count();
+    let warnings = this
+        .chrome()
+        .aux
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+        .count();
     let status = this.chrome().status.clone();
     let external = this.chrome().external_change;
     let icon = this.icon();
@@ -787,13 +1080,27 @@ pub fn frame<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Context<
                 .on_click(cx.listener(|this, _, window, cx| redo(this, window, cx))),
         )
         .child(Icon::new(icon).size(px(15.0)).text_color(theme.info))
-        .child(div().text_sm().font_semibold().text_color(theme.foreground).child(name))
+        .child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .text_color(theme.foreground)
+                .child(name),
+        )
         .child(Tag::secondary().small().child(kind_title))
         .children(extra)
         .child(div().flex_1())
-        .when(errors > 0, |t| t.child(Tag::danger().small().child(format!("{errors} errors"))))
-        .when(warnings > 0, |t| t.child(Tag::warning().small().child(format!("{warnings} warnings"))))
-        .child(if dirty { Tag::warning().small().child("Unsaved changes") } else { Tag::success().small().child("Saved") });
+        .when(errors > 0, |t| {
+            t.child(Tag::danger().small().child(format!("{errors} errors")))
+        })
+        .when(warnings > 0, |t| {
+            t.child(Tag::warning().small().child(format!("{warnings} warnings")))
+        })
+        .child(if dirty {
+            Tag::warning().small().child("Unsaved changes")
+        } else {
+            Tag::success().small().child("Saved")
+        });
 
     let breadcrumb = h_flex()
         .w_full()
@@ -808,7 +1115,8 @@ pub fn frame<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Context<
         .text_color(theme.muted_foreground)
         .children(crumbs.into_iter().enumerate().flat_map(|(i, c)| {
             let sep = (i > 0).then(|| div().child("/").into_any_element());
-            sep.into_iter().chain(std::iter::once(div().child(c).into_any_element()))
+            sep.into_iter()
+                .chain(std::iter::once(div().child(c).into_any_element()))
         }));
 
     let banner = |text: String, color: Hsla, actions: Vec<Button>| {
@@ -822,7 +1130,13 @@ pub fn frame<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Context<
             .bg(color.opacity(0.10))
             .border_b_1()
             .border_color(color.opacity(0.35))
-            .child(div().flex_1().text_xs().text_color(theme.foreground).child(text))
+            .child(
+                div()
+                    .flex_1()
+                    .text_xs()
+                    .text_color(theme.foreground)
+                    .child(text),
+            )
             .children(actions)
     };
 
@@ -841,12 +1155,20 @@ pub fn frame<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Context<
                 "This file changed on disk (another tab or tool saved it).".into(),
                 theme.warning,
                 vec![
-                    Button::new("anim-keep-mine").label("Keep my version").small().on_click(cx.listener(|this, _, window, cx| overwrite(this, window, cx))),
-                    Button::new("anim-use-theirs").label("Reload theirs").small().on_click(cx.listener(|this, _, window, cx| reload(this, window, cx))),
+                    Button::new("anim-keep-mine")
+                        .label("Keep my version")
+                        .small()
+                        .on_click(cx.listener(|this, _, window, cx| overwrite(this, window, cx))),
+                    Button::new("anim-use-theirs")
+                        .label("Reload theirs")
+                        .small()
+                        .on_click(cx.listener(|this, _, window, cx| reload(this, window, cx))),
                 ],
             ))
         })
-        .when_some(status, |c, message| c.child(banner(message, theme.danger, Vec::new())))
+        .when_some(status, |c, message| {
+            c.child(banner(message, theme.danger, Vec::new()))
+        })
         .child(
             h_flex()
                 .flex_1()
@@ -899,7 +1221,14 @@ pub fn frame<V: EditorBody>(this: &mut V, window: &mut Window, cx: &mut Context<
                                 .text_color(theme.muted_foreground)
                                 .child("PROPERTIES"),
                         )
-                        .child(div().flex_1().min_h_0().overflow_y_scroll().p_3().child(inspector)),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .overflow_y_scroll()
+                                .p_3()
+                                .child(inspector),
+                        ),
                 ),
         )
         .child(aux)
@@ -912,13 +1241,18 @@ macro_rules! anim_panel {
         impl $view {
             /// Register the document's undo history with the host.
             pub fn adopt_undo(&self, service: &plugin_editor_api::UndoService) {
-                $crate::anim_editors::views::chrome::EditorModel::adopt_undo($crate::anim_editors::views::chrome::EditorBody::model(self), service);
+                $crate::anim_editors::views::chrome::EditorModel::adopt_undo(
+                    $crate::anim_editors::views::chrome::EditorBody::model(self),
+                    service,
+                );
             }
         }
         impl gpui::EventEmitter<ui::dock::PanelEvent> for $view {}
         impl gpui::Focusable for $view {
             fn focus_handle(&self, _cx: &gpui::App) -> gpui::FocusHandle {
-                $crate::anim_editors::views::chrome::EditorBody::chrome_ref(self).focus.clone()
+                $crate::anim_editors::views::chrome::EditorBody::chrome_ref(self)
+                    .focus
+                    .clone()
             }
         }
         impl ui::dock::Panel for $view {
@@ -927,16 +1261,25 @@ macro_rules! anim_panel {
             }
             fn tab_name(&self, _cx: &gpui::App) -> Option<gpui::SharedString> {
                 let model = $crate::anim_editors::views::chrome::EditorBody::model(self);
-                $crate::anim_editors::views::chrome::EditorModel::path(model).file_name().map(|n| n.to_string_lossy().to_string().into())
+                $crate::anim_editors::views::chrome::EditorModel::path(model)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string().into())
             }
             fn tab_icon(&self, _cx: &gpui::App) -> Option<ui::IconName> {
                 Some($crate::anim_editors::views::chrome::EditorBody::icon(self))
             }
             fn tab_unsaved(&self, _cx: &gpui::App) -> bool {
-                $crate::anim_editors::views::chrome::EditorModel::is_dirty($crate::anim_editors::views::chrome::EditorBody::model(self))
+                $crate::anim_editors::views::chrome::EditorModel::is_dirty(
+                    $crate::anim_editors::views::chrome::EditorBody::model(self),
+                )
             }
             fn panel_file_path(&self, _cx: &gpui::App) -> Option<std::path::PathBuf> {
-                Some($crate::anim_editors::views::chrome::EditorModel::path($crate::anim_editors::views::chrome::EditorBody::model(self)).to_path_buf())
+                Some(
+                    $crate::anim_editors::views::chrome::EditorModel::path(
+                        $crate::anim_editors::views::chrome::EditorBody::model(self),
+                    )
+                    .to_path_buf(),
+                )
             }
             fn title(&self, _window: &gpui::Window, _cx: &gpui::App) -> gpui::AnyElement {
                 let model = $crate::anim_editors::views::chrome::EditorBody::model(self);
