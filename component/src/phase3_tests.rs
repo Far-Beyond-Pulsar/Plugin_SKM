@@ -1652,3 +1652,61 @@ fn editing_a_sequence_on_disk_recompiles_the_running_graph_in_place() {
         0
     );
 }
+
+#[test]
+fn the_asset_change_hook_only_answers_animation_files() {
+    for yes in [
+        "a/walk.animseq",
+        "a/Walk.ANIMSEQ",
+        "a/loco.animgraph",
+        "a/swing.montage",
+        "a/hero.skeleton",
+        "a/loco.blendspace",
+    ] {
+        assert!(is_animation_asset_file(Path::new(yes)), "{yes}");
+    }
+    for no in ["a/rock.png", "a/rock.mesh", "a/noext", "a/anim"] {
+        assert!(!is_animation_asset_file(Path::new(no)), "{no}");
+    }
+
+    let rig = rig();
+    let graph = walk_graph(&rig, false);
+    let mut world = World::new();
+    let owner = world.spawn();
+    let player = pulsar_world_registry::attach_value(&mut world, owner, component(&rig, &graph))
+        .unwrap();
+    let montage = compile_montage_asset(
+        &rig,
+        &montage_asset(&rig, skeletal_assets::montage::MontageRootMotion::Graph),
+    );
+    world
+        .get_mut::<AnimationComponent>(player)
+        .unwrap()
+        .anim
+        .montages
+        .insert(montage.id.clone(), montage);
+    // a texture is no business of the animator: nothing is touched
+    assert_eq!(animation_asset_changed(&mut world, Path::new("rock.png")), 0);
+    assert!(
+        !world
+            .get::<AnimationComponent>(player)
+            .unwrap()
+            .anim
+            .montages
+            .is_empty()
+    );
+    // an animation file reaches the dependants path (no graph names it: zero
+    // recompiles, but Montages compile afresh)
+    assert_eq!(
+        animation_asset_changed(&mut world, Path::new("other.animseq")),
+        0
+    );
+    assert!(
+        world
+            .get::<AnimationComponent>(player)
+            .unwrap()
+            .anim
+            .montages
+            .is_empty()
+    );
+}

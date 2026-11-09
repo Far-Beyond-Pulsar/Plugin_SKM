@@ -9,10 +9,12 @@
 //! plays it through a compiled one-node graph in that same instance, never a
 //! second player.
 //!
-//! The owner's `n`-th animator drives the owner's `n`-th skinned mesh
+//! The owner's `n`-th animator leads with the owner's `n`-th skinned mesh
 //! (`helio_component::skinning::SkinnedMeshAccess`): it plays on that mesh's
 //! skeleton (the mesh is the skeleton's only authority) and shows its drawn
-//! pose there; the mesh turns the pose into its joint palette. As Unity's
+//! pose on every skinned mesh of the owner bound to that skeleton (a modular
+//! character: body, head and gear share one pose); each mesh turns the pose
+//! into its joint palette. As Unity's
 //! Animator drives a SkinnedMeshRenderer: the pose is the animator's, the
 //! bind poses and the palette are the mesh's.
 //!
@@ -336,6 +338,10 @@ pub struct AnimationComponent {
     pose_generation: u64,
     #[serde(skip)]
     shown_generation: u64,
+    /// The meshes the pose was last shown on; a change in the set shows the
+    /// current pose again so a mesh added later is not left in its bind pose.
+    #[serde(skip)]
+    shown_meshes: Vec<Entity>,
     /// Whole-skeleton physics ownership: the rig's mesh-space pose and how much of the drawn
     /// pose it replaces (Unreal's physics blend weight). The animation keeps running either way.
     #[serde(skip)]
@@ -402,6 +408,15 @@ impl AnimationComponent {
         self.skeleton = skeleton;
         self.attach_assets();
         true
+    }
+
+    /// Record the meshes this animator drives; a different set needs the
+    /// current pose shown again.
+    pub(crate) fn note_driven_meshes(&mut self, meshes: &[Entity]) {
+        if self.shown_meshes != meshes {
+            self.shown_meshes = meshes.to_vec();
+            self.shown_generation = self.pose_generation.wrapping_sub(1);
+        }
     }
 
     /// The drawn pose to show on the mesh, once per change: `None` when the
@@ -1121,6 +1136,37 @@ fn dependency_paths_in(root: &Path, graph: &CompiledGraph) -> Vec<String> {
 /// (`World::asset_source_changed`).
 pub fn reload_animation_dependencies(world: &mut World, changed: &Path) -> usize {
     reload_dependants(world, changed, AnimationComponent::recompile_graph)
+}
+
+/// Whether `path` is a file animation graphs, Montages or poses are built from.
+pub fn is_animation_asset_file(path: &Path) -> bool {
+    use pulsar_reflection::{
+        BlendSpaceAssetKind, IkRetargeterAssetKind, IkRigAssetKind, PoseDatabaseAssetKind,
+        RetargetProfileAssetKind,
+    };
+    let Some(extension) = path.extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+    let known = |extensions: &[&str]| extensions.iter().any(|e| e.eq_ignore_ascii_case(extension));
+    known(SkeletonAssetKind::EXTENSIONS)
+        || known(AnimationSequenceAssetKind::EXTENSIONS)
+        || known(AnimationMontageAssetKind::EXTENSIONS)
+        || known(AnimationGraphAssetKind::EXTENSIONS)
+        || known(BlendSpaceAssetKind::EXTENSIONS)
+        || known(RetargetProfileAssetKind::EXTENSIONS)
+        || known(IkRigAssetKind::EXTENSIONS)
+        || known(IkRetargeterAssetKind::EXTENSIONS)
+        || known(PoseDatabaseAssetKind::EXTENSIONS)
+}
+
+/// The engine's asset-change hook: an animation asset file changed, so every
+/// running graph that depends on it recompiles ([`reload_animation_dependencies`]).
+/// Other files (textures, meshes) are none of the animator's business.
+pub fn animation_asset_changed(world: &mut World, changed: &Path) -> usize {
+    if !is_animation_asset_file(changed) {
+        return 0;
+    }
+    reload_animation_dependencies(world, changed)
 }
 
 fn reload_dependants(

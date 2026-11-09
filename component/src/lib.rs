@@ -93,3 +93,12 @@ inventory::submit! {
         },
     }
 }
+
+// A changed animation asset file recompiles the running graphs that depend on it
+// (a sequence, Blend Space, rig or Montage the graph names).
+inventory::submit! {
+    engine_backend::scene::game_hooks::AssetChangedRegistration {
+        origin: pulsar_plugins::origin!(),
+        on_changed: animation_asset_changed,
+    }
+}

@@ -264,7 +264,7 @@ impl Library {
     }
 }
 
-pub(super) fn same_file(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_file(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
