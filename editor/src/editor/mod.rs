@@ -1,3 +1,4 @@
+pub(crate) mod file_events;
 pub mod link_state;
 pub mod mesh_edit;
 pub mod mesh_ref;

@@ -315,6 +315,8 @@ pub struct SkeletalAnimEditorPanel {
     pub clipboard: Vec<ClipKey>,
 
     pub(crate) subscriptions: Vec<Subscription>,
+    /// Follows the engine file events for the skeleton and preview mesh files.
+    pub(crate) file_watch: Option<Task<()>>,
 }
 
 impl SkeletalAnimEditorPanel {
@@ -615,6 +617,7 @@ impl SkeletalAnimEditorPanel {
             hovered_bone: None,
             clipboard: Vec::new(),
             subscriptions,
+            file_watch: None,
         };
 
         if let Some(root_id) = root_id {
@@ -623,6 +626,7 @@ impl SkeletalAnimEditorPanel {
         // The weight heat map is what a mesh is edited for; a preview mesh is only
         // there for orientation and should not change color with the selection.
         panel.view_options.weights = mode == EditorMode::Mesh;
+        panel.watch_files(cx);
 
         panel
     }

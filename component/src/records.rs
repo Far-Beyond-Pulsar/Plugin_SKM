@@ -1,6 +1,6 @@
-//! The animator's legacy record migration
-//! (`pulsar_class::records::RecordMigrationRegistration`), run on every
-//! level and class prefab load with the engine's own.
+//! The animator's legacy record migration, run on every level and class
+//! prefab load with the engine's own (the plugin's root crate registers it as
+//! a `pulsar_class::records::RecordMigrationRegistration`).
 //!
 //! Before the animator existed the skinned mesh was the player: a
 //! `SkeletalMeshComponent` record held the animation graph, the old single
@@ -69,16 +69,6 @@ pub fn split_animator(entries: &mut Vec<Value>) -> bool {
         index += 1;
     }
     changed
-}
-
-inventory::submit! {
-    pulsar_class::records::RecordMigrationRegistration {
-        origin: pulsar_plugins::origin!(),
-        description: SPLIT,
-        entries: Some(split_animator),
-        from_props: None,
-        stale_props: &[],
-    }
 }
 
 #[cfg(test)]

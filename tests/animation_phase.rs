@@ -1,5 +1,9 @@
 //! The engine's animation phase: it runs before the ECS schedule, so a system
 //! (physics reads poses in one) sees the pose evaluated for this very frame.
+
+// The plugin as a game links it: its root, with every registration.
+use skeletal_animation_plugin as _;
+
 use animation_component::AnimationComponent;
 use pulsar_game::prelude::{TickLoop, TickMode};
 use pulsar_scenedb::World;

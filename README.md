@@ -3,6 +3,25 @@ https://github.com/user-attachments/assets/1ab9e9ba-8750-49b3-b6ad-d74473f0b969
 <img width="2496" height="1310" alt="Screenshot 2026-06-12 at 9 00 12 PM" src="https://github.com/user-attachments/assets/29d52036-3191-4922-9df3-4091381c9c3e" />
 <img width="2158" height="1182" alt="Screenshot 2026-06-13 at 12 14 39 AM" src="https://github.com/user-attachments/assets/c62099b6-105a-4835-a461-7b66b659e21e" />
 
+## Crates
+
+`pulsar.animation` ("Animation") is a plugin of Pulsar-Native, vendored at
+`plugins/vendor/skm_editor`.
+
+| Crate | Path | What |
+|---|---|---|
+| `skeletal_animation_plugin` | `.` | The plugin's root crate, the one place it registers everything it contributes (runtime registrations always, the editor's with `editor`) |
+| `animation_component` | `component/` | The animator component (graphs, Montages, notifies, root motion, the physics blend), its animation phase and the skeletal pose physics rigs read and drive |
+| `skeletal_animation_editor` | `editor/` | The skeletal animation editors (skeletons, sequences, skeletal meshes and the higher-level animation assets) and their editor provider |
+| `skeletal_assets` | `skeletal_assets/` | The skeletal asset formats, ids, math and skinning, shared with the asset importer |
+
+The root crate is the one place the plugin submits its contributions: the
+animator class, its tick phase, notify catalog, skeletal pose access and
+record migration, and, with its `editor` feature, the editors' provider. The
+other crates register nothing. A game links the root without `editor`; the
+editor links it with. The editor crate still builds as a DLL plugin
+(`export_plugin!`, without `builtin`).
+
 ## Controls
 
 **Viewport** — RMB drag: look · RMB held + WASD / Space / Shift: fly · MMB drag: pan · Alt+LMB drag: orbit ·
@@ -41,7 +60,7 @@ The renderers can be run without opening the editor. These tests render into an 
 themselves when no GPU adapter is available:
 
 ```
-SKM_PREVIEW_DIR=./previews cargo test -p skeletal_animation_plugin --lib
+SKM_PREVIEW_DIR=./previews cargo test -p skeletal_animation_editor --lib
 ```
 
 With `SKM_PREVIEW_DIR` set, each render is also written out as a PNG (`timeline.png`, `viewport_dark.png`,
@@ -56,5 +75,5 @@ pointed at one, and nothing made from the model is committed (check its license 
 # 1. import it (asset_import) into a scratch folder
 SKM_SAMPLE_DIR=<folder with BrainStem.glb> SKM_OUT_DIR=<scratch> cargo test -p asset_import --test real_sample
 # 2. render it, optionally comparing skinned vertices with an independent reference (SKM_REF_JSON)
-SKM_SAMPLE_OUT=<scratch> SKM_PREVIEW_DIR=<pngs> cargo test -p skeletal_animation_plugin --lib render_real_sample
+SKM_SAMPLE_OUT=<scratch> SKM_PREVIEW_DIR=<pngs> cargo test -p skeletal_animation_editor --lib render_real_sample
 ```

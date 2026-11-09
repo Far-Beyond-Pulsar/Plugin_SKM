@@ -815,11 +815,14 @@ pub fn run_animation_phase(world: &mut World, delta_seconds: f32) {
             .get::<pulsar_world_registry::pulsar_scene_model::ComponentOwner>(instance)
             .map(|link| (link.is_enabled(), link.entity()));
         let live = link.is_some_and(|(enabled, owner)| enabled && world.is_alive(owner));
-        // the skinned mesh it drives: its skeleton is the one it plays on
-        let mesh = meshes.and_then(|access| {
-            let mesh = driven_mesh(world, access, instance)?;
-            Some((mesh, (access.binding)(world, mesh)))
+        // the skinned meshes it drives: the leader's skeleton is the one it plays
+        // on, every mesh bound to that skeleton shows the pose
+        let driven = meshes.map(|access| driven_meshes(world, access, instance));
+        let mesh = meshes.zip(driven.as_ref()).and_then(|(access, driven)| {
+            let leader = driven.leader?;
+            Some((leader, (access.binding)(world, leader)))
         });
+        let driven_set = driven.map(|d| d.meshes).unwrap_or_default();
         let Some(mut player) = world.get_mut::<AnimationComponent>(instance) else {
             continue;
         };
@@ -840,10 +843,13 @@ pub fn run_animation_phase(world: &mut World, delta_seconds: f32) {
         } else if player.anim.started {
             player.animation_phase_stopped();
         }
+        player.note_driven_meshes(&driven_set);
         let shown = player.take_shown_pose();
         drop(player);
-        if let (Some(access), Some((mesh, _)), Some((bones, pose))) = (meshes, mesh, shown) {
-            (access.show_pose)(world, mesh, bones, pose);
+        if let (Some(access), Some((bones, pose))) = (meshes, shown) {
+            for mesh in driven_set {
+                (access.show_pose)(world, mesh, bones.clone(), pose.clone());
+            }
         }
         if let (Some(delta), Some((_, owner))) = (moved, link) {
             apply_root_motion(world, owner, &delta);
@@ -851,42 +857,120 @@ pub fn run_animation_phase(world: &mut World, delta_seconds: f32) {
     }
 }
 
-/// The skinned mesh animator `instance` drives: its owner's mesh at the
-/// animator's own place among the owner's animators (the first animator
-/// drives the first mesh), or the mesh on `instance` itself.
-fn driven_mesh(
+/// The skinned meshes one animator drives.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct DrivenMeshes {
+    /// The mesh whose skeleton the animator plays on.
+    leader: Option<Entity>,
+    /// Every mesh that shows the animator's pose (the leader included).
+    meshes: Vec<Entity>,
+}
+
+/// Which of an owner's skinned meshes (by ordinal, `None` for one with no
+/// skeleton) animator number `animator` of `animators` drives. The animator's
+/// leader is the mesh at its own ordinal (else the first skinned mesh); every
+/// other mesh bound to the leader's skeleton shows the pose too (a modular
+/// character: body, head and gear on one skeleton). A mesh at another
+/// animator's ordinal stays that animator's; the remaining meshes go to the
+/// lowest animator on their skeleton, so no mesh has two animators.
+fn assign_meshes(
+    skeletons: &[Option<&str>],
+    animator: usize,
+    animators: usize,
+) -> (Option<usize>, Vec<usize>) {
+    let leader = match skeletons.get(animator) {
+        Some(Some(_)) => Some(animator),
+        _ => skeletons.iter().position(Option::is_some),
+    };
+    let Some(leader) = leader else {
+        return (None, Vec::new());
+    };
+    let skeleton = skeletons[leader];
+    let lowest_on_skeleton = (0..animators.min(skeletons.len()))
+        .find(|&k| skeletons[k] == skeleton)
+        .unwrap_or(animator);
+    let mut driven = vec![leader];
+    for (index, other) in skeletons.iter().enumerate() {
+        if index == leader || other.is_none() || *other != skeleton {
+            continue;
+        }
+        let claimed = index < animators;
+        if !claimed && animator == lowest_on_skeleton {
+            driven.push(index);
+        }
+    }
+    driven.sort_unstable();
+    (Some(leader), driven)
+}
+
+/// A guard on the ordinal walk of an owner's meshes.
+const MAX_DRIVEN_MESHES: usize = 256;
+
+/// The skinned meshes animator `instance` drives (see [`assign_meshes`]), or the
+/// mesh on `instance` itself.
+fn driven_meshes(
     world: &World,
     access: &helio_component::skinning::SkinnedMeshAccess,
     instance: Entity,
-) -> Option<Entity> {
+) -> DrivenMeshes {
     use pulsar_world_registry::pulsar_scene_model::attachments;
     let Some(owner) = attachments::owner_of(world, instance) else {
-        return (access.instance)(world, instance, 0);
+        return match (access.instance)(world, instance, 0) {
+            Some(mesh) => DrivenMeshes {
+                leader: Some(mesh),
+                meshes: vec![mesh],
+            },
+            None => DrivenMeshes::default(),
+        };
     };
-    let ordinal = attachments::instances(world, owner)
+    let animators: Vec<Entity> = attachments::instances(world, owner)
         .into_iter()
         .filter(|other| {
             attachments::meta(world, *other)
                 .is_some_and(|meta| meta.class_name == super::ANIMATION_COMPONENT)
         })
-        .position(|other| other == instance)?;
-    (access.instance)(world, owner, ordinal as u32)
+        .collect();
+    let Some(ordinal) = animators.iter().position(|other| *other == instance) else {
+        return DrivenMeshes::default();
+    };
+    // every skinned mesh of the owner, in ordinal order
+    let mut entities = Vec::new();
+    let mut bindings = Vec::new();
+    while entities.len() < MAX_DRIVEN_MESHES {
+        let Some(mesh) = (access.instance)(world, owner, entities.len() as u32) else {
+            break;
+        };
+        entities.push(mesh);
+        bindings.push((access.binding)(world, mesh).and_then(|b| b.skeleton));
+    }
+    let skeletons: Vec<Option<&str>> = bindings.iter().map(|s| s.as_deref()).collect();
+    let (leader, driven) = assign_meshes(&skeletons, ordinal, animators.len());
+    DrivenMeshes {
+        leader: leader.map(|i| entities[i]),
+        meshes: driven.into_iter().map(|i| entities[i]).collect(),
+    }
 }
 
-/// Show animator `instance`'s pose on its mesh now, if it changed (a physics
-/// rig drove or released bones after the animation phase).
+/// Show animator `instance`'s pose on every mesh it drives now, if it changed (a
+/// physics rig drove or released bones after the animation phase).
 pub fn show_pose(world: &mut World, instance: Entity) {
     let Some(access) = helio_component::skinning::skinned_mesh_access() else {
         return;
     };
-    let Some(mesh) = driven_mesh(world, access, instance) else {
+    let driven = driven_meshes(world, access, instance);
+    if driven.meshes.is_empty() {
         return;
-    };
+    }
     let shown = world
         .get_mut::<AnimationComponent>(instance)
-        .and_then(|mut player| player.take_shown_pose());
+        .and_then(|mut player| {
+            player.note_driven_meshes(&driven.meshes);
+            player.take_shown_pose()
+        });
     if let Some((bones, pose)) = shown {
-        (access.show_pose)(world, mesh, bones, pose);
+        for mesh in driven.meshes {
+            (access.show_pose)(world, mesh, bones.clone(), pose.clone());
+        }
     }
 }
 
@@ -1526,6 +1610,56 @@ mod tests {
     use std::sync::Mutex;
 
     const EVENT: &str = "AnimationComponent.animation_notify";
+
+    #[test]
+    fn one_animator_drives_every_mesh_on_its_skeleton() {
+        // a modular character: body, head, gear on one skeleton, a prop on none
+        let skins = [Some("hero"), Some("hero"), None, Some("hero")];
+        assert_eq!(assign_meshes(&skins, 0, 1), (Some(0), vec![0, 1, 3]));
+        // a mesh on another skeleton is left alone
+        let mixed = [Some("hero"), Some("horse"), Some("hero")];
+        assert_eq!(assign_meshes(&mixed, 0, 1), (Some(0), vec![0, 2]));
+        // no skinned mesh, nothing to drive
+        assert_eq!(assign_meshes(&[None, None], 0, 1), (None, vec![]));
+        assert_eq!(assign_meshes(&[], 0, 1), (None, vec![]));
+    }
+
+    #[test]
+    fn two_animators_never_share_a_mesh() {
+        // hero and horse each have an animator; the saddle (hero) and the
+        // mane (horse) are unclaimed and go to the animator on their skeleton
+        let meshes = [
+            Some("hero"),
+            Some("horse"),
+            Some("hero"),
+            Some("horse"),
+        ];
+        let first = assign_meshes(&meshes, 0, 2);
+        let second = assign_meshes(&meshes, 1, 2);
+        assert_eq!(first, (Some(0), vec![0, 2]));
+        assert_eq!(second, (Some(1), vec![1, 3]));
+        // two animators on one skeleton: each keeps its own mesh, the rest
+        // go to the first one only
+        let same = [Some("hero"), Some("hero"), Some("hero")];
+        assert_eq!(assign_meshes(&same, 0, 2), (Some(0), vec![0, 2]));
+        assert_eq!(assign_meshes(&same, 1, 2), (Some(1), vec![1]));
+        // an animator past the last mesh leads with the first skinned one
+        assert_eq!(assign_meshes(&[Some("hero")], 3, 4).0, Some(0));
+    }
+
+    #[test]
+    fn a_new_mesh_gets_the_pose_that_was_already_shown() {
+        let mut p = player();
+        let mut world = World::new();
+        let (a, b) = (world.spawn(), world.spawn());
+        p.note_driven_meshes(&[a]);
+        p.take_shown_pose();
+        assert!(p.take_shown_pose().is_none(), "shown once per change");
+        p.note_driven_meshes(&[a]);
+        assert!(p.take_shown_pose().is_none(), "same set: nothing to repeat");
+        p.note_driven_meshes(&[a, b]);
+        assert!(p.take_shown_pose().is_some(), "the added mesh needs the pose");
+    }
 
     fn player() -> AnimationComponent {
         let sequence = serde_json::from_value(serde_json::json!({

@@ -43,13 +43,13 @@ jobs:
         workspaces: pulsar
     - name: Build
       working-directory: pulsar
-      run: cargo build -p skeletal_animation_plugin --verbose
+      run: cargo build -p skeletal_animation_plugin --features skeletal_animation_plugin/editor --verbose
     - name: Run tests
       working-directory: pulsar
-      run: cargo test -p skeletal_animation_plugin -p skeletal_assets --verbose -- --test-threads=1
+      run: cargo test -p skeletal_animation_plugin -p animation_component -p skeletal_animation_editor -p skeletal_assets --verbose -- --test-threads=1
     - name: GPU skinning parity and resource lifecycle (software Vulkan)
       working-directory: pulsar
       env:
         WGPU_BACKEND: vulkan
         XDG_RUNTIME_DIR: /tmp
-      run: cargo test -p skeletal_animation_plugin --lib -- --ignored --skip skinning_geometry_benchmark --skip skinning_render_benchmark --nocapture --test-threads=1
+      run: cargo test -p skeletal_animation_editor --lib -- --ignored --skip skinning_geometry_benchmark --skip skinning_render_benchmark --nocapture --test-threads=1
