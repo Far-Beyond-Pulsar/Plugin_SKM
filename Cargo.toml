@@ -34,6 +34,14 @@ plugin_manager = { workspace = true, optional = true }
 pulsar_game = { path = "../../../crates/core/pulsar_game" }
 skeletal_assets = { workspace = true }
 serde_json = { workspace = true }
+# The headless wiring tests (`tests/animator_meshes.rs`, `tests/asset_changed_hook.rs`): the real meshes
+# plugin's skinned mesh access, the engine's asset-update path, a temp project.
+meshes_plugin = { workspace = true }
+meshes_component = { workspace = true }
+pulsar_reflection = { workspace = true }
+engine_state = { workspace = true }
+engine_fs = { workspace = true, features = ["editor"] }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
