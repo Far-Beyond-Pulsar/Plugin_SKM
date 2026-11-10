@@ -13,8 +13,8 @@
 //!   a cached Montage plays again with its file gone from disk, a cleared one
 //!   has to be read (and compiled) again.
 //!
-//! What this does NOT cover: that the file watcher publishes an update for an
-//! animation file at all (see `the_file_watcher_publishes_animation_updates`).
+//! `the_file_watcher_publishes_animation_updates` covers the watcher's side: an
+//! animation file edited on disk publishes the update.
 
 mod common;
 
@@ -97,9 +97,18 @@ fn an_edited_sequence_recompiles_the_running_graph_in_place() {
     let _guard = PROJECT.lock().unwrap_or_else(|e| e.into_inner());
     let project = open_project();
     let (mut game, animator) = running_animator(&project);
+    // The first pose is the bind pose, drawn before the sequence has loaded; how many
+    // frames pass before the player runs depends on the asset pump's timing. Start
+    // from a clock that is certainly running, and derive every expectation from it.
+    game.tick_until("the sequence player is running", |w| {
+        w.get::<AnimationComponent>(animator)
+            .is_some_and(|a| a.bone_world_pose.len() == 3 && a.bone_world_pose[1][3][0] > 0.0)
+    });
     game.tick(2);
     let before = b1_x(&game, animator);
     assert!(before > 0.0 && before < 4.0, "2 m/s slide: {before}");
+    // 2 m/s: the clock is at before / 2 seconds
+    let clock = before / 2.0;
 
     // the artist moves the slide to 8 m in the sequence file and saves
     let skeleton =
@@ -124,7 +133,12 @@ fn an_edited_sequence_recompiles_the_running_graph_in_place() {
         (later - after - 4.0 * 0.1).abs() < 1e-2,
         "the new 4 m/s slide: {after} -> {later}"
     );
-    assert!(after > 4.0 * 0.2, "the clock was not restarted: {after}");
+    // the clock carried on from `clock` (a restart would give 4 * STEP = 0.4)
+    assert!(
+        (after - 4.0 * (clock + common::STEP)).abs() < 1e-2,
+        "the clock was not restarted: {after}, expected {}",
+        4.0 * (clock + common::STEP)
+    );
 
     // a file the graph does not name recompiles nothing
     let other = project.root.join("other.animseq");
@@ -176,14 +190,9 @@ fn a_texture_edit_leaves_the_montage_caches_and_an_animation_edit_clears_them() 
     play_montage(&game, animator, &project).expect("and the file compiles again");
 }
 
-/// `.agents/ANIMATION.md` says the file watcher publishes
-/// `AssetUpdated(Custom("animation"))` for the animation family. Its
-/// `publish_asset_update` only publishes textures and materials
-/// (`engine_fs::watchers`: `is_animation_extension` and `ANIMATION_ASSET_KIND`
-/// are used by nothing but a unit test), so an edit on disk never reaches the
-/// hook above. Ignored until the watcher publishes; run it with `--ignored`.
+/// The file watcher publishes `AssetUpdated(Custom("animation"))` for an animation
+/// file edited on disk (`engine_fs::watchers::publish_asset_update`).
 #[test]
-#[ignore = "known gap: the engine_fs watcher does not publish animation file updates"]
 fn the_file_watcher_publishes_animation_updates() {
     let _guard = PROJECT.lock().unwrap_or_else(|e| e.into_inner());
     let project = open_project();
