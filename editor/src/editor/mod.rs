@@ -13,4 +13,6 @@ pub(crate) mod hierarchy_edit;
 pub(crate) mod hierarchy_history;
 
 #[cfg(test)]
+mod file_event_tests;
+#[cfg(test)]
 mod hierarchy_tests;
