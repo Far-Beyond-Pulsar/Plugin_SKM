@@ -13,8 +13,8 @@
 //!   a cached Montage plays again with its file gone from disk, a cleared one
 //!   has to be read (and compiled) again.
 //!
-//! What this does NOT cover: that the file watcher publishes an update for an
-//! animation file at all (see `the_file_watcher_publishes_animation_updates`).
+//! `the_file_watcher_publishes_animation_updates` covers the watcher's side: an
+//! animation file edited on disk publishes the update.
 
 mod common;
 
@@ -176,14 +176,9 @@ fn a_texture_edit_leaves_the_montage_caches_and_an_animation_edit_clears_them() 
     play_montage(&game, animator, &project).expect("and the file compiles again");
 }
 
-/// `.agents/ANIMATION.md` says the file watcher publishes
-/// `AssetUpdated(Custom("animation"))` for the animation family. Its
-/// `publish_asset_update` only publishes textures and materials
-/// (`engine_fs::watchers`: `is_animation_extension` and `ANIMATION_ASSET_KIND`
-/// are used by nothing but a unit test), so an edit on disk never reaches the
-/// hook above. Ignored until the watcher publishes; run it with `--ignored`.
+/// The file watcher publishes `AssetUpdated(Custom("animation"))` for an animation
+/// file edited on disk (`engine_fs::watchers::publish_asset_update`).
 #[test]
-#[ignore = "known gap: the engine_fs watcher does not publish animation file updates"]
 fn the_file_watcher_publishes_animation_updates() {
     let _guard = PROJECT.lock().unwrap_or_else(|e| e.into_inner());
     let project = open_project();
