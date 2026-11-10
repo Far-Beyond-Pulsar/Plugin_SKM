@@ -78,7 +78,12 @@ pub fn element(
                 }
             }
             for overlay in &overlays {
-                let pts: Vec<_> = overlay.bones.iter().filter_map(|id| projection.index_of(id)).map(p).collect();
+                let pts: Vec<_> = overlay
+                    .bones
+                    .iter()
+                    .filter_map(|id| projection.index_of(id))
+                    .map(p)
+                    .collect();
                 stroke_polyline(window, &pts, overlay.width, overlay.color);
             }
             for i in 0..projection.bones.len() {
@@ -101,7 +106,19 @@ pub fn element(
 }
 
 /// The bone under `position`, if any.
-pub fn pick(projection: &SkeletonProjection, bounds: &Cell<Bounds<Pixels>>, position: Point<Pixels>, radius: f32) -> Option<String> {
+pub fn pick(
+    projection: &SkeletonProjection,
+    bounds: &Cell<Bounds<Pixels>>,
+    position: Point<Pixels>,
+    radius: f32,
+) -> Option<String> {
     let b = bounds.get();
-    projection.pick(f32::from(b.size.width), f32::from(b.size.height), PAD, f32::from(position.x - b.origin.x), f32::from(position.y - b.origin.y), radius)
+    projection.pick(
+        f32::from(b.size.width),
+        f32::from(b.size.height),
+        PAD,
+        f32::from(position.x - b.origin.x),
+        f32::from(position.y - b.origin.y),
+        radius,
+    )
 }

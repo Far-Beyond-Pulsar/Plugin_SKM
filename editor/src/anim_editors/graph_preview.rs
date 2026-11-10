@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use pulsar_reflection::{
-    AnimationGraphAssetKind, AnimationMontageAssetKind, AnimationSequenceAssetKind, AssetKind, BlendSpaceAssetKind, IkRetargeterAssetKind, IkRigAssetKind, PoseDatabaseAssetKind,
+    AnimationGraphAssetKind, AnimationMontageAssetKind, AnimationSequenceAssetKind, AssetKind,
+    BlendSpaceAssetKind, IkRetargeterAssetKind, IkRigAssetKind, PoseDatabaseAssetKind,
     RetargetProfileAssetKind, SkeletonAssetKind,
 };
 use serde_json::{json, Value};
@@ -41,10 +42,18 @@ pub struct ProjectAssets {
 
 impl ProjectAssets {
     pub fn new(root: &Path) -> Self {
-        Self { root: root.to_path_buf(), cache: Mutex::new(HashMap::new()) }
+        Self {
+            root: root.to_path_buf(),
+            cache: Mutex::new(HashMap::new()),
+        }
     }
 
-    fn load<T: Send + Sync + 'static>(&self, kind: &str, id: &str, parse: fn(&str) -> Option<T>) -> Option<Arc<T>> {
+    fn load<T: Send + Sync + 'static>(
+        &self,
+        kind: &str,
+        id: &str,
+        parse: fn(&str) -> Option<T>,
+    ) -> Option<Arc<T>> {
         let key = (kind.to_string(), id.to_string());
         if let Some(hit) = self.cache.lock().ok()?.get(&key) {
             return hit.clone().and_then(|a| a.downcast::<T>().ok());
@@ -61,31 +70,47 @@ impl ProjectAssets {
 
 impl AssetSource for ProjectAssets {
     fn skeleton(&self, id: &str) -> Option<Arc<SkeletonAsset>> {
-        self.load(SkeletonAssetKind::KIND, id, |t| SkeletonAsset::parse(t).ok())
+        self.load(SkeletonAssetKind::KIND, id, |t| {
+            SkeletonAsset::parse(t).ok()
+        })
     }
     fn sequence(&self, id: &str) -> Option<Arc<AnimSeqAsset>> {
-        self.load(AnimationSequenceAssetKind::KIND, id, |t| AnimSeqAsset::parse(t).ok())
+        self.load(AnimationSequenceAssetKind::KIND, id, |t| {
+            AnimSeqAsset::parse(t).ok()
+        })
     }
     fn blend_space(&self, id: &str) -> Option<Arc<BlendSpaceAsset>> {
-        self.load(BlendSpaceAssetKind::KIND, id, |t| BlendSpaceAsset::parse(t).ok())
+        self.load(BlendSpaceAssetKind::KIND, id, |t| {
+            BlendSpaceAsset::parse(t).ok()
+        })
     }
     fn montage(&self, id: &str) -> Option<Arc<AnimationMontageAsset>> {
-        self.load(AnimationMontageAssetKind::KIND, id, |t| AnimationMontageAsset::parse(t).ok())
+        self.load(AnimationMontageAssetKind::KIND, id, |t| {
+            AnimationMontageAsset::parse(t).ok()
+        })
     }
     fn graph(&self, id: &str) -> Option<Arc<AnimationGraphAsset>> {
-        self.load(AnimationGraphAssetKind::KIND, id, |t| AnimationGraphAsset::parse(t).ok())
+        self.load(AnimationGraphAssetKind::KIND, id, |t| {
+            AnimationGraphAsset::parse(t).ok()
+        })
     }
     fn ik_rig(&self, id: &str) -> Option<Arc<IkRigAsset>> {
         self.load(IkRigAssetKind::KIND, id, |t| IkRigAsset::parse(t).ok())
     }
     fn retarget_profile(&self, id: &str) -> Option<Arc<RetargetProfileAsset>> {
-        self.load(RetargetProfileAssetKind::KIND, id, |t| RetargetProfileAsset::parse(t).ok())
+        self.load(RetargetProfileAssetKind::KIND, id, |t| {
+            RetargetProfileAsset::parse(t).ok()
+        })
     }
     fn ik_retargeter(&self, id: &str) -> Option<Arc<IkRetargetAsset>> {
-        self.load(IkRetargeterAssetKind::KIND, id, |t| IkRetargetAsset::parse(t).ok())
+        self.load(IkRetargeterAssetKind::KIND, id, |t| {
+            IkRetargetAsset::parse(t).ok()
+        })
     }
     fn pose_db(&self, id: &str) -> Option<Arc<PoseDbAsset>> {
-        self.load(PoseDatabaseAssetKind::KIND, id, |t| PoseDbAsset::parse(t).ok())
+        self.load(PoseDatabaseAssetKind::KIND, id, |t| {
+            PoseDbAsset::parse(t).ok()
+        })
     }
 }
 
@@ -107,22 +132,56 @@ pub struct GraphPreview {
 
 impl GraphPreview {
     /// Compile `asset` against `source` and make a transient instance of it.
-    pub fn build(asset: &AnimationGraphAsset, source: &dyn AssetSource) -> Result<Self, Vec<Diagnostic>> {
-        let skeleton_id = asset.skeleton.as_ref().map(|s| s.as_str().to_string()).ok_or_else(|| vec![Diagnostic::error("preview.no_skeleton", "The graph has no skeleton").repair("Pick the graph's skeleton")])?;
-        let skeleton = source.skeleton(&skeleton_id).ok_or_else(|| vec![Diagnostic::error("preview.skeleton_unavailable", "The graph's skeleton could not be loaded")])?.skeleton();
+    pub fn build(
+        asset: &AnimationGraphAsset,
+        source: &dyn AssetSource,
+    ) -> Result<Self, Vec<Diagnostic>> {
+        let skeleton_id = asset
+            .skeleton
+            .as_ref()
+            .map(|s| s.as_str().to_string())
+            .ok_or_else(|| {
+                vec![
+                    Diagnostic::error("preview.no_skeleton", "The graph has no skeleton")
+                        .repair("Pick the graph's skeleton"),
+                ]
+            })?;
+        let skeleton = source
+            .skeleton(&skeleton_id)
+            .ok_or_else(|| {
+                vec![Diagnostic::error(
+                    "preview.skeleton_unavailable",
+                    "The graph's skeleton could not be loaded",
+                )]
+            })?
+            .skeleton();
         let output = compile_graph(asset, source);
-        let Some(graph) = output.graph else { return Err(output.diagnostics) };
+        let Some(graph) = output.graph else {
+            return Err(output.diagnostics);
+        };
         if has_errors(&output.diagnostics) {
             return Err(output.diagnostics);
         }
         let runtime = graph.skeleton.clone();
         let mut instance = AnimInstance::new(runtime.clone());
-        instance.set_graph(graph).map_err(|e| vec![Diagnostic::error("preview.instance", e)])?;
-        Ok(Self { projection: SkeletonProjection::new(&skeleton), instance, runtime, time: 0.0 })
+        instance
+            .set_graph(graph)
+            .map_err(|e| vec![Diagnostic::error("preview.instance", e)])?;
+        Ok(Self {
+            projection: SkeletonProjection::new(&skeleton),
+            instance,
+            runtime,
+            time: 0.0,
+        })
     }
 
     pub fn set_parameter(&mut self, name: &str, value: Value) -> Result<(), String> {
-        let ty = self.instance.parameters().find(|p| p.0 == name).map(|p| p.1).ok_or_else(|| format!("no parameter named {name}"))?;
+        let ty = self
+            .instance
+            .parameters()
+            .find(|p| p.0 == name)
+            .map(|p| p.1)
+            .ok_or_else(|| format!("no parameter named {name}"))?;
         let bad = || format!("{name} is a {ty:?}");
         let runtime = match ty {
             ParamType::Float => RuntimeValue::Float(value.as_f64().ok_or_else(bad)? as f32),
@@ -134,7 +193,9 @@ impl GraphPreview {
                 RuntimeValue::vector([n(0)?, n(1)?, n(2)?])
             }
         };
-        self.instance.set_parameter(name, runtime).map_err(|e| format!("{e:?}"))
+        self.instance
+            .set_parameter(name, runtime)
+            .map_err(|e| format!("{e:?}"))
     }
 
     /// The preview's parameters with their current values.
@@ -156,20 +217,39 @@ impl GraphPreview {
 
     /// Run the instance forward. `scrub` seeks without producing gameplay events.
     pub fn advance(&mut self, dt: f32, scrub: bool) {
-        self.instance.advance(dt, TimeStep::Variable, if scrub { UpdateMode::Scrub } else { UpdateMode::Play });
+        self.instance.advance(
+            dt,
+            TimeStep::Variable,
+            if scrub {
+                UpdateMode::Scrub
+            } else {
+                UpdateMode::Play
+            },
+        );
         self.time += dt;
     }
 
     /// The skeleton posed by the instance's latest pose.
     pub fn projection(&self) -> SkeletonProjection {
-        self.projection.with_pose(&self.runtime, &self.instance.pose().bones)
+        self.projection
+            .with_pose(&self.runtime, &self.instance.pose().bones)
     }
 
     pub fn report(&self) -> PreviewReport {
-        let mut curves: Vec<(String, f32)> = self.instance.curves().iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let mut curves: Vec<(String, f32)> = self
+            .instance
+            .curves()
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
         curves.sort_by(|a, b| a.0.cmp(&b.0));
         let rm = self.instance.report.root_motion.translation;
-        PreviewReport { trace: self.instance.report.trace.clone(), curves, root_motion_translation: [rm.x, rm.y, rm.z], time: self.time }
+        PreviewReport {
+            trace: self.instance.report.trace.clone(),
+            curves,
+            root_motion_translation: [rm.x, rm.y, rm.z],
+            time: self.time,
+        }
     }
 }
 
@@ -220,16 +300,41 @@ mod tests {
 
     fn fixture() -> (Mem, AnimationGraphAsset) {
         let sk = Arc::new(SkeletonAsset::new(leg()));
-        let seq = Arc::new(AnimSeqAsset::new(Some(sk.id.clone()), AnimationClip::bind_pose()));
+        let seq = Arc::new(AnimSeqAsset::new(
+            Some(sk.id.clone()),
+            AnimationClip::bind_pose(),
+        ));
         let store = MemStore::default();
-        let mut model = AnimGraphModel::open(Arc::new(store), Path::new("g.animgraph"), &AnimationGraphAsset::default().to_text().unwrap()).unwrap();
-        model.doc.apply("skeleton", |a| a.skeleton = Some(sk.id.to_ref()));
+        let mut model = AnimGraphModel::open(
+            Arc::new(store),
+            Path::new("g.animgraph"),
+            &AnimationGraphAsset::default().to_text().unwrap(),
+        )
+        .unwrap();
+        model
+            .doc
+            .apply("skeleton", |a| a.skeleton = Some(sk.id.to_ref()));
         let player = model.add_node("anim.sequence_player", (0.0, 0.0)).unwrap();
-        model.set_property(&player, "sequence", json!(seq.id.as_str())).unwrap();
-        let out = model.graph().nodes.values().find(|n| n.node_type == "anim.output_pose").unwrap().id.clone();
+        model
+            .set_property(&player, "sequence", json!(seq.id.as_str()))
+            .unwrap();
+        let out = model
+            .graph()
+            .nodes
+            .values()
+            .find(|n| n.node_type == "anim.output_pose")
+            .unwrap()
+            .id
+            .clone();
         model.connect((&player, "pose"), (&out, "pose")).unwrap();
         let _ = skeleton();
-        (Mem { skeleton: sk, sequence: seq }, model.asset().clone())
+        (
+            Mem {
+                skeleton: sk,
+                sequence: seq,
+            },
+            model.asset().clone(),
+        )
     }
 
     #[test]
@@ -241,17 +346,30 @@ mod tests {
         preview.advance(0.1, true);
         assert!((preview.time - 0.2).abs() < 1e-5);
         assert_eq!(preview.projection().bones.len(), before.bones.len());
-        assert!(preview.report().root_motion_translation.iter().all(|v| v.is_finite()));
+        assert!(preview
+            .report()
+            .root_motion_translation
+            .iter()
+            .all(|v| v.is_finite()));
     }
 
     #[test]
     fn a_graph_that_does_not_compile_returns_its_diagnostics_instead_of_a_preview() {
         let (source, mut asset) = fixture();
         asset.skeleton = None;
-        let err = GraphPreview::build(&asset, &source).err().expect("no skeleton, no preview");
+        let err = GraphPreview::build(&asset, &source)
+            .err()
+            .expect("no skeleton, no preview");
         assert_eq!(err[0].code, "preview.no_skeleton");
         let (source, mut asset) = fixture();
-        let out = asset.main.nodes.values().find(|n| n.node_type == "anim.output_pose").unwrap().id.clone();
+        let out = asset
+            .main
+            .nodes
+            .values()
+            .find(|n| n.node_type == "anim.output_pose")
+            .unwrap()
+            .id
+            .clone();
         asset.main.connections.clear();
         for n in asset.main.nodes.values_mut() {
             for p in n.inputs.iter_mut().chain(n.outputs.iter_mut()) {
@@ -259,18 +377,32 @@ mod tests {
             }
         }
         let _ = out;
-        assert!(GraphPreview::build(&asset, &source).is_err(), "an Output Pose with nothing wired does not compile");
+        assert!(
+            GraphPreview::build(&asset, &source).is_err(),
+            "an Output Pose with nothing wired does not compile"
+        );
     }
 
     #[test]
     fn parameters_are_set_on_the_instance_and_validated() {
         let (source, mut asset) = fixture();
-        asset.parameters.push(skeletal_assets::anim_graph::GraphParameter::new("Speed", ParamType::Float));
+        asset
+            .parameters
+            .push(skeletal_assets::anim_graph::GraphParameter::new(
+                "Speed",
+                ParamType::Float,
+            ));
         let mut preview = GraphPreview::build(&asset, &source).expect("compiles");
         assert!(preview.set_parameter("Speed", json!(3.0)).is_ok());
         assert!(preview.set_parameter("Speed", json!("fast")).is_err());
         assert!(preview.set_parameter("Ghost", json!(1.0)).is_err());
-        assert_eq!(preview.parameters().iter().find(|p| p.0 == "Speed").map(|p| p.2.clone()), Some(json!(3.0)));
+        assert_eq!(
+            preview
+                .parameters()
+                .iter()
+                .find(|p| p.0 == "Speed")
+                .map(|p| p.2.clone()),
+            Some(json!(3.0))
+        );
     }
 }
-

@@ -269,10 +269,10 @@ pub struct SkeletalAnimEditorPanel {
     pub issues: Vec<Issue>,
     /// One-off message under the toolbar (e.g. that an old asset was converted).
     pub notice: Option<String>,
-    pub(crate) skeleton_picker: Option<Entity<ui_common::MeshAssetPicker>>,
-    pub(crate) mesh_picker: Option<Entity<ui_common::MeshAssetPicker>>,
+    pub(crate) skeleton_picker: Option<Entity<ui_common::AssetPicker>>,
+    pub(crate) mesh_picker: Option<Entity<ui_common::AssetPicker>>,
     /// `Mesh` mode: one material picker per slot.
-    pub(crate) slot_pickers: Vec<Entity<ui_common::MeshAssetPicker>>,
+    pub(crate) slot_pickers: Vec<Entity<ui_common::AssetPicker>>,
     /// Counts library scans, so a stale one finishing late is ignored.
     pub(crate) scan_generation: u64,
     /// Counts preview-mesh loads, for the same reason.
@@ -682,7 +682,10 @@ impl SkeletalAnimEditorPanel {
             return None;
         }
         let limit = self.animation.duration;
-        let start = self.animation.snap_time(start.clamp(0.0, limit)).clamp(0.0, limit);
+        let start = self
+            .animation
+            .snap_time(start.clamp(0.0, limit))
+            .clamp(0.0, limit);
         let id = self
             .notify_view()
             .add_state("State", start, start + DEFAULT_STATE_LENGTH, limit);
@@ -731,7 +734,11 @@ impl SkeletalAnimEditorPanel {
     /// Set a state's start and/or end, snapped to the frame grid and kept inside the clip.
     pub fn resize_notify_state(&mut self, id: &str, start: Option<f32>, end: Option<f32>) {
         let limit = self.animation.duration;
-        let snap = |t: f32| self.animation.snap_time(t.clamp(0.0, limit)).clamp(0.0, limit);
+        let snap = |t: f32| {
+            self.animation
+                .snap_time(t.clamp(0.0, limit))
+                .clamp(0.0, limit)
+        };
         let (start, end) = (start.map(snap), end.map(snap));
         if self.notify_view().resize_state(id, start, end, limit) {
             self.is_dirty = true;
@@ -769,7 +776,10 @@ impl SkeletalAnimEditorPanel {
 
     pub fn set_notify_time(&mut self, id: &str, time: f32) {
         let limit = self.animation.duration;
-        let time = self.animation.snap_time(time.clamp(0.0, limit)).clamp(0.0, limit);
+        let time = self
+            .animation
+            .snap_time(time.clamp(0.0, limit))
+            .clamp(0.0, limit);
         if self.notify_view().move_to(id, time, limit) {
             self.is_dirty = true;
             self.animation_features
@@ -803,7 +813,8 @@ impl SkeletalAnimEditorPanel {
     pub fn set_notify_target_name(&mut self, id: &str, name: String) {
         if matches!(self.marker_target(id), Some(NotifyTarget::ClassVariable(_)))
             && matches!(
-                self.notify_view().set_target(id, NotifyTarget::ClassVariable(name)),
+                self.notify_view()
+                    .set_target(id, NotifyTarget::ClassVariable(name)),
                 Ok(true)
             )
         {
@@ -1848,7 +1859,9 @@ impl SkeletalAnimEditorPanel {
             sockets: self.sockets.clone(),
             preview_mesh: self.preview_mesh_ref.clone(),
             // the skeleton editor does not edit masks; keep the ones on disk (the graph editor owns them)
-            masks: assets::load_skeleton_asset(path).map(|a| a.masks).unwrap_or_default(),
+            masks: assets::load_skeleton_asset(path)
+                .map(|a| a.masks)
+                .unwrap_or_default(),
         };
         assets::save_skeleton_asset(path, &asset)?;
         self.asset_id = Some(id);

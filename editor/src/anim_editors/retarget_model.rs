@@ -13,7 +13,10 @@ use skeletal_assets::diagnostics::Diagnostic;
 use skeletal_assets::ik_retarget::{ChainRetarget, FkSettings, IkRetargetAsset, IkSettings};
 use skeletal_assets::ik_rig::IkRigAsset;
 use skeletal_assets::math::Transform;
-use skeletal_assets::retarget::{BoneMapping, BoneRotation, ChainMapping, RetargetPose, RetargetProfileAsset, RootScale, RotationMode, TranslationMode};
+use skeletal_assets::retarget::{
+    BoneMapping, BoneRotation, ChainMapping, RetargetPose, RetargetProfileAsset, RootScale,
+    RotationMode, TranslationMode,
+};
 use skeletal_assets::skeleton::Skeleton;
 
 use super::document::AnimDocument;
@@ -31,7 +34,12 @@ pub enum PoseSide {
 
 fn quat_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     let ([ax, ay, az, aw], [bx, by, bz, bw]) = (a, b);
-    [aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz]
+    [
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ]
 }
 
 /// Quaternion `[x, y, z, w]` for XYZ Euler degrees in the engine's convention
@@ -51,7 +59,11 @@ pub fn euler_deg_from_quat(q: [f32; 4]) -> [f32; 3] {
     [t.rotation.x, t.rotation.y, t.rotation.z]
 }
 
-fn pose_mut<'a>(source: &'a mut RetargetPose, target: &'a mut RetargetPose, side: PoseSide) -> &'a mut RetargetPose {
+fn pose_mut<'a>(
+    source: &'a mut RetargetPose,
+    target: &'a mut RetargetPose,
+    side: PoseSide,
+) -> &'a mut RetargetPose {
     match side {
         PoseSide::Source => source,
         PoseSide::Target => target,
@@ -79,14 +91,20 @@ fn set_pose_bone(pose: &mut RetargetPose, bone: &str, deg: [f32; 3]) -> Result<b
             Ok(changed)
         }
         (None, false) => {
-            pose.bone_rotations.push(BoneRotation { bone: bone.to_string(), rotation: quat_from_euler_deg(deg) });
+            pose.bone_rotations.push(BoneRotation {
+                bone: bone.to_string(),
+                rotation: quat_from_euler_deg(deg),
+            });
             Ok(true)
         }
     }
 }
 
 fn pose_euler(pose: &RetargetPose, bone: &str) -> [f32; 3] {
-    pose.bone_rotations.iter().find(|b| b.bone == bone).map_or([0.0; 3], |b| euler_deg_from_quat(b.rotation))
+    pose.bone_rotations
+        .iter()
+        .find(|b| b.bone == bone)
+        .map_or([0.0; 3], |b| euler_deg_from_quat(b.rotation))
 }
 
 fn alpha_ok(v: f32) -> Result<(), String> {
@@ -109,7 +127,9 @@ pub enum ChainStatus {
     /// The mapping names a target chain the target rig does not have.
     MissingTarget,
     /// The target chain has several plausible source chains.
-    Ambiguous { candidates: Vec<String> },
+    Ambiguous {
+        candidates: Vec<String>,
+    },
 }
 
 impl ChainStatus {
@@ -128,14 +148,22 @@ pub struct ChainRow {
 }
 
 fn normalise(name: &str) -> String {
-    name.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase()
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase()
 }
 
 /// Source chains that plausibly correspond to `target`: same name ignoring
 /// case and separators first, then names that contain each other.
 pub fn suggest_chains(target: &str, source: &IkRigAsset) -> Vec<String> {
     let t = normalise(target);
-    let mut exact: Vec<String> = source.chains.iter().filter(|c| normalise(&c.name) == t).map(|c| c.name.clone()).collect();
+    let mut exact: Vec<String> = source
+        .chains
+        .iter()
+        .filter(|c| normalise(&c.name) == t)
+        .map(|c| c.name.clone())
+        .collect();
     let mut near: Vec<String> = source
         .chains
         .iter()
@@ -151,7 +179,11 @@ pub fn suggest_chains(target: &str, source: &IkRigAsset) -> Vec<String> {
 
 /// Status rows for the target rig's chains plus mappings that name chains no
 /// rig has.
-fn chain_rows(source: Option<&IkRigAsset>, target: Option<&IkRigAsset>, pairs: &[(String, Option<String>)]) -> Vec<ChainRow> {
+fn chain_rows(
+    source: Option<&IkRigAsset>,
+    target: Option<&IkRigAsset>,
+    pairs: &[(String, Option<String>)],
+) -> Vec<ChainRow> {
     let mut rows = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let status_of = |t: &str, s: Option<&String>| -> (ChainStatus, Vec<String>) {
@@ -163,21 +195,36 @@ fn chain_rows(source: Option<&IkRigAsset>, target: Option<&IkRigAsset>, pairs: &
         match s {
             None => {
                 if suggestions.len() > 1 {
-                    (ChainStatus::Ambiguous { candidates: suggestions.clone() }, suggestions)
+                    (
+                        ChainStatus::Ambiguous {
+                            candidates: suggestions.clone(),
+                        },
+                        suggestions,
+                    )
                 } else {
                     (ChainStatus::UnmappedTarget, suggestions)
                 }
             }
-            Some(name) if source.is_some_and(|r| r.chain(name).is_none()) => (ChainStatus::MissingSource, suggestions),
+            Some(name) if source.is_some_and(|r| r.chain(name).is_none()) => {
+                (ChainStatus::MissingSource, suggestions)
+            }
             Some(_) => (ChainStatus::Mapped, suggestions),
         }
     };
     if let Some(target) = target {
         for chain in &target.chains {
-            let source_chain = pairs.iter().find(|(t, _)| *t == chain.name).and_then(|(_, s)| s.clone());
+            let source_chain = pairs
+                .iter()
+                .find(|(t, _)| *t == chain.name)
+                .and_then(|(_, s)| s.clone());
             let (status, suggestions) = status_of(&chain.name, source_chain.as_ref());
             seen.insert(chain.name.clone());
-            rows.push(ChainRow { target_chain: chain.name.clone(), source_chain, status, suggestions });
+            rows.push(ChainRow {
+                target_chain: chain.name.clone(),
+                source_chain,
+                status,
+                suggestions,
+            });
         }
     }
     for (t, s) in pairs {
@@ -185,7 +232,12 @@ fn chain_rows(source: Option<&IkRigAsset>, target: Option<&IkRigAsset>, pairs: &
             continue;
         }
         let (status, suggestions) = status_of(t, s.as_ref());
-        rows.push(ChainRow { target_chain: t.clone(), source_chain: s.clone(), status, suggestions });
+        rows.push(ChainRow {
+            target_chain: t.clone(),
+            source_chain: s.clone(),
+            status,
+            suggestions,
+        });
     }
     rows
 }
@@ -204,14 +256,25 @@ pub struct RetargetProfileModel {
 impl RetargetProfileModel {
     pub fn open(store: Arc<dyn DocStore>, path: &Path, default_text: &str) -> Result<Self, String> {
         let doc = AnimDocument::<RetargetProfileAsset>::open(store, path, default_text)?;
-        Ok(Self { doc, selection: AnimSelection::None, source_skeleton: None, target_skeleton: None, source_rig: None, target_rig: None })
+        Ok(Self {
+            doc,
+            selection: AnimSelection::None,
+            source_skeleton: None,
+            target_skeleton: None,
+            source_rig: None,
+            target_rig: None,
+        })
     }
 
     pub fn asset(&self) -> &RetargetProfileAsset {
         self.doc.value()
     }
 
-    pub fn set_skeletons(&mut self, source: Option<AssetRef<SkeletonAssetKind>>, target: Option<AssetRef<SkeletonAssetKind>>) -> bool {
+    pub fn set_skeletons(
+        &mut self,
+        source: Option<AssetRef<SkeletonAssetKind>>,
+        target: Option<AssetRef<SkeletonAssetKind>>,
+    ) -> bool {
         self.doc.edit("Set skeletons", None, |a| {
             let changed = a.source_skeleton != source || a.target_skeleton != target;
             a.source_skeleton = source;
@@ -222,7 +285,11 @@ impl RetargetProfileModel {
 
     /// Set both IK rigs, or neither. Switching to or from rig mapping clears the
     /// other mapping table, which the format forbids holding both of.
-    pub fn set_rigs(&mut self, source: Option<AssetRef<IkRigAssetKind>>, target: Option<AssetRef<IkRigAssetKind>>) -> Result<(), String> {
+    pub fn set_rigs(
+        &mut self,
+        source: Option<AssetRef<IkRigAssetKind>>,
+        target: Option<AssetRef<IkRigAssetKind>>,
+    ) -> Result<(), String> {
         if source.is_some() != target.is_some() {
             return Err("set both IK rigs, or neither".into());
         }
@@ -242,13 +309,20 @@ impl RetargetProfileModel {
     }
 
     pub fn rows(&self) -> Vec<ChainRow> {
-        let pairs: Vec<_> = self.asset().chain_map.iter().map(|m| (m.target_chain.clone(), Some(m.source_chain.clone()))).collect();
+        let pairs: Vec<_> = self
+            .asset()
+            .chain_map
+            .iter()
+            .map(|m| (m.target_chain.clone(), Some(m.source_chain.clone())))
+            .collect();
         chain_rows(self.source_rig.as_ref(), self.target_rig.as_ref(), &pairs)
     }
 
     pub fn select_chain(&mut self, target_chain: &str) -> bool {
         if self.rows().iter().any(|r| r.target_chain == target_chain) {
-            self.selection = AnimSelection::RetargetChain { name: target_chain.into() };
+            self.selection = AnimSelection::RetargetChain {
+                name: target_chain.into(),
+            };
             true
         } else {
             false
@@ -256,7 +330,10 @@ impl RetargetProfileModel {
     }
 
     fn mapping_index(&self, target_chain: &str) -> Option<usize> {
-        self.asset().chain_map.iter().position(|m| m.target_chain == target_chain)
+        self.asset()
+            .chain_map
+            .iter()
+            .position(|m| m.target_chain == target_chain)
     }
 
     /// Map `source_chain` onto `target_chain`, replacing any earlier mapping of
@@ -265,10 +342,18 @@ impl RetargetProfileModel {
         if !self.asset().maps_by_chain() {
             return Err("set both IK rigs to map by chain".into());
         }
-        if self.source_rig.as_ref().is_some_and(|r| r.chain(source_chain).is_none()) {
+        if self
+            .source_rig
+            .as_ref()
+            .is_some_and(|r| r.chain(source_chain).is_none())
+        {
             return Err(format!("`{source_chain}` is not a chain of the source rig"));
         }
-        if self.target_rig.as_ref().is_some_and(|r| r.chain(target_chain).is_none()) {
+        if self
+            .target_rig
+            .as_ref()
+            .is_some_and(|r| r.chain(target_chain).is_none())
+        {
             return Err(format!("`{target_chain}` is not a chain of the target rig"));
         }
         let (s, t) = (source_chain.to_string(), target_chain.to_string());
@@ -285,12 +370,16 @@ impl RetargetProfileModel {
                 translation_alpha: 1.0,
             }),
         });
-        self.selection = AnimSelection::RetargetChain { name: target_chain.into() };
+        self.selection = AnimSelection::RetargetChain {
+            name: target_chain.into(),
+        };
         Ok(())
     }
 
     pub fn unmap_chain(&mut self, target_chain: &str) -> bool {
-        let Some(i) = self.mapping_index(target_chain) else { return false };
+        let Some(i) = self.mapping_index(target_chain) else {
+            return false;
+        };
         self.doc.apply("Unmap chain", |a| {
             a.chain_map.remove(i);
         });
@@ -301,13 +390,19 @@ impl RetargetProfileModel {
     /// chain (ignoring case and separators). Ambiguous ones are left for the
     /// user. Returns how many were mapped.
     pub fn auto_map_chains(&mut self) -> usize {
-        let (Some(source), Some(target)) = (self.source_rig.clone(), self.target_rig.clone()) else { return 0 };
+        let (Some(source), Some(target)) = (self.source_rig.clone(), self.target_rig.clone())
+        else {
+            return 0;
+        };
         let todo: Vec<(String, String)> = target
             .chains
             .iter()
             .filter(|c| self.mapping_index(&c.name).is_none())
             .filter_map(|c| {
-                let exact: Vec<_> = suggest_chains(&c.name, &source).into_iter().filter(|s| normalise(s) == normalise(&c.name)).collect();
+                let exact: Vec<_> = suggest_chains(&c.name, &source)
+                    .into_iter()
+                    .filter(|s| normalise(s) == normalise(&c.name))
+                    .collect();
                 (exact.len() == 1).then(|| (exact[0].clone(), c.name.clone()))
             })
             .collect();
@@ -331,25 +426,47 @@ impl RetargetProfileModel {
         count
     }
 
-    pub fn set_chain_rotation(&mut self, target_chain: &str, mode: RotationMode, alpha: f32) -> Result<(), String> {
+    pub fn set_chain_rotation(
+        &mut self,
+        target_chain: &str,
+        mode: RotationMode,
+        alpha: f32,
+    ) -> Result<(), String> {
         alpha_ok(alpha)?;
-        let i = self.mapping_index(target_chain).ok_or("that chain is not mapped")?;
-        self.doc.edit("Set chain rotation", Some(&format!("crot:{target_chain}")), |a| {
-            a.chain_map[i].rotation = mode;
-            a.chain_map[i].rotation_alpha = alpha;
-            (true, ())
-        });
+        let i = self
+            .mapping_index(target_chain)
+            .ok_or("that chain is not mapped")?;
+        self.doc.edit(
+            "Set chain rotation",
+            Some(&format!("crot:{target_chain}")),
+            |a| {
+                a.chain_map[i].rotation = mode;
+                a.chain_map[i].rotation_alpha = alpha;
+                (true, ())
+            },
+        );
         Ok(())
     }
 
-    pub fn set_chain_translation(&mut self, target_chain: &str, mode: TranslationMode, alpha: f32) -> Result<(), String> {
+    pub fn set_chain_translation(
+        &mut self,
+        target_chain: &str,
+        mode: TranslationMode,
+        alpha: f32,
+    ) -> Result<(), String> {
         alpha_ok(alpha)?;
-        let i = self.mapping_index(target_chain).ok_or("that chain is not mapped")?;
-        self.doc.edit("Set chain translation", Some(&format!("ctr:{target_chain}")), |a| {
-            a.chain_map[i].translation = mode;
-            a.chain_map[i].translation_alpha = alpha;
-            (true, ())
-        });
+        let i = self
+            .mapping_index(target_chain)
+            .ok_or("that chain is not mapped")?;
+        self.doc.edit(
+            "Set chain translation",
+            Some(&format!("ctr:{target_chain}")),
+            |a| {
+                a.chain_map[i].translation = mode;
+                a.chain_map[i].translation_alpha = alpha;
+                (true, ())
+            },
+        );
         Ok(())
     }
 
@@ -359,30 +476,57 @@ impl RetargetProfileModel {
         if self.asset().maps_by_chain() {
             return Err("this profile maps by chain".into());
         }
-        if self.source_skeleton.as_ref().is_some_and(|s| s.bone(source_bone).is_none()) || self.target_skeleton.as_ref().is_some_and(|s| s.bone(target_bone).is_none()) {
+        if self
+            .source_skeleton
+            .as_ref()
+            .is_some_and(|s| s.bone(source_bone).is_none())
+            || self
+                .target_skeleton
+                .as_ref()
+                .is_some_and(|s| s.bone(target_bone).is_none())
+        {
             return Err("pick bones of the source and target skeletons".into());
         }
-        let existing = self.asset().bone_map.iter().position(|m| m.target_bone == target_bone);
+        let existing = self
+            .asset()
+            .bone_map
+            .iter()
+            .position(|m| m.target_bone == target_bone);
         let (s, t) = (source_bone.to_string(), target_bone.to_string());
         self.doc.apply("Map bone", |a| match existing {
             Some(i) => a.bone_map[i].source_bone = s,
-            None => a.bone_map.push(BoneMapping { id: uuid::Uuid::new_v4().to_string(), source_bone: s, target_bone: t, rotation: RotationMode::default(), translation: TranslationMode::default() }),
+            None => a.bone_map.push(BoneMapping {
+                id: uuid::Uuid::new_v4().to_string(),
+                source_bone: s,
+                target_bone: t,
+                rotation: RotationMode::default(),
+                translation: TranslationMode::default(),
+            }),
         });
         Ok(())
     }
 
     pub fn unmap_bone(&mut self, target_bone: &str) -> bool {
         let before = self.asset().bone_map.len();
-        if !self.asset().bone_map.iter().any(|m| m.target_bone == target_bone) {
+        if !self
+            .asset()
+            .bone_map
+            .iter()
+            .any(|m| m.target_bone == target_bone)
+        {
             return false;
         }
-        self.doc.apply("Unmap bone", |a| a.bone_map.retain(|m| m.target_bone != target_bone));
+        self.doc.apply("Unmap bone", |a| {
+            a.bone_map.retain(|m| m.target_bone != target_bone)
+        });
         before != self.asset().bone_map.len()
     }
 
     /// Map target bones to same-named source bones. Returns how many were added.
     pub fn auto_map_bones(&mut self) -> usize {
-        let (Some(source), Some(target)) = (&self.source_skeleton, &self.target_skeleton) else { return 0 };
+        let (Some(source), Some(target)) = (&self.source_skeleton, &self.target_skeleton) else {
+            return 0;
+        };
         if self.asset().maps_by_chain() {
             return 0;
         }
@@ -390,13 +534,25 @@ impl RetargetProfileModel {
             .bones
             .iter()
             .filter(|t| !self.asset().bone_map.iter().any(|m| m.target_bone == t.id))
-            .filter_map(|t| source.bones.iter().find(|s| normalise(&s.name) == normalise(&t.name)).map(|s| (s.id.clone(), t.id.clone())))
+            .filter_map(|t| {
+                source
+                    .bones
+                    .iter()
+                    .find(|s| normalise(&s.name) == normalise(&t.name))
+                    .map(|s| (s.id.clone(), t.id.clone()))
+            })
             .collect();
         let count = todo.len();
         if count > 0 {
             self.doc.apply("Auto-map bones", |a| {
                 for (s, t) in todo {
-                    a.bone_map.push(BoneMapping { id: uuid::Uuid::new_v4().to_string(), source_bone: s, target_bone: t, rotation: RotationMode::default(), translation: TranslationMode::default() });
+                    a.bone_map.push(BoneMapping {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        source_bone: s,
+                        target_bone: t,
+                        rotation: RotationMode::default(),
+                        translation: TranslationMode::default(),
+                    });
                 }
             });
         }
@@ -406,7 +562,15 @@ impl RetargetProfileModel {
     // root + pose ---------------------------------------------------------------
 
     pub fn set_roots(&mut self, source: Option<&str>, target: Option<&str>) -> Result<(), String> {
-        if source.is_some_and(|b| self.source_skeleton.as_ref().is_some_and(|s| s.bone(b).is_none())) || target.is_some_and(|b| self.target_skeleton.as_ref().is_some_and(|s| s.bone(b).is_none())) {
+        if source.is_some_and(|b| {
+            self.source_skeleton
+                .as_ref()
+                .is_some_and(|s| s.bone(b).is_none())
+        }) || target.is_some_and(|b| {
+            self.target_skeleton
+                .as_ref()
+                .is_some_and(|s| s.bone(b).is_none())
+        }) {
             return Err("pick bones of the source and target skeletons".into());
         }
         let (s, t) = (source.map(str::to_string), target.map(str::to_string));
@@ -444,7 +608,12 @@ impl RetargetProfileModel {
     }
 
     /// Rotate one bone of a retarget pose (the "retarget pose" tool).
-    pub fn set_pose_bone(&mut self, side: PoseSide, bone: &str, euler_deg: [f32; 3]) -> Result<bool, String> {
+    pub fn set_pose_bone(
+        &mut self,
+        side: PoseSide,
+        bone: &str,
+        euler_deg: [f32; 3],
+    ) -> Result<bool, String> {
         let known = match side {
             PoseSide::Source => self.source_skeleton.as_ref(),
             PoseSide::Target => self.target_skeleton.as_ref(),
@@ -454,18 +623,33 @@ impl RetargetProfileModel {
         }
         let bone = bone.to_string();
         let mut result = Ok(false);
-        self.doc.edit("Edit retarget pose", Some(&format!("pose:{side:?}:{bone}")), |a| {
-            let RetargetProfileAsset { source_pose, target_pose, .. } = a;
-            result = set_pose_bone(pose_mut(source_pose, target_pose, side), &bone, euler_deg);
-            let changed = matches!(result, Ok(true));
-            (changed, ())
-        });
+        self.doc.edit(
+            "Edit retarget pose",
+            Some(&format!("pose:{side:?}:{bone}")),
+            |a| {
+                let RetargetProfileAsset {
+                    source_pose,
+                    target_pose,
+                    ..
+                } = a;
+                result = set_pose_bone(pose_mut(source_pose, target_pose, side), &bone, euler_deg);
+                let changed = matches!(result, Ok(true));
+                (changed, ())
+            },
+        );
         result
     }
 
     pub fn pose_bone_euler(&self, side: PoseSide, bone: &str) -> [f32; 3] {
         let a = self.asset();
-        pose_euler(if side == PoseSide::Source { &a.source_pose } else { &a.target_pose }, bone)
+        pose_euler(
+            if side == PoseSide::Source {
+                &a.source_pose
+            } else {
+                &a.target_pose
+            },
+            bone,
+        )
     }
 
     pub fn reset_pose(&mut self, side: PoseSide) -> bool {
@@ -523,14 +707,26 @@ pub struct IkRetargetModel {
 impl IkRetargetModel {
     pub fn open(store: Arc<dyn DocStore>, path: &Path, default_text: &str) -> Result<Self, String> {
         let doc = AnimDocument::<IkRetargetAsset>::open(store, path, default_text)?;
-        Ok(Self { doc, selection: AnimSelection::None, source_rig: None, target_rig: None, source_skeleton: None, target_skeleton: None, overlay: false })
+        Ok(Self {
+            doc,
+            selection: AnimSelection::None,
+            source_rig: None,
+            target_rig: None,
+            source_skeleton: None,
+            target_skeleton: None,
+            overlay: false,
+        })
     }
 
     pub fn asset(&self) -> &IkRetargetAsset {
         self.doc.value()
     }
 
-    pub fn set_rigs(&mut self, source: Option<AssetRef<IkRigAssetKind>>, target: Option<AssetRef<IkRigAssetKind>>) -> Result<(), String> {
+    pub fn set_rigs(
+        &mut self,
+        source: Option<AssetRef<IkRigAssetKind>>,
+        target: Option<AssetRef<IkRigAssetKind>>,
+    ) -> Result<(), String> {
         if source.is_some() && source == target {
             return Err("the source and target rig must differ".into());
         }
@@ -544,7 +740,10 @@ impl IkRetargetModel {
     }
 
     fn chain_index(&self, target_chain: &str) -> Option<usize> {
-        self.asset().chains.iter().position(|c| c.target_chain == target_chain)
+        self.asset()
+            .chains
+            .iter()
+            .position(|c| c.target_chain == target_chain)
     }
 
     /// Add a setting for every target-rig chain that has none, pairing it with
@@ -552,46 +751,73 @@ impl IkRetargetModel {
     /// chains the target rig no longer has are kept (and reported). Returns the
     /// number added.
     pub fn sync_chains(&mut self) -> usize {
-        let Some(target) = self.target_rig.clone() else { return 0 };
+        let Some(target) = self.target_rig.clone() else {
+            return 0;
+        };
         let source = self.source_rig.clone();
         let add: Vec<ChainRetarget> = target
             .chains
             .iter()
             .filter(|c| self.chain_index(&c.name).is_none())
             .map(|c| {
-                let exact = source.as_ref().map(|s| suggest_chains(&c.name, s).into_iter().filter(|n| normalise(n) == normalise(&c.name)).collect::<Vec<_>>()).unwrap_or_default();
+                let exact = source
+                    .as_ref()
+                    .map(|s| {
+                        suggest_chains(&c.name, s)
+                            .into_iter()
+                            .filter(|n| normalise(n) == normalise(&c.name))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
                 ChainRetarget {
                     id: uuid::Uuid::new_v4().to_string(),
                     target_chain: c.name.clone(),
                     source_chain: (exact.len() == 1).then(|| exact[0].clone()),
                     fk: FkSettings::default(),
-                    ik: IkSettings { enabled: c.goal.is_some(), ..IkSettings::default() },
+                    ik: IkSettings {
+                        enabled: c.goal.is_some(),
+                        ..IkSettings::default()
+                    },
                 }
             })
             .collect();
         let count = add.len();
         if count > 0 {
-            self.doc.apply("Add chain settings", |a| a.chains.extend(add));
+            self.doc
+                .apply("Add chain settings", |a| a.chains.extend(add));
         }
         count
     }
 
     pub fn rows(&self) -> Vec<ChainRow> {
-        let pairs: Vec<_> = self.asset().chains.iter().map(|c| (c.target_chain.clone(), c.source_chain.clone())).collect();
+        let pairs: Vec<_> = self
+            .asset()
+            .chains
+            .iter()
+            .map(|c| (c.target_chain.clone(), c.source_chain.clone()))
+            .collect();
         chain_rows(self.source_rig.as_ref(), self.target_rig.as_ref(), &pairs)
     }
 
     pub fn select_chain(&mut self, target_chain: &str) -> bool {
         if self.chain_index(target_chain).is_some() {
-            self.selection = AnimSelection::RetargetChain { name: target_chain.into() };
+            self.selection = AnimSelection::RetargetChain {
+                name: target_chain.into(),
+            };
             true
         } else {
             false
         }
     }
 
-    pub fn set_source_chain(&mut self, target_chain: &str, source: Option<&str>) -> Result<(), String> {
-        let i = self.chain_index(target_chain).ok_or("no setting for that chain")?;
+    pub fn set_source_chain(
+        &mut self,
+        target_chain: &str,
+        source: Option<&str>,
+    ) -> Result<(), String> {
+        let i = self
+            .chain_index(target_chain)
+            .ok_or("no setting for that chain")?;
         if let (Some(s), Some(rig)) = (source, &self.source_rig) {
             if rig.chain(s).is_none() {
                 return Err(format!("`{s}` is not a chain of the source rig"));
@@ -607,7 +833,9 @@ impl IkRetargetModel {
     }
 
     pub fn delete_chain_setting(&mut self, target_chain: &str) -> bool {
-        let Some(i) = self.chain_index(target_chain) else { return false };
+        let Some(i) = self.chain_index(target_chain) else {
+            return false;
+        };
         self.doc.apply("Delete chain setting", |a| {
             a.chains.remove(i);
         });
@@ -617,46 +845,65 @@ impl IkRetargetModel {
     pub fn set_fk(&mut self, target_chain: &str, fk: FkSettings) -> Result<(), String> {
         alpha_ok(fk.rotation_alpha)?;
         alpha_ok(fk.translation_alpha)?;
-        let i = self.chain_index(target_chain).ok_or("no setting for that chain")?;
-        self.doc.edit("Edit FK", Some(&format!("fk:{target_chain}")), |a| {
-            let changed = a.chains[i].fk != fk;
-            a.chains[i].fk = fk;
-            (changed, ())
-        });
+        let i = self
+            .chain_index(target_chain)
+            .ok_or("no setting for that chain")?;
+        self.doc
+            .edit("Edit FK", Some(&format!("fk:{target_chain}")), |a| {
+                let changed = a.chains[i].fk != fk;
+                a.chains[i].fk = fk;
+                (changed, ())
+            });
         Ok(())
     }
 
     /// Edit IK settings. IK needs a goal on the target chain when the rig is known.
     pub fn set_ik(&mut self, target_chain: &str, ik: IkSettings) -> Result<(), String> {
         alpha_ok(ik.blend_to_source)?;
-        if !ik.scale_vertical.is_finite() || ik.scale_vertical <= 0.0 || !ik.extension.is_finite() || ik.extension <= 0.0 {
+        if !ik.scale_vertical.is_finite()
+            || ik.scale_vertical <= 0.0
+            || !ik.extension.is_finite()
+            || ik.extension <= 0.0
+        {
             return Err("scale and extension must be positive".into());
         }
         if ik.static_offset.iter().any(|v| !v.is_finite()) {
             return Err("offset must be numbers".into());
         }
-        let i = self.chain_index(target_chain).ok_or("no setting for that chain")?;
+        let i = self
+            .chain_index(target_chain)
+            .ok_or("no setting for that chain")?;
         if ik.enabled {
             if let Some(chain) = self.target_rig.as_ref().and_then(|r| r.chain(target_chain)) {
                 if chain.goal.is_none() {
-                    return Err("the target chain has no IK goal; give it one in the target IK rig".into());
+                    return Err(
+                        "the target chain has no IK goal; give it one in the target IK rig".into(),
+                    );
                 }
             }
         }
-        self.doc.edit("Edit IK", Some(&format!("ik:{target_chain}")), |a| {
-            let changed = a.chains[i].ik != ik;
-            a.chains[i].ik = ik;
-            (changed, ())
-        });
+        self.doc
+            .edit("Edit IK", Some(&format!("ik:{target_chain}")), |a| {
+                let changed = a.chains[i].ik != ik;
+                a.chains[i].ik = ik;
+                (changed, ())
+            });
         Ok(())
     }
 
-    pub fn set_root(&mut self, edit: impl FnOnce(&mut skeletal_assets::ik_retarget::RootRetarget)) -> Result<(), String> {
+    pub fn set_root(
+        &mut self,
+        edit: impl FnOnce(&mut skeletal_assets::ik_retarget::RootRetarget),
+    ) -> Result<(), String> {
         let mut candidate = self.asset().root.clone();
         edit(&mut candidate);
         alpha_ok(candidate.rotation_alpha)?;
         alpha_ok(candidate.translation_alpha)?;
-        if !candidate.scale_horizontal.is_finite() || candidate.scale_horizontal <= 0.0 || !candidate.scale_vertical.is_finite() || candidate.scale_vertical <= 0.0 {
+        if !candidate.scale_horizontal.is_finite()
+            || candidate.scale_horizontal <= 0.0
+            || !candidate.scale_vertical.is_finite()
+            || candidate.scale_vertical <= 0.0
+        {
             return Err("scales must be positive".into());
         }
         self.doc.edit("Edit root", Some("root"), |a| {
@@ -666,7 +913,12 @@ impl IkRetargetModel {
         Ok(())
     }
 
-    pub fn set_pose_bone(&mut self, side: PoseSide, bone: &str, euler_deg: [f32; 3]) -> Result<bool, String> {
+    pub fn set_pose_bone(
+        &mut self,
+        side: PoseSide,
+        bone: &str,
+        euler_deg: [f32; 3],
+    ) -> Result<bool, String> {
         let known = match side {
             PoseSide::Source => self.source_skeleton.as_ref(),
             PoseSide::Target => self.target_skeleton.as_ref(),
@@ -676,17 +928,32 @@ impl IkRetargetModel {
         }
         let bone = bone.to_string();
         let mut result = Ok(false);
-        self.doc.edit("Edit retarget pose", Some(&format!("pose:{side:?}:{bone}")), |a| {
-            let IkRetargetAsset { source_pose, target_pose, .. } = a;
-            result = set_pose_bone(pose_mut(source_pose, target_pose, side), &bone, euler_deg);
-            (matches!(result, Ok(true)), ())
-        });
+        self.doc.edit(
+            "Edit retarget pose",
+            Some(&format!("pose:{side:?}:{bone}")),
+            |a| {
+                let IkRetargetAsset {
+                    source_pose,
+                    target_pose,
+                    ..
+                } = a;
+                result = set_pose_bone(pose_mut(source_pose, target_pose, side), &bone, euler_deg);
+                (matches!(result, Ok(true)), ())
+            },
+        );
         result
     }
 
     pub fn pose_bone_euler(&self, side: PoseSide, bone: &str) -> [f32; 3] {
         let a = self.asset();
-        pose_euler(if side == PoseSide::Source { &a.source_pose } else { &a.target_pose }, bone)
+        pose_euler(
+            if side == PoseSide::Source {
+                &a.source_pose
+            } else {
+                &a.target_pose
+            },
+            bone,
+        )
     }
 
     pub fn reset_pose(&mut self, side: PoseSide) -> bool {
@@ -726,20 +993,58 @@ mod tests {
         for (c, goal) in chains {
             let goal_id = goal.map(|g| {
                 let id = format!("goal-{g}");
-                r.goals.push(skeletal_assets::ik_rig::IkGoal { id: id.clone(), name: g.to_string(), bone: "b".into(), position_alpha: 1.0, rotation_alpha: 1.0, default_offset: [0.0; 3] });
+                r.goals.push(skeletal_assets::ik_rig::IkGoal {
+                    id: id.clone(),
+                    name: g.to_string(),
+                    bone: "b".into(),
+                    position_alpha: 1.0,
+                    rotation_alpha: 1.0,
+                    default_offset: [0.0; 3],
+                });
                 id
             });
-            r.chains.push(IkChain { id: format!("id-{c}"), name: c.to_string(), start_bone: "a".into(), end_bone: "b".into(), goal: goal_id });
+            r.chains.push(IkChain {
+                id: format!("id-{c}"),
+                name: c.to_string(),
+                start_bone: "a".into(),
+                end_bone: "b".into(),
+                goal: goal_id,
+            });
         }
         r
     }
 
     fn profile() -> RetargetProfileModel {
         let store = MemStore::default();
-        let mut m = RetargetProfileModel::open(Arc::new(store), Path::new("p.animretarget"), &RetargetProfileAsset::new("P", None, None).to_text().unwrap()).unwrap();
-        m.source_rig = Some(rig("S", &[("Spine", None), ("LeftArm", None), ("RightArm", None), ("Leg_L", None)]));
-        m.target_rig = Some(rig("T", &[("spine", None), ("left_arm", None), ("RightArm", None), ("Tail", None), ("Leg", None)]));
-        m.set_rigs(Some(AssetRef::new()), Some(AssetRef::new())).unwrap();
+        let mut m = RetargetProfileModel::open(
+            Arc::new(store),
+            Path::new("p.animretarget"),
+            &RetargetProfileAsset::new("P", None, None)
+                .to_text()
+                .unwrap(),
+        )
+        .unwrap();
+        m.source_rig = Some(rig(
+            "S",
+            &[
+                ("Spine", None),
+                ("LeftArm", None),
+                ("RightArm", None),
+                ("Leg_L", None),
+            ],
+        ));
+        m.target_rig = Some(rig(
+            "T",
+            &[
+                ("spine", None),
+                ("left_arm", None),
+                ("RightArm", None),
+                ("Tail", None),
+                ("Leg", None),
+            ],
+        ));
+        m.set_rigs(Some(AssetRef::new()), Some(AssetRef::new()))
+            .unwrap();
         m
     }
 
@@ -768,35 +1073,87 @@ mod tests {
     fn chain_table_flags_unmapped_missing_and_ambiguous_rows_with_suggestions() {
         let mut m = profile();
         let rows = m.rows();
-        let row = |name: &str| rows.iter().find(|r| r.target_chain == name).unwrap().clone();
+        let row = |name: &str| {
+            rows.iter()
+                .find(|r| r.target_chain == name)
+                .unwrap()
+                .clone()
+        };
         assert_eq!(row("Tail").status, ChainStatus::UnmappedTarget);
         assert!(row("Tail").suggestions.is_empty());
         assert_eq!(row("RightArm").suggestions, ["RightArm"]);
-        assert_eq!(row("left_arm").suggestions, ["LeftArm"], "separators and case are ignored");
+        assert_eq!(
+            row("left_arm").suggestions,
+            ["LeftArm"],
+            "separators and case are ignored"
+        );
         // Leg is contained in Leg_L only: a near suggestion, still unmapped
         assert_eq!(row("Leg").status, ChainStatus::UnmappedTarget);
         assert_eq!(row("Leg").suggestions, ["Leg_L"]);
         m.map_chain("Spine", "spine").unwrap();
-        assert_eq!(m.rows().iter().find(|r| r.target_chain == "spine").unwrap().status, ChainStatus::Mapped);
+        assert_eq!(
+            m.rows()
+                .iter()
+                .find(|r| r.target_chain == "spine")
+                .unwrap()
+                .status,
+            ChainStatus::Mapped
+        );
         assert!(m.map_chain("Nope", "spine").is_err());
         assert!(m.map_chain("Spine", "Nope").is_err());
         // a mapping to a chain that left the rig is a missing-target row
-        m.doc.apply("break", |a| a.chain_map.push(ChainMapping { id: "x".into(), source_chain: "Spine".into(), target_chain: "Gone".into(), rotation: RotationMode::None, rotation_alpha: 1.0, translation: TranslationMode::None, translation_alpha: 1.0 }));
-        assert_eq!(m.rows().iter().find(|r| r.target_chain == "Gone").unwrap().status, ChainStatus::MissingTarget);
+        m.doc.apply("break", |a| {
+            a.chain_map.push(ChainMapping {
+                id: "x".into(),
+                source_chain: "Spine".into(),
+                target_chain: "Gone".into(),
+                rotation: RotationMode::None,
+                rotation_alpha: 1.0,
+                translation: TranslationMode::None,
+                translation_alpha: 1.0,
+            })
+        });
+        assert_eq!(
+            m.rows()
+                .iter()
+                .find(|r| r.target_chain == "Gone")
+                .unwrap()
+                .status,
+            ChainStatus::MissingTarget
+        );
         m.source_skeleton = Some(super::super::ik_rig_model::tests::skeleton());
         m.target_skeleton = Some(super::super::ik_rig_model::tests::skeleton());
-        assert!(m.validation().iter().any(|d| d.code == "retarget.unknown_chain"));
+        assert!(m
+            .validation()
+            .iter()
+            .any(|d| d.code == "retarget.unknown_chain"));
     }
 
     #[test]
     fn auto_map_takes_exact_matches_only_and_remap_replaces() {
         let mut m = profile();
-        assert_eq!(m.auto_map_chains(), 3, "spine, left_arm and RightArm have exactly one same-named source");
+        assert_eq!(
+            m.auto_map_chains(),
+            3,
+            "spine, left_arm and RightArm have exactly one same-named source"
+        );
         assert_eq!(m.auto_map_chains(), 0);
         assert_eq!(m.asset().chain_map.len(), 3);
         m.map_chain("LeftArm", "RightArm").unwrap();
-        assert_eq!(m.asset().chain_map.iter().find(|c| c.target_chain == "RightArm").unwrap().source_chain, "LeftArm");
-        assert_eq!(m.asset().chain_map.len(), 3, "remapping a target replaces its mapping");
+        assert_eq!(
+            m.asset()
+                .chain_map
+                .iter()
+                .find(|c| c.target_chain == "RightArm")
+                .unwrap()
+                .source_chain,
+            "LeftArm"
+        );
+        assert_eq!(
+            m.asset().chain_map.len(),
+            3,
+            "remapping a target replaces its mapping"
+        );
         assert!(m.unmap_chain("RightArm") && !m.unmap_chain("RightArm"));
         assert!(m.asset().validate_structure().is_ok());
     }
@@ -805,30 +1162,56 @@ mod tests {
     fn chain_settings_and_root_are_validated_and_rigs_are_both_or_neither() {
         let mut m = profile();
         m.auto_map_chains();
-        assert!(m.set_chain_rotation("spine", RotationMode::OneToOne, 1.5).is_err());
-        m.set_chain_rotation("spine", RotationMode::OneToOne, 0.5).unwrap();
-        m.set_chain_translation("spine", TranslationMode::GloballyScaled, 0.25).unwrap();
-        assert!(m.set_chain_rotation("Tail", RotationMode::None, 1.0).is_err(), "unmapped");
+        assert!(m
+            .set_chain_rotation("spine", RotationMode::OneToOne, 1.5)
+            .is_err());
+        m.set_chain_rotation("spine", RotationMode::OneToOne, 0.5)
+            .unwrap();
+        m.set_chain_translation("spine", TranslationMode::GloballyScaled, 0.25)
+            .unwrap();
+        assert!(
+            m.set_chain_rotation("Tail", RotationMode::None, 1.0)
+                .is_err(),
+            "unmapped"
+        );
         assert!(m.set_root_scale(RootScale::Fixed { factor: 0.0 }).is_err());
         m.set_root_scale(RootScale::Fixed { factor: 0.9 }).unwrap();
         assert!(m.set_root_alphas(2.0, 1.0).is_err());
         assert!(m.set_rigs(Some(AssetRef::new()), None).is_err());
         m.set_rigs(None, None).unwrap();
-        assert!(m.asset().chain_map.is_empty(), "leaving rig mode drops chain mappings");
+        assert!(
+            m.asset().chain_map.is_empty(),
+            "leaving rig mode drops chain mappings"
+        );
         assert!(m.map_chain("Spine", "spine").is_err());
     }
 
     #[test]
     fn bone_mapping_mode_maps_by_name_and_refuses_chain_ops() {
         let store = MemStore::default();
-        let mut m = RetargetProfileModel::open(Arc::new(store), Path::new("b.animretarget"), &RetargetProfileAsset::new("B", None, None).to_text().unwrap()).unwrap();
+        let mut m = RetargetProfileModel::open(
+            Arc::new(store),
+            Path::new("b.animretarget"),
+            &RetargetProfileAsset::new("B", None, None)
+                .to_text()
+                .unwrap(),
+        )
+        .unwrap();
         m.source_skeleton = Some(super::super::ik_rig_model::tests::skeleton());
         m.target_skeleton = Some(super::super::ik_rig_model::tests::skeleton());
         assert_eq!(m.auto_map_bones(), 6);
         assert_eq!(m.auto_map_bones(), 0);
         assert!(m.map_bone("ghost", "foot").is_err());
         m.map_bone("shin", "foot").unwrap();
-        assert_eq!(m.asset().bone_map.iter().find(|b| b.target_bone == "foot").unwrap().source_bone, "shin");
+        assert_eq!(
+            m.asset()
+                .bone_map
+                .iter()
+                .find(|b| b.target_bone == "foot")
+                .unwrap()
+                .source_bone,
+            "shin"
+        );
         assert!(m.unmap_bone("foot"));
         m.set_roots(Some("root"), Some("root")).unwrap();
         assert!(m.set_roots(Some("ghost"), None).is_err());
@@ -840,14 +1223,20 @@ mod tests {
         let mut m = profile();
         m.source_skeleton = Some(super::super::ik_rig_model::tests::skeleton());
         m.target_skeleton = Some(super::super::ik_rig_model::tests::skeleton());
-        assert!(m.set_pose_bone(PoseSide::Target, "ghost", [1.0, 0.0, 0.0]).is_err());
-        assert_eq!(m.set_pose_bone(PoseSide::Target, "shin", [0.0, 0.0, 30.0]), Ok(true));
+        assert!(m
+            .set_pose_bone(PoseSide::Target, "ghost", [1.0, 0.0, 0.0])
+            .is_err());
+        assert_eq!(
+            m.set_pose_bone(PoseSide::Target, "shin", [0.0, 0.0, 30.0]),
+            Ok(true)
+        );
         assert!(m.asset().source_pose.bone_rotations.is_empty());
         assert!((m.pose_bone_euler(PoseSide::Target, "shin")[2] - 30.0).abs() < 1e-3);
         assert!(m.reset_pose(PoseSide::Target) && !m.reset_pose(PoseSide::Target));
         // a drag over one bone is one undo step
         for z in [5.0, 10.0, 15.0] {
-            m.set_pose_bone(PoseSide::Source, "shin", [0.0, 0.0, z]).unwrap();
+            m.set_pose_bone(PoseSide::Source, "shin", [0.0, 0.0, z])
+                .unwrap();
         }
         m.doc.end_gesture();
         assert!(m.doc.undo());
@@ -856,10 +1245,19 @@ mod tests {
 
     fn ik_model() -> IkRetargetModel {
         let store = MemStore::default();
-        let mut m = IkRetargetModel::open(Arc::new(store), Path::new("r.ikretarget"), &IkRetargetAsset::new("R", None, None).to_text().unwrap()).unwrap();
+        let mut m = IkRetargetModel::open(
+            Arc::new(store),
+            Path::new("r.ikretarget"),
+            &IkRetargetAsset::new("R", None, None).to_text().unwrap(),
+        )
+        .unwrap();
         m.source_rig = Some(rig("S", &[("Spine", None), ("Arm", None)]));
-        m.target_rig = Some(rig("T", &[("spine", None), ("arm", Some("HandGoal")), ("Wing", None)]));
-        m.set_rigs(Some(AssetRef::new()), Some(AssetRef::new())).unwrap();
+        m.target_rig = Some(rig(
+            "T",
+            &[("spine", None), ("arm", Some("HandGoal")), ("Wing", None)],
+        ));
+        m.set_rigs(Some(AssetRef::new()), Some(AssetRef::new()))
+            .unwrap();
         m
     }
 
@@ -869,56 +1267,178 @@ mod tests {
         assert_eq!(m.sync_chains(), 3);
         assert_eq!(m.sync_chains(), 0);
         let rows = m.rows();
-        assert_eq!(rows.iter().find(|r| r.target_chain == "spine").unwrap().status, ChainStatus::Mapped);
-        assert_eq!(rows.iter().find(|r| r.target_chain == "Wing").unwrap().status, ChainStatus::UnmappedTarget);
-        assert!(m.asset().chains.iter().find(|c| c.target_chain == "arm").unwrap().ik.enabled, "IK defaults on for a chain with a goal");
-        assert!(!m.asset().chains.iter().find(|c| c.target_chain == "spine").unwrap().ik.enabled);
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.target_chain == "spine")
+                .unwrap()
+                .status,
+            ChainStatus::Mapped
+        );
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.target_chain == "Wing")
+                .unwrap()
+                .status,
+            ChainStatus::UnmappedTarget
+        );
+        assert!(
+            m.asset()
+                .chains
+                .iter()
+                .find(|c| c.target_chain == "arm")
+                .unwrap()
+                .ik
+                .enabled,
+            "IK defaults on for a chain with a goal"
+        );
+        assert!(
+            !m.asset()
+                .chains
+                .iter()
+                .find(|c| c.target_chain == "spine")
+                .unwrap()
+                .ik
+                .enabled
+        );
         m.set_source_chain("Wing", Some("Arm")).unwrap();
         assert!(m.set_source_chain("Wing", Some("Ghost")).is_err());
         assert!(m.set_source_chain("Nope", None).is_err());
-        assert!(m.validation().iter().all(|d| d.code != "ikretarget.unmapped_chain"));
+        assert!(m
+            .validation()
+            .iter()
+            .all(|d| d.code != "ikretarget.unmapped_chain"));
     }
 
     #[test]
     fn ik_settings_need_a_goal_and_sane_values() {
         let mut m = ik_model();
         m.sync_chains();
-        let on = IkSettings { enabled: true, ..IkSettings::default() };
-        assert!(m.set_ik("spine", on.clone()).is_err(), "no goal on the target chain");
-        m.set_ik("arm", IkSettings { blend_to_source: 0.5, extension: 1.2, ..on.clone() }).unwrap();
-        assert!(m.set_ik("arm", IkSettings { blend_to_source: 2.0, ..on.clone() }).is_err());
-        assert!(m.set_ik("arm", IkSettings { extension: 0.0, ..on.clone() }).is_err());
-        assert!(m.set_ik("arm", IkSettings { static_offset: [f32::INFINITY, 0.0, 0.0], ..on }).is_err());
-        assert!(m.set_fk("arm", FkSettings { rotation_alpha: -1.0, ..FkSettings::default() }).is_err());
-        m.set_fk("arm", FkSettings { enabled: false, rotation: RotationMode::OneToOneReversed, ..FkSettings::default() }).unwrap();
+        let on = IkSettings {
+            enabled: true,
+            ..IkSettings::default()
+        };
+        assert!(
+            m.set_ik("spine", on.clone()).is_err(),
+            "no goal on the target chain"
+        );
+        m.set_ik(
+            "arm",
+            IkSettings {
+                blend_to_source: 0.5,
+                extension: 1.2,
+                ..on.clone()
+            },
+        )
+        .unwrap();
+        assert!(m
+            .set_ik(
+                "arm",
+                IkSettings {
+                    blend_to_source: 2.0,
+                    ..on.clone()
+                }
+            )
+            .is_err());
+        assert!(m
+            .set_ik(
+                "arm",
+                IkSettings {
+                    extension: 0.0,
+                    ..on.clone()
+                }
+            )
+            .is_err());
+        assert!(m
+            .set_ik(
+                "arm",
+                IkSettings {
+                    static_offset: [f32::INFINITY, 0.0, 0.0],
+                    ..on
+                }
+            )
+            .is_err());
+        assert!(m
+            .set_fk(
+                "arm",
+                FkSettings {
+                    rotation_alpha: -1.0,
+                    ..FkSettings::default()
+                }
+            )
+            .is_err());
+        m.set_fk(
+            "arm",
+            FkSettings {
+                enabled: false,
+                rotation: RotationMode::OneToOneReversed,
+                ..FkSettings::default()
+            },
+        )
+        .unwrap();
         assert!(m.set_root(|r| r.scale_horizontal = 0.0).is_err());
         m.set_root(|r| {
             r.scale_vertical = 1.1;
             r.offset = [0.0, 0.05, 0.0];
         })
         .unwrap();
-        assert!(m.set_rigs(Some(AssetRef::parse("11111111-1111-4111-8111-111111111111").unwrap()), Some(AssetRef::parse("11111111-1111-4111-8111-111111111111").unwrap())).is_err());
+        assert!(m
+            .set_rigs(
+                Some(AssetRef::parse("11111111-1111-4111-8111-111111111111").unwrap()),
+                Some(AssetRef::parse("11111111-1111-4111-8111-111111111111").unwrap())
+            )
+            .is_err());
         assert!(m.delete_chain_setting("Wing") && !m.delete_chain_setting("Wing"));
-        assert!(m.validation().iter().any(|d| d.code == "ikretarget.no_setting"), "deleting a setting makes the chain actionable again");
+        assert!(
+            m.validation()
+                .iter()
+                .any(|d| d.code == "ikretarget.no_setting"),
+            "deleting a setting makes the chain actionable again"
+        );
     }
 
     #[test]
     fn retargeter_round_trips_through_save_and_reopen() {
         let store = MemStore::default();
-        let mut m = IkRetargetModel::open(Arc::new(store.clone()), Path::new("r.ikretarget"), &IkRetargetAsset::new("R", None, None).to_text().unwrap()).unwrap();
+        let mut m = IkRetargetModel::open(
+            Arc::new(store.clone()),
+            Path::new("r.ikretarget"),
+            &IkRetargetAsset::new("R", None, None).to_text().unwrap(),
+        )
+        .unwrap();
         m.source_rig = Some(rig("S", &[("Arm", None)]));
         m.target_rig = Some(rig("T", &[("arm", Some("G"))]));
         let (s, t) = (AssetRef::new(), AssetRef::new());
         m.set_rigs(Some(s.clone()), Some(t.clone())).unwrap();
         m.sync_chains();
-        m.set_ik("arm", IkSettings { enabled: true, blend_to_source: 0.75, extension: 1.1, static_offset: [0.0, 0.1, 0.0], scale_vertical: 1.0 }).unwrap();
+        m.set_ik(
+            "arm",
+            IkSettings {
+                enabled: true,
+                blend_to_source: 0.75,
+                extension: 1.1,
+                static_offset: [0.0, 0.1, 0.0],
+                scale_vertical: 1.0,
+            },
+        )
+        .unwrap();
         m.set_root(|r| r.translation_alpha = 0.5).unwrap();
         m.overlay = true;
         m.save().unwrap();
         let r = IkRetargetModel::open(Arc::new(store), Path::new("r.ikretarget"), "").unwrap();
-        assert_eq!((r.asset().source_rig.clone(), r.asset().target_rig.clone()), (Some(s), Some(t)));
+        assert_eq!(
+            (r.asset().source_rig.clone(), r.asset().target_rig.clone()),
+            (Some(s), Some(t))
+        );
         let c = &r.asset().chains[0];
-        assert_eq!((c.ik.blend_to_source, c.ik.extension, c.ik.static_offset, c.source_chain.as_deref()), (0.75, 1.1, [0.0, 0.1, 0.0], Some("Arm")));
+        assert_eq!(
+            (
+                c.ik.blend_to_source,
+                c.ik.extension,
+                c.ik.static_offset,
+                c.source_chain.as_deref()
+            ),
+            (0.75, 1.1, [0.0, 0.1, 0.0], Some("Arm"))
+        );
         assert_eq!(r.asset().root.translation_alpha, 0.5);
         assert!(!r.overlay, "preview layout is not saved");
     }

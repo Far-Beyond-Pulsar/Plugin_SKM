@@ -23,8 +23,11 @@ plugin_editor_api = { workspace = true }
 skeletal_assets   = { workspace = true }
 ui_common         = { workspace = true }
 engine_fs         = { workspace = true }
-pulsar_reflection = { workspace = true }
-pulsar_physics = { workspace = true }
+# The asset reference property editors (`asset_ref_editors`) are GPUI-typed.
+pulsar_reflection = { workspace = true, features = ["prims-gpui"] }
+# The physics plugin's .physasset schema: the viewport draws a rig's bodies,
+# and bone edits are checked against the rigs that name them.
+physics_api = { workspace = true }
 
 # The animation graph editor draws and edits on the shared Graphy canvas.
 graphy-blueprint = { workspace = true }

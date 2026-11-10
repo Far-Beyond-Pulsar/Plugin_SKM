@@ -33,7 +33,9 @@
 //!
 //! This crate registers nothing itself: the plugin's root crate
 //! (`skeletal_animation_plugin`, with its `editor` feature) submits its
-//! editor provider ([`builtin_provider`]). A DLL build of this crate
+//! editor provider ([`builtin_provider`]). The property editors for the
+//! animation asset references a component names (`asset_ref_editors`) are
+//! attached to their types here, as every property editor is. A DLL build of this crate
 //! (without `builtin`) exports [`SkeletalAnimationPlugin`] through
 //! `export_plugin!` instead.
 
@@ -46,6 +48,7 @@ use serde_json::json;
 use ui::dock::PanelView;
 
 mod anim_editors;
+mod asset_ref_editors;
 mod core;
 mod editor;
 mod rendering;
@@ -101,7 +104,9 @@ pub const POSE_DATABASE_FILE_TYPE: &str = "pose_database";
 /// The create-menu entry of one high-level animation asset. Its default
 /// content is a valid empty document written by the real codec, so a new file
 /// opens without repair.
-fn animation_asset_file_type(kind: anim_editors::kinds::AnimationAssetEditorKind) -> FileTypeDefinition {
+fn animation_asset_file_type(
+    kind: anim_editors::kinds::AnimationAssetEditorKind,
+) -> FileTypeDefinition {
     use anim_editors::kinds::AnimationAssetEditorKind as K;
     let color = match kind {
         K::BlendSpace => 0x7E57C2,
@@ -216,7 +221,9 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 creation_directory: None,
             },
         ];
-        types.extend(anim_editors::kinds::AnimationAssetEditorKind::ALL.map(animation_asset_file_type));
+        types.extend(
+            anim_editors::kinds::AnimationAssetEditorKind::ALL.map(animation_asset_file_type),
+        );
         types
     }
 
@@ -241,11 +248,13 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 supported_file_types: vec![FileTypeId::new(SKELETAL_MESH_FILE_TYPE)],
             },
         ];
-        editors.extend(anim_editors::kinds::AnimationAssetEditorKind::ALL.map(|kind| EditorMetadata {
-            id: EditorId::new(kind.editor_id()),
-            display_name: format!("{} Editor", kind.title()).into(),
-            supported_file_types: vec![FileTypeId::new(kind.file_type())],
-        }));
+        editors.extend(
+            anim_editors::kinds::AnimationAssetEditorKind::ALL.map(|kind| EditorMetadata {
+                id: EditorId::new(kind.editor_id()),
+                display_name: format!("{} Editor", kind.title()).into(),
+                supported_file_types: vec![FileTypeId::new(kind.file_type())],
+            }),
+        );
         editors
     }
 
@@ -275,7 +284,12 @@ impl EditorPluginEditor for SkeletalAnimationPlugin {
             );
         }
         for kind in anim_editors::kinds::AnimationAssetEditorKind::ALL {
-            registry.register_fn_with_settings(EditorId::new(kind.editor_id()), move |file_path, settings, window, cx| kind.open(file_path, Some(&settings.services().undo), window, cx));
+            registry.register_fn_with_settings(
+                EditorId::new(kind.editor_id()),
+                move |file_path, settings, window, cx| {
+                    kind.open(file_path, Some(&settings.services().undo), window, cx)
+                },
+            );
         }
     }
 }
@@ -336,9 +350,7 @@ impl SkeletalAnimationPlugin {
     ) -> Result<Arc<dyn PanelView>, PluginError> {
         // The new animation assets have purpose-built editors, shared with the
         // DLL registration; the panel below only knows the older three files.
-        if let Some(kind) =
-            anim_editors::kinds::AnimationAssetEditorKind::for_path(&file_path)
-        {
+        if let Some(kind) = anim_editors::kinds::AnimationAssetEditorKind::for_path(&file_path) {
             return kind.open(file_path, undo, window, cx);
         }
         let mut load_error = None;
@@ -432,21 +444,40 @@ mod tests {
                 .find(|d| d.id.as_str() == kind.file_type())
                 .unwrap_or_else(|| panic!("no file type for {}", kind.title()));
             assert_eq!(definition.extension, kind.extension());
-            assert!(extensions.insert(definition.extension.clone()), "one extension per format");
-            assert!(definition.is_creatable(), "{} is in the create menu", kind.title());
+            assert!(
+                extensions.insert(definition.extension.clone()),
+                "one extension per format"
+            );
+            assert!(
+                definition.is_creatable(),
+                "{} is in the create menu",
+                kind.title()
+            );
             assert!(definition.categories.iter().any(|c| c == "Animation"));
             assert!(provides_editor(kind.editor_id()));
             assert!(editors.iter().any(|e| e.id.as_str() == kind.editor_id()
-                && e.supported_file_types.iter().any(|t| t.as_str() == kind.file_type())));
+                && e.supported_file_types
+                    .iter()
+                    .any(|t| t.as_str() == kind.file_type())));
             // the menu writes this content as the new file; the real codec must accept it
             let text = definition.default_content.to_string();
-            let id = kind.parses(&text).unwrap_or_else(|e| panic!("{} default content does not load: {e}", kind.title()));
+            let id = kind
+                .parses(&text)
+                .unwrap_or_else(|e| panic!("{} default content does not load: {e}", kind.title()));
             assert!(!id.is_empty());
             // and it indexes under the kind the picker and Reflection use
-            assert_eq!(skeletal_assets::dependencies::kind_of_extension(kind.extension()), Some(kind.asset_kind()));
+            assert_eq!(
+                skeletal_assets::dependencies::kind_of_extension(kind.extension()),
+                Some(kind.asset_kind())
+            );
         }
         assert_eq!(K::ALL.len(), 7);
-        assert_eq!(skeletal_assets::dependencies::extension_of(pulsar_reflection::AnimationMontageAssetKind::KIND), Some("montage"));
+        assert_eq!(
+            skeletal_assets::dependencies::extension_of(
+                pulsar_reflection::AnimationMontageAssetKind::KIND
+            ),
+            Some("montage")
+        );
     }
 }
 

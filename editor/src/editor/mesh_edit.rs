@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use gpui::*;
 use pulsar_reflection::MaterialRef;
-use ui_common::{AssetPickedEvent, AssetQuery, MeshAssetPicker};
+use ui_common::{AssetPickedEvent, AssetPicker, AssetQuery};
 
 use super::panel::{EditorMode, SkeletalAnimEditorPanel};
 use crate::core::material_ids;
@@ -68,7 +68,7 @@ impl SkeletalAnimEditorPanel {
                 );
             }
             let picker = cx.new(|cx| {
-                MeshAssetPicker::new(
+                AssetPicker::new(
                     selected,
                     Vec::new(),
                     root.clone(),

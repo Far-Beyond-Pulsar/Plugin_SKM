@@ -1673,8 +1673,8 @@ fn the_asset_change_hook_only_answers_animation_files() {
     let graph = walk_graph(&rig, false);
     let mut world = World::new();
     let owner = world.spawn();
-    let player = pulsar_world_registry::attach_value(&mut world, owner, component(&rig, &graph))
-        .unwrap();
+    let player =
+        pulsar_world_registry::attach_value(&mut world, owner, component(&rig, &graph)).unwrap();
     let montage = compile_montage_asset(
         &rig,
         &montage_asset(&rig, skeletal_assets::montage::MontageRootMotion::Graph),
@@ -1686,7 +1686,10 @@ fn the_asset_change_hook_only_answers_animation_files() {
         .montages
         .insert(montage.id.clone(), montage);
     // a texture is no business of the animator: nothing is touched
-    assert_eq!(animation_asset_changed(&mut world, Path::new("rock.png")), 0);
+    assert_eq!(
+        animation_asset_changed(&mut world, Path::new("rock.png")),
+        0
+    );
     assert!(
         !world
             .get::<AnimationComponent>(player)

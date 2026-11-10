@@ -13,7 +13,7 @@ use ui::popover::Popover;
 use ui::scroll::ScrollbarAxis;
 use ui::tag::Tag;
 use ui::{h_flex, v_flex, ActiveTheme, Icon, IconName, Sizable, StyledExt};
-use ui_common::MeshAssetPicker;
+use ui_common::AssetPicker;
 
 use crate::core::skinning::{bone_influence, joint_vertex_counts};
 use crate::core::skmesh::{MeshStats, SkeletalMeshAsset};
@@ -146,21 +146,71 @@ impl MeshInspectorPanel {
         let theme = cx.theme();
         let (text, color) = match &e.link {
             crate::core::SkeletonLink::Unset => ("No skeleton chosen".to_string(), theme.warning),
-            crate::core::SkeletonLink::Resolving(_) => ("Looking for the skeleton…".to_string(), theme.muted_foreground),
+            crate::core::SkeletonLink::Resolving(_) => (
+                "Looking for the skeleton…".to_string(),
+                theme.muted_foreground,
+            ),
             crate::core::SkeletonLink::Resolved(entry) => {
-                let compatible = e.issues.iter().all(|i| i.severity != Severity::Error || !i.message.to_lowercase().contains("skeleton"));
-                (format!("{} · {}", entry.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), if compatible { "compatible" } else { "incompatible, see the problems below" }), if compatible { theme.success } else { theme.danger })
+                let compatible = e.issues.iter().all(|i| {
+                    i.severity != Severity::Error || !i.message.to_lowercase().contains("skeleton")
+                });
+                (
+                    format!(
+                        "{} · {}",
+                        entry
+                            .path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        if compatible {
+                            "compatible"
+                        } else {
+                            "incompatible, see the problems below"
+                        }
+                    ),
+                    if compatible {
+                        theme.success
+                    } else {
+                        theme.danger
+                    },
+                )
             }
-            crate::core::SkeletonLink::Missing(_) => ("No file in the project has this skeleton id".to_string(), theme.danger),
-            crate::core::SkeletonLink::Ambiguous { paths, .. } => (format!("{} files share this skeleton id", paths.len()), theme.danger),
+            crate::core::SkeletonLink::Missing(_) => (
+                "No file in the project has this skeleton id".to_string(),
+                theme.danger,
+            ),
+            crate::core::SkeletonLink::Ambiguous { paths, .. } => (
+                format!("{} files share this skeleton id", paths.len()),
+                theme.danger,
+            ),
         };
         let mesh_id = e.mesh_id.as_ref().map(|id| id.to_string());
         v_flex()
             .w_full()
             .child(
-                v_flex().w_full().px_3().py_2().gap_1().child(div().text_xs().font_semibold().text_color(theme.muted_foreground).child("SKELETON")).child(div().text_xs().text_color(color).child(text)),
+                v_flex()
+                    .w_full()
+                    .px_3()
+                    .py_2()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(theme.muted_foreground)
+                            .child("SKELETON"),
+                    )
+                    .child(div().text_xs().text_color(color).child(text)),
             )
-            .when_some(mesh_id, |col, id| col.child(crate::ui_components::references::used_by_card(&e.project_root, "skmesh", &id, "Used by", cx)))
+            .when_some(mesh_id, |col, id| {
+                col.child(crate::ui_components::references::used_by_card(
+                    &e.project_root,
+                    "skmesh",
+                    &id,
+                    "Used by",
+                    cx,
+                ))
+            })
             .into_any_element()
     }
 
@@ -179,7 +229,7 @@ impl MeshInspectorPanel {
     fn render_slots(
         &self,
         mesh: &SkeletalMeshAsset,
-        pickers: &[Entity<MeshAssetPicker>],
+        pickers: &[Entity<AssetPicker>],
         editor: &Entity<SkeletalAnimEditorPanel>,
         cx: &App,
     ) -> impl IntoElement {
@@ -213,7 +263,7 @@ impl MeshInspectorPanel {
             let field: AnyElement = match pickers.get(index) {
                 Some(picker) => {
                     let picker = picker.clone();
-                    Popover::<MeshAssetPicker>::new(("slot-popover", index))
+                    Popover::<AssetPicker>::new(("slot-popover", index))
                         .anchor(Corner::BottomRight)
                         .trigger(trigger)
                         .content(move |_, _| picker.clone())

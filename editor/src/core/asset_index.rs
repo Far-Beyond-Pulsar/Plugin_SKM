@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use engine_fs::{AssetDep, ProjectFileIndex};
-use skeletal_assets::dependencies::{extension_of, extract, kind_of_extension, AssetSource, EdgeRole, Lookup, SkeletonRule};
+use skeletal_assets::dependencies::{
+    extension_of, extract, kind_of_extension, AssetSource, EdgeRole, Lookup, SkeletonRule,
+};
 use skeletal_assets::picker::{describe, PickerCandidate};
 
 /// Resolves `(kind, id)` through the project index and reads the file.
@@ -20,7 +22,10 @@ pub struct ProjectAssetSource {
 
 impl ProjectAssetSource {
     pub fn open(root: &Path) -> Option<Self> {
-        engine_fs::open_project_file_index(root).ok().flatten().map(|index| Self { index })
+        engine_fs::open_project_file_index(root)
+            .ok()
+            .flatten()
+            .map(|index| Self { index })
     }
 
     pub fn index(&self) -> &ProjectFileIndex {
@@ -38,7 +43,9 @@ impl AssetSource for ProjectAssetSource {
             [one] => {
                 let wanted = extension_of(kind);
                 let actual = one.extension().and_then(|e| e.to_str());
-                if wanted.is_some() && actual.is_some_and(|a| !wanted.is_some_and(|w| w.eq_ignore_ascii_case(a))) {
+                if wanted.is_some()
+                    && actual.is_some_and(|a| !wanted.is_some_and(|w| w.eq_ignore_ascii_case(a)))
+                {
                     return Lookup::WrongKind(one.display().to_string());
                 }
                 match engine_fs::virtual_fs::read_file(one) {
@@ -68,7 +75,11 @@ fn dep_row(kind: &str, id: &str, edge: &skeletal_assets::dependencies::AssetEdge
 /// known) and keep any id they had. Failures are logged, never fatal: the
 /// index is derived data and is rebuilt on the next save.
 pub fn record_asset(root: &Path, path: &Path) {
-    let Some(kind) = path.extension().and_then(|e| e.to_str()).and_then(kind_of_extension) else {
+    let Some(kind) = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .and_then(kind_of_extension)
+    else {
         return;
     };
     let Ok(Some(index)) = engine_fs::open_project_file_index(root) else {
@@ -80,7 +91,11 @@ pub fn record_asset(root: &Path, path: &Path) {
         match extract(kind, &bytes) {
             Ok(extracted) => {
                 index.record_typed_asset_id(kind, &extracted.id, path)?;
-                let rows: Vec<AssetDep> = extracted.edges.iter().map(|e| dep_row(kind, &extracted.id, e)).collect();
+                let rows: Vec<AssetDep> = extracted
+                    .edges
+                    .iter()
+                    .map(|e| dep_row(kind, &extracted.id, e))
+                    .collect();
                 index.replace_asset_deps(path, kind, &extracted.id, &rows)?;
             }
             Err(message) => {
@@ -108,7 +123,9 @@ pub struct Referrer {
 
 /// Every recorded asset that references `(kind, id)`.
 pub fn used_by(root: &Path, kind: &str, id: &str) -> Vec<Referrer> {
-    let Some(source) = ProjectAssetSource::open(root) else { return Vec::new() };
+    let Some(source) = ProjectAssetSource::open(root) else {
+        return Vec::new();
+    };
     source
         .index()
         .asset_used_by(kind, id)
@@ -125,21 +142,36 @@ pub fn used_by(root: &Path, kind: &str, id: &str) -> Vec<Referrer> {
 }
 
 /// What `(kind, id)` references, as recorded.
-pub fn dependencies_of(root: &Path, kind: &str, id: &str) -> Vec<(String, String, String, SkeletonRule)> {
-    let Some(source) = ProjectAssetSource::open(root) else { return Vec::new() };
+pub fn dependencies_of(
+    root: &Path,
+    kind: &str,
+    id: &str,
+) -> Vec<(String, String, String, SkeletonRule)> {
+    let Some(source) = ProjectAssetSource::open(root) else {
+        return Vec::new();
+    };
     source
         .index()
         .asset_deps_of(kind, id)
         .unwrap_or_default()
         .into_iter()
-        .map(|d| (d.target_kind, d.target_id, d.via, SkeletonRule::parse(&d.expect).unwrap_or(SkeletonRule::Unconstrained)))
+        .map(|d| {
+            (
+                d.target_kind,
+                d.target_id,
+                d.via,
+                SkeletonRule::parse(&d.expect).unwrap_or(SkeletonRule::Unconstrained),
+            )
+        })
         .collect()
 }
 
 /// Describe every indexed asset of `kind` for a picker. Unreadable files are
 /// skipped; a picker shows what it can use.
 pub fn picker_candidates(root: &Path, kind: &str) -> Vec<PickerCandidate> {
-    let Some(source) = ProjectAssetSource::open(root) else { return Vec::new() };
+    let Some(source) = ProjectAssetSource::open(root) else {
+        return Vec::new();
+    };
     source
         .index()
         .assets_of_kind(kind)
@@ -147,7 +179,11 @@ pub fn picker_candidates(root: &Path, kind: &str) -> Vec<PickerCandidate> {
         .into_iter()
         .filter_map(|(_, path)| {
             let bytes = engine_fs::virtual_fs::read_file(&path).ok()?;
-            let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
             describe(&relative, &bytes)
         })
         .collect()

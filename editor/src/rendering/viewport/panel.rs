@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use pulsar_physics::SkeletalPhysicsAsset;
+use physics_api::SkeletalPhysicsAsset;
 use ui::button::{Button, ButtonVariants};
 use ui::tag::Tag;
 use ui::{

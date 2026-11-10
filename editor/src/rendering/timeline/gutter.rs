@@ -94,7 +94,8 @@ impl TimelineGutter {
     fn capture(&mut self, e: &SkeletalAnimEditorPanel) {
         self.signature = self.signature_of(e);
         self.total_keys = e.animation.key_count();
-        self.notify_count = e.animation_features.notifies.len() + e.animation_features.notify_states.len();
+        self.notify_count =
+            e.animation_features.notifies.len() + e.animation_features.notify_states.len();
         self.rows = e
             .animation
             .tracks

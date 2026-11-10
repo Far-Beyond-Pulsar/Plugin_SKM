@@ -20,8 +20,8 @@ use skeletal_assets::montage::AnimationMontageAsset;
 use skeletal_assets::pose_db::PoseDbAsset;
 use skeletal_assets::retarget::RetargetProfileAsset;
 
-use plugin_editor_api::undo::{lock, History, SharedHistory, UndoEntry};
 use super::store::DocStore;
+use plugin_editor_api::undo::{lock, History, SharedHistory, UndoEntry};
 
 /// What every animation asset kind offers the editor.
 pub trait AnimAsset: Clone + Send + 'static {
@@ -68,7 +68,9 @@ pub fn content_hash(bytes: &[u8]) -> u64 {
 pub enum SaveOutcome {
     Saved,
     /// The file on disk is not the one this document was based on.
-    Conflict { disk_hash: u64 },
+    Conflict {
+        disk_hash: u64,
+    },
 }
 
 pub struct AnimDocument<A: AnimAsset> {
@@ -88,21 +90,36 @@ impl<A: AnimAsset> AnimDocument<A> {
     /// written once, so the new asset has its id on disk. A file that cannot be
     /// parsed is an error: it is shown, never overwritten.
     pub fn open(store: Arc<dyn DocStore>, path: &Path, default_text: &str) -> Result<Self, String> {
-        let existing = store.read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let is_new = existing.as_ref().map_or(true, |b| b.iter().all(u8::is_ascii_whitespace));
-        let bytes = if is_new { default_text.as_bytes().to_vec() } else { existing.clone().unwrap_or_default() };
-        let text = String::from_utf8(bytes.clone()).map_err(|_| format!("{}: not UTF-8 text", path.display()))?;
-        let (value, assigned) = A::parse_text(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        let existing = store
+            .read(path)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let is_new = existing
+            .as_ref()
+            .map_or(true, |b| b.iter().all(u8::is_ascii_whitespace));
+        let bytes = if is_new {
+            default_text.as_bytes().to_vec()
+        } else {
+            existing.clone().unwrap_or_default()
+        };
+        let text = String::from_utf8(bytes.clone())
+            .map_err(|_| format!("{}: not UTF-8 text", path.display()))?;
+        let (value, assigned) =
+            A::parse_text(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut doc = Self {
             path: path.to_path_buf(),
             value,
             history: SharedHistory::default(),
             store,
-            base_hash: if is_new { None } else { Some(content_hash(&bytes)) },
+            base_hash: if is_new {
+                None
+            } else {
+                Some(content_hash(&bytes))
+            },
             generation: 0,
         };
         if is_new || assigned {
-            doc.write_current().map_err(|e| format!("{}: {e}", path.display()))?;
+            doc.write_current()
+                .map_err(|e| format!("{}: {e}", path.display()))?;
         }
         Ok(doc)
     }
@@ -141,11 +158,20 @@ impl<A: AnimAsset> AnimDocument<A> {
     /// Apply an edit. `change` returns whether it changed anything plus a
     /// result; a no-op leaves history and dirty state alone. `key` joins
     /// consecutive edits of one gesture into a single undo step.
-    pub fn edit<R>(&mut self, label: &str, key: Option<&str>, change: impl FnOnce(&mut A) -> (bool, R)) -> R {
+    pub fn edit<R>(
+        &mut self,
+        label: &str,
+        key: Option<&str>,
+        change: impl FnOnce(&mut A) -> (bool, R),
+    ) -> R {
         let before = self.value.clone();
         let (changed, result) = change(&mut self.value);
         if changed {
-            lock(&self.history).push(AnimEdit { other: before, label: label.to_string(), key: key.map(str::to_string) });
+            lock(&self.history).push(AnimEdit {
+                other: before,
+                label: label.to_string(),
+                key: key.map(str::to_string),
+            });
             self.generation += 1;
         } else {
             self.value = before;
@@ -206,7 +232,9 @@ impl<A: AnimAsset> AnimDocument<A> {
 
     /// Whether the file changed since this document read or wrote it.
     pub fn changed_on_disk(&self) -> bool {
-        self.disk_hash().ok().is_some_and(|disk| disk != self.base_hash)
+        self.disk_hash()
+            .ok()
+            .is_some_and(|disk| disk != self.base_hash)
     }
 
     /// Write the document unless the file changed underneath it.
@@ -228,7 +256,11 @@ impl<A: AnimAsset> AnimDocument<A> {
     /// Replace the document with the file's current content and clear history
     /// (the user chose "use theirs", or another tab saved).
     pub fn reload(&mut self) -> Result<(), String> {
-        let bytes = self.store.read(&self.path).map_err(|e| e.to_string())?.ok_or("the file no longer exists")?;
+        let bytes = self
+            .store
+            .read(&self.path)
+            .map_err(|e| e.to_string())?
+            .ok_or("the file no longer exists")?;
         let text = String::from_utf8(bytes.clone()).map_err(|_| "not UTF-8 text".to_string())?;
         let (value, _) = A::parse_text(&text)?;
         self.value = value;
@@ -248,7 +280,9 @@ macro_rules! migrating_asset {
         impl AnimAsset for $ty {
             const KIND: &'static str = $kind;
             fn parse_text(text: &str) -> Result<(Self, bool), String> {
-                <$ty>::parse_migrating(text).map(|(a, m)| (a, m.id_assigned)).map_err(|e| e.to_string())
+                <$ty>::parse_migrating(text)
+                    .map(|(a, m)| (a, m.id_assigned))
+                    .map_err(|e| e.to_string())
             }
             fn to_text(&self) -> anyhow::Result<String> {
                 <$ty>::to_text(self)
@@ -271,7 +305,9 @@ macro_rules! plain_asset {
         impl AnimAsset for $ty {
             const KIND: &'static str = $kind;
             fn parse_text(text: &str) -> Result<(Self, bool), String> {
-                <$ty>::parse(text).map(|a| (a, false)).map_err(|e| e.to_string())
+                <$ty>::parse(text)
+                    .map(|a| (a, false))
+                    .map_err(|e| e.to_string())
             }
             fn to_text(&self) -> anyhow::Result<String> {
                 <$ty>::to_text(self)
@@ -289,12 +325,27 @@ macro_rules! plain_asset {
     };
 }
 
-migrating_asset!(BlendSpaceAsset, pulsar_reflection::BlendSpaceAssetKind::KIND);
-migrating_asset!(AnimationMontageAsset, pulsar_reflection::AnimationMontageAssetKind::KIND);
-migrating_asset!(AnimationGraphAsset, pulsar_reflection::AnimationGraphAssetKind::KIND);
-plain_asset!(RetargetProfileAsset, pulsar_reflection::RetargetProfileAssetKind::KIND);
+migrating_asset!(
+    BlendSpaceAsset,
+    pulsar_reflection::BlendSpaceAssetKind::KIND
+);
+migrating_asset!(
+    AnimationMontageAsset,
+    pulsar_reflection::AnimationMontageAssetKind::KIND
+);
+migrating_asset!(
+    AnimationGraphAsset,
+    pulsar_reflection::AnimationGraphAssetKind::KIND
+);
+plain_asset!(
+    RetargetProfileAsset,
+    pulsar_reflection::RetargetProfileAssetKind::KIND
+);
 plain_asset!(IkRigAsset, pulsar_reflection::IkRigAssetKind::KIND);
-plain_asset!(IkRetargetAsset, pulsar_reflection::IkRetargeterAssetKind::KIND);
+plain_asset!(
+    IkRetargetAsset,
+    pulsar_reflection::IkRetargeterAssetKind::KIND
+);
 plain_asset!(PoseDbAsset, pulsar_reflection::PoseDatabaseAssetKind::KIND);
 
 #[cfg(test)]
@@ -303,7 +354,12 @@ mod tests {
     use super::*;
 
     fn open(store: &MemStore) -> AnimDocument<BlendSpaceAsset> {
-        AnimDocument::open(Arc::new(store.clone()), Path::new("a.blendspace"), &BlendSpaceAsset::default().to_text().unwrap()).unwrap()
+        AnimDocument::open(
+            Arc::new(store.clone()),
+            Path::new("a.blendspace"),
+            &BlendSpaceAsset::default().to_text().unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -346,9 +402,17 @@ mod tests {
             (true, ())
         });
         assert!(doc.undo());
-        assert_eq!(doc.value().name, "v4", "the sealed gesture is a separate step");
+        assert_eq!(
+            doc.value().name,
+            "v4",
+            "the sealed gesture is a separate step"
+        );
         assert!(doc.undo());
-        assert_eq!(doc.value().name, "New Blend Space", "four drags undo at once");
+        assert_eq!(
+            doc.value().name,
+            "New Blend Space",
+            "four drags undo at once"
+        );
         assert!(!doc.can_undo() && doc.can_redo());
     }
 
@@ -385,8 +449,14 @@ mod tests {
         assert_eq!(first.save().unwrap(), SaveOutcome::Saved);
         assert!(second.changed_on_disk());
         second.apply("rename", |a| a.name = "From tab two".into());
-        assert!(matches!(second.save().unwrap(), SaveOutcome::Conflict { .. }));
-        assert!(store.text("a.blendspace").unwrap().contains("From tab one"), "the other tab's edit is intact");
+        assert!(matches!(
+            second.save().unwrap(),
+            SaveOutcome::Conflict { .. }
+        ));
+        assert!(
+            store.text("a.blendspace").unwrap().contains("From tab one"),
+            "the other tab's edit is intact"
+        );
         second.save_overwrite().unwrap();
         assert!(store.text("a.blendspace").unwrap().contains("From tab two"));
         first.reload().unwrap();
@@ -398,7 +468,11 @@ mod tests {
     fn an_unreadable_file_is_an_error_and_is_left_alone() {
         let store = MemStore::default();
         store.put("a.blendspace", "{ not json");
-        let result = AnimDocument::<BlendSpaceAsset>::open(Arc::new(store.clone()), Path::new("a.blendspace"), "");
+        let result = AnimDocument::<BlendSpaceAsset>::open(
+            Arc::new(store.clone()),
+            Path::new("a.blendspace"),
+            "",
+        );
         assert!(result.is_err());
         assert_eq!(store.text("a.blendspace").unwrap(), "{ not json");
     }

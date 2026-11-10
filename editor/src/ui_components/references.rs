@@ -31,14 +31,34 @@ fn kind_label(kind: &str) -> &str {
 pub fn used_by_card(root: &Path, kind: &str, id: &str, title: &str, cx: &App) -> AnyElement {
     let theme = cx.theme();
     let referrers = asset_index::used_by(root, kind, id);
-    let mut card = v_flex().w_full().px_3().py_2().gap_1().border_t_1().border_color(theme.border).child(
-        div().text_xs().font_semibold().text_color(theme.muted_foreground).child(format!("{} ({})", title.to_uppercase(), referrers.len())),
-    );
+    let mut card = v_flex()
+        .w_full()
+        .px_3()
+        .py_2()
+        .gap_1()
+        .border_t_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(theme.muted_foreground)
+                .child(format!("{} ({})", title.to_uppercase(), referrers.len())),
+        );
     if referrers.is_empty() {
-        card = card.child(div().text_xs().text_color(theme.muted_foreground).child("Nothing in the project references this asset."));
+        card = card.child(
+            div()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child("Nothing in the project references this asset."),
+        );
     }
     for (i, r) in referrers.into_iter().take(60).enumerate() {
-        let name = r.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let name = r
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         let path = r.path.clone();
         card = card.child(
             h_flex()
@@ -51,10 +71,23 @@ pub fn used_by_card(root: &Path, kind: &str, id: &str, title: &str, cx: &App) ->
                 .hover(|s| s.bg(theme.secondary))
                 .text_xs()
                 .child(div().text_color(theme.foreground).child(name))
-                .child(div().text_color(theme.muted_foreground).child(kind_label(&r.kind).to_string()))
-                .child(div().flex_1().text_color(theme.muted_foreground).child(r.via.clone()))
-                .when(r.hint, |row| row.child(div().text_color(theme.muted_foreground).child("hint")))
-                .on_click(move |_, window, cx| window.dispatch_action(Box::new(OpenAsset { path: path.clone() }), cx)),
+                .child(
+                    div()
+                        .text_color(theme.muted_foreground)
+                        .child(kind_label(&r.kind).to_string()),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .text_color(theme.muted_foreground)
+                        .child(r.via.clone()),
+                )
+                .when(r.hint, |row| {
+                    row.child(div().text_color(theme.muted_foreground).child("hint"))
+                })
+                .on_click(move |_, window, cx| {
+                    window.dispatch_action(Box::new(OpenAsset { path: path.clone() }), cx)
+                }),
         );
     }
     card.into_any_element()
