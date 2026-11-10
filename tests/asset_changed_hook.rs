@@ -97,9 +97,18 @@ fn an_edited_sequence_recompiles_the_running_graph_in_place() {
     let _guard = PROJECT.lock().unwrap_or_else(|e| e.into_inner());
     let project = open_project();
     let (mut game, animator) = running_animator(&project);
+    // The first pose is the bind pose, drawn before the sequence has loaded; how many
+    // frames pass before the player runs depends on the asset pump's timing. Start
+    // from a clock that is certainly running, and derive every expectation from it.
+    game.tick_until("the sequence player is running", |w| {
+        w.get::<AnimationComponent>(animator)
+            .is_some_and(|a| a.bone_world_pose.len() == 3 && a.bone_world_pose[1][3][0] > 0.0)
+    });
     game.tick(2);
     let before = b1_x(&game, animator);
     assert!(before > 0.0 && before < 4.0, "2 m/s slide: {before}");
+    // 2 m/s: the clock is at before / 2 seconds
+    let clock = before / 2.0;
 
     // the artist moves the slide to 8 m in the sequence file and saves
     let skeleton =
@@ -124,7 +133,12 @@ fn an_edited_sequence_recompiles_the_running_graph_in_place() {
         (later - after - 4.0 * 0.1).abs() < 1e-2,
         "the new 4 m/s slide: {after} -> {later}"
     );
-    assert!(after > 4.0 * 0.2, "the clock was not restarted: {after}");
+    // the clock carried on from `clock` (a restart would give 4 * STEP = 0.4)
+    assert!(
+        (after - 4.0 * (clock + common::STEP)).abs() < 1e-2,
+        "the clock was not restarted: {after}, expected {}",
+        4.0 * (clock + common::STEP)
+    );
 
     // a file the graph does not name recompiles nothing
     let other = project.root.join("other.animseq");
