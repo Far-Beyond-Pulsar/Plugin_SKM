@@ -53,3 +53,6 @@ gpui-ce = { workspace = true, features = ["test-support"] }
 tempfile = { workspace = true }
 # Validates the WGSL sources offline with the same front end wgpu uses.
 naga = { version = "30", features = ["wgsl-in"] }
+
+[lints]
+workspace = true

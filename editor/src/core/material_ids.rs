@@ -71,7 +71,7 @@ pub fn path_for_id(root: &Path, id: &MaterialRef) -> Option<PathBuf> {
 }
 
 fn document_path(asset_path: &Path) -> PathBuf {
-    if asset_path.is_dir() {
+    if engine_fs::virtual_fs::is_dir(asset_path) {
         asset_path.join(GRAPH_FILE)
     } else {
         asset_path.to_path_buf()

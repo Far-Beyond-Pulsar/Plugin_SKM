@@ -36,8 +36,12 @@ pub fn project_root(file: &Path) -> PathBuf {
     let start = file.parent().unwrap_or(file);
     start
         .ancestors()
-        .find(|d| d.join("Pulsar.toml").is_file())
-        .or_else(|| start.ancestors().find(|d| d.join(".pulsar").is_dir()))
+        .find(|d| engine_fs::virtual_fs::is_file(&d.join("Pulsar.toml")))
+        .or_else(|| {
+            start
+                .ancestors()
+                .find(|d| engine_fs::virtual_fs::is_dir(&d.join(".pulsar")))
+        })
         .unwrap_or(start)
         .to_path_buf()
 }
@@ -268,7 +272,10 @@ pub(crate) fn same_file(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
-    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+    match (
+        engine_fs::virtual_fs::canonicalize(a),
+        engine_fs::virtual_fs::canonicalize(b),
+    ) {
         (Ok(a), Ok(b)) => a == b,
         _ => false,
     }

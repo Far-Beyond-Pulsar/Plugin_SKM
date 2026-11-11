@@ -5,6 +5,7 @@
 //! when no GPU adapter is available. Set `SKM_PREVIEW_DIR` to also write each
 //! render out as a PNG.
 
+#[cfg(test)]
 use std::path::PathBuf;
 
 pub const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
@@ -128,6 +129,7 @@ pub fn coverage(rgba: &[u8]) -> f32 {
 }
 
 /// Write `rgba` to `$SKM_PREVIEW_DIR/<name>.png` when that variable is set.
+#[cfg(test)]
 pub fn save(name: &str, w: u32, h: u32, rgba: &[u8]) {
     let Some(dir) = std::env::var_os("SKM_PREVIEW_DIR") else {
         return;
@@ -138,6 +140,7 @@ pub fn save(name: &str, w: u32, h: u32, rgba: &[u8]) {
 }
 
 /// Minimal PNG encoder (uncompressed deflate), enough for previews.
+#[cfg(test)]
 fn encode_png(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
     fn crc32(data: &[u8]) -> u32 {
         let mut table = [0u32; 256];
