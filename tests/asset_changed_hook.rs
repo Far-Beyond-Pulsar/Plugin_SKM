@@ -216,7 +216,15 @@ fn the_file_watcher_publishes_animation_updates() {
             .lock()
             .unwrap()
             .iter()
-            .any(|e| e.path.as_deref() == Some(project.sequence_path.as_path()))
+            // The fixture's root is canonical (a verbatim path on Windows); the
+            // watcher reports the path as the OS names it.
+            .any(|e| {
+                e.path
+                    .as_deref()
+                    .and_then(|path| std::fs::canonicalize(path).ok())
+                    .as_deref()
+                    == Some(project.sequence_path.as_path())
+            })
         {
             return;
         }
