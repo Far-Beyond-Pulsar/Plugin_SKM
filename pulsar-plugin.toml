@@ -7,6 +7,7 @@ name = "Animation"
 description = "Skeletons, the animator, skeletal meshes and animation assets (sequences, blend spaces, montages, graphs, IK rigs, retargets, pose databases) and their editors"
 enabled_by_default = true
 provides = [
+    { id = "pulsar.animation.classes", kind = "class", members = ["AnimationComponent"], version = 1 },
     { id = "pulsar.animation.api", kind = "api", members = ["skeletal_assets"], version = 1 },
 ]
 requires = [
