@@ -8,41 +8,35 @@ use animation_component::{
 use engine_backend::scene::game_hooks::{
     AssetChangedRegistration, ScriptVariableResolver, TickPhaseRegistration,
 };
-use engine_backend::scene::{ComponentEventCatalog, ComponentEventsRegistration};
+use engine_backend::scene::{
+    ClassSpec, ComponentEventCatalog, ComponentEventsRegistration, ComponentsBuilder,
+};
 use helio_component::skinning::{SkeletalPose, SkeletalPoseAccess};
 use pulsar_class::records::RecordMigrationRegistration;
 use pulsar_scenedb::World;
 
-// ── Component classes ───────────────────────────────────────────────────────
+/// Everything the animation plugin registers for a game.
+pub(crate) fn build(p: &mut pulsar_plugins::PluginBuilder) {
+    // ── Component classes ───────────────────────────────────────────────────
 
-pulsar_world_registry::submit_world_component!(AnimationComponent);
+    p.components()
+        .class::<AnimationComponent>(ClassSpec::default());
 
-// ── Game loop ───────────────────────────────────────────────────────────────
+    // ── Game loop ───────────────────────────────────────────────────────────
 
-// The animation: its phase before the game's systems (physics reads this
-// frame's pose), its notifies after the scripts.
-inventory::submit! {
-    TickPhaseRegistration {
-        origin: pulsar_plugins::origin!(),
+    // The animation: its phase before the game's systems (physics reads this
+    // frame's pose), its notifies after the scripts.
+    p.add(TickPhaseRegistration {
+        origin: p.origin(),
         name: "skeletal_animation",
         before_systems: Some(run_animation_phase),
         after_scripts: Some(publish_animation_notifies),
-    }
-}
+    });
 
-fn publish_animation_notifies(
-    world: &mut World,
-    hub: &pulsar_events::EventHub,
-    resolve: ScriptVariableResolver,
-) {
-    flush_animation_notifies(world, hub, resolve);
-}
-
-// An animator's events, for scripts, are the notifies its animation assets
-// declare.
-inventory::submit! {
-    ComponentEventsRegistration {
-        origin: pulsar_plugins::origin!(),
+    // An animator's events, for scripts, are the notifies its animation
+    // assets declare.
+    p.add(ComponentEventsRegistration {
+        origin: p.origin(),
         class_name: ANIMATION_COMPONENT,
         events: |root, assets| {
             let catalog = component_animation_notify_events(root, assets);
@@ -55,26 +49,22 @@ inventory::submit! {
                     .collect(),
             }
         },
-    }
-}
+    });
 
-// A changed animation asset file recompiles the running graphs that depend
-// on it (a sequence, Blend Space, rig or Montage the graph names).
-inventory::submit! {
-    AssetChangedRegistration {
-        origin: pulsar_plugins::origin!(),
+    // A changed animation asset file recompiles the running graphs that
+    // depend on it (a sequence, Blend Space, rig or Montage the graph names).
+    p.add(AssetChangedRegistration {
+        origin: p.origin(),
         name: "animation.graph_dependencies",
         on_changed: animation_asset_changed,
-    }
-}
+    });
 
-// ── Skinning ────────────────────────────────────────────────────────────────
+    // ── Skinning ────────────────────────────────────────────────────────────
 
-// A physics rig reads and drives the animated pose
-// (`helio_component::skinning`).
-inventory::submit! {
-    SkeletalPoseAccess {
-        origin: pulsar_plugins::origin!(),
+    // A physics rig reads and drives the animated pose
+    // (`helio_component::skinning`).
+    p.add(SkeletalPoseAccess {
+        origin: p.origin(),
         name: "animation.animator_pose",
         component: pulsar_scenedb::component_id::<AnimationComponent>,
         pose: |world, instance| {
@@ -98,25 +88,39 @@ inventory::submit! {
             }
             show_pose(world, instance);
         },
-    }
-}
+    });
 
-// ── Level records ───────────────────────────────────────────────────────────
+    // ── Level records ───────────────────────────────────────────────────────
 
-// A skinned mesh record that held its animation gets an animator record.
-inventory::submit! {
-    RecordMigrationRegistration {
-        origin: pulsar_plugins::origin!(),
+    // A skinned mesh record that held its animation gets an animator record.
+    p.add(RecordMigrationRegistration {
+        origin: p.origin(),
         name: "animation.split_animator",
         description: records::SPLIT,
         entries: Some(records::split_animator),
         from_props: None,
         stale_props: &[],
         retired_fields: &[],
-    }
+    });
+
+    // ── Asset updates ───────────────────────────────────────────────────────
+
+    // Animation files changed on disk are animation updates (see
+    // [`animation_change`]).
+    p.add(engine_fs::AssetChangeKind {
+        origin: p.origin(),
+        id: "animation.files",
+        kind_of: animation_change,
+    });
 }
 
-// ── Asset updates ───────────────────────────────────────────────────────────
+fn publish_animation_notifies(
+    world: &mut World,
+    hub: &pulsar_events::EventHub,
+    resolve: ScriptVariableResolver,
+) {
+    flush_animation_notifies(world, hub, resolve);
+}
 
 /// The custom asset kind animation files publish their updates under.
 pub const ANIMATION_ASSET_KIND: &str = "animation";
@@ -148,14 +152,6 @@ pub fn animation_change(path: &std::path::Path) -> Option<ui_types_common::Asset
         .and_then(|ext| ext.to_str())
         .filter(|ext| is_animation_extension(ext))
         .map(|_| ui_types_common::AssetKind::Custom(ANIMATION_ASSET_KIND.to_string()))
-}
-
-inventory::submit! {
-    engine_fs::AssetChangeKind {
-        origin: pulsar_plugins::origin!(),
-        id: "animation.files",
-        kind_of: animation_change,
-    }
 }
 
 #[cfg(test)]

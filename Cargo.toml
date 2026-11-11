@@ -18,7 +18,6 @@ engine_fs = { workspace = true }
 ui_types_common = { workspace = true }
 # The plugin gate and the registrations' collection.
 pulsar_plugins = { workspace = true }
-inventory = { workspace = true }
 # The plugin's crates.
 animation_component = { workspace = true }
 skeletal_animation_editor = { workspace = true, optional = true }

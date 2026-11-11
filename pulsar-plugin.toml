@@ -6,7 +6,13 @@ id = "pulsar.animation"
 name = "Animation"
 description = "Skeletons, the animator, skeletal meshes and animation assets (sequences, blend spaces, montages, graphs, IK rigs, retargets, pose databases) and their editors"
 enabled_by_default = true
-requires = []
+provides = [
+    { id = "pulsar.animation.classes", kind = "class", members = ["AnimationComponent"], version = 1 },
+    { id = "pulsar.animation.api", kind = "api", members = ["skeletal_assets"], version = 1 },
+]
+requires = [
+    { id = "pulsar.physics.api", optional = true },
+]
 
 # The plugin's root crate (the package in this directory): the one place it
 # registers everything it contributes. A game links it without its `editor`
