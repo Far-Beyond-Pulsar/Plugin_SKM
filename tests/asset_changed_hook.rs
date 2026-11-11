@@ -190,8 +190,9 @@ fn a_texture_edit_leaves_the_montage_caches_and_an_animation_edit_clears_them() 
     play_montage(&game, animator, &project).expect("and the file compiles again");
 }
 
-/// The file watcher publishes `AssetUpdated(Custom("animation"))` for an animation
-/// file edited on disk (`engine_fs::watchers::publish_asset_update`).
+/// The project's file watcher (started with its file index) publishes
+/// `AssetUpdated(Custom("animation"))` for an animation file edited on disk:
+/// the plugin's `engine_fs::AssetChangeKind` names the kind.
 #[test]
 fn the_file_watcher_publishes_animation_updates() {
     let _guard = PROJECT.lock().unwrap_or_else(|e| e.into_inner());
@@ -201,13 +202,7 @@ fn the_file_watcher_publishes_animation_updates() {
     let _subscription = pulsar_events::subscribe_asset_updates(None, move |event| {
         sink.lock().unwrap().push(event.clone());
     });
-    engine_fs::watchers::start_watcher(
-        project.root.clone(),
-        std::sync::Arc::new(engine_fs::AssetIndex::new()),
-        std::sync::Arc::new(engine_fs::UserTypeRegistry::new()),
-        Some(project.index.clone()),
-    )
-    .unwrap();
+    // `open_project` opened the file index, which started its watcher.
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     let skeleton =

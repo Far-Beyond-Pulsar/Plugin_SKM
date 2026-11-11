@@ -41,7 +41,7 @@ use pulsar_scenedb::{AssetId, AssetPayload, AssetView, Entity, World};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use skeletal_assets::diagnostics::Diagnostic;
-use skeletal_assets::runtime::anim_instance::{AnimInstance, single_sequence_graph};
+use skeletal_assets::runtime::anim_instance::{single_sequence_graph, AnimInstance};
 use skeletal_assets::runtime::clip::CompiledClip;
 use skeletal_assets::runtime::graph::compile::{compile_graph, compile_montage};
 use skeletal_assets::runtime::graph::{CompiledGraph, ParamError, Value as AnimValue};
@@ -58,13 +58,13 @@ use crate::anim_source::ProjectAnimSource;
 #[path = "notifies.rs"]
 mod notifies;
 pub use notifies::{
-    AnimStateEvent, AnimationNotifyCatalog, AnimationNotifyDiagnostic, AnimationNotifyEvent,
-    MONTAGE_LIFECYCLE_KINDS, MontageLifecycleEvent, SkeletalAnimationEvents,
-    SkeletalAnimationEventsEventWriterExt, anim_state_descriptor, animation_notify_descriptor,
-    animation_notify_state_descriptor, animation_source_for_file,
-    component_animation_notify_events, flush_animation_notifies, montage_lifecycle_descriptor,
-    montage_notify_descriptor, montage_notify_state_descriptor, project_animation_notify_events,
-    register_animation_notifies, register_montage_events, run_animation_phase, show_pose,
+    anim_state_descriptor, animation_notify_descriptor, animation_notify_state_descriptor,
+    animation_source_for_file, component_animation_notify_events, flush_animation_notifies,
+    montage_lifecycle_descriptor, montage_notify_descriptor, montage_notify_state_descriptor,
+    project_animation_notify_events, register_animation_notifies, register_montage_events,
+    run_animation_phase, show_pose, AnimStateEvent, AnimationNotifyCatalog,
+    AnimationNotifyDiagnostic, AnimationNotifyEvent, MontageLifecycleEvent,
+    SkeletalAnimationEvents, SkeletalAnimationEventsEventWriterExt, MONTAGE_LIFECYCLE_KINDS,
 };
 
 /// The animator's class name: its records, events and script references.
@@ -1037,7 +1037,7 @@ fn path_for_ref<K: AssetKind>(reference: &AssetRef<K>) -> Option<PathBuf> {
         return None;
     };
     let full_path = root.join(&path);
-    Some(std::fs::canonicalize(&full_path).unwrap_or(full_path))
+    Some(engine_fs::virtual_fs::canonicalize(&full_path).unwrap_or(full_path))
 }
 
 fn asset_id_for_ref<K: AssetKind>(reference: Option<&AssetRef<K>>) -> AssetId {
@@ -1606,8 +1606,8 @@ fn blend_mesh_space(animated: &glam::Mat4, owned: &glam::Mat4, weight: f32) -> g
 mod animation_runtime_tests {
     use super::*;
     use pulsar_events::{
-        EventHub, FlushPoint,
         gamma::{Channel, DynValue, SubscribeOptions},
+        EventHub, FlushPoint,
     };
     use pulsar_scenedb::World;
     use pulsar_world_registry::ComponentRuntimeState;
@@ -1742,18 +1742,17 @@ mod animation_runtime_tests {
         both.legacy_animation = AssetRef::parse(id);
         both.animation_graph = AssetRef::parse("33333333-3333-4333-8333-333333333333");
         both.refresh_diagnostics();
-        assert!(
-            both.diagnostics
-                .iter()
-                .any(|d| d.code == "component.sequence_shadowed_by_graph")
-        );
+        assert!(both
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "component.sequence_shadowed_by_graph"));
         both.ensure_runtime();
         assert_eq!(both.animation().unwrap().graph().unwrap().id, graph.id);
     }
 
     #[test]
-    fn a_graph_component_runs_in_the_animation_phase_with_typed_parameters_and_raises_graph_player_notifies()
-     {
+    fn a_graph_component_runs_in_the_animation_phase_with_typed_parameters_and_raises_graph_player_notifies(
+    ) {
         let (rig, graph, walk_id) = rig();
         let hub = registered_hub();
         let mut world = World::new();
@@ -1999,11 +1998,9 @@ mod animation_runtime_tests {
             .get_mut::<AnimationComponent>(c)
             .unwrap()
             .take_montage_events();
-        assert!(
-            events
-                .iter()
-                .any(|e| e.handle == handle && matches!(e.kind, MontageEventKind::Started))
-        );
+        assert!(events
+            .iter()
+            .any(|e| e.handle == handle && matches!(e.kind, MontageEventKind::Started)));
         assert!(
             events.iter().any(|e| e.handle == handle
                 && matches!(e.kind, MontageEventKind::Ended(MontageResult::Completed))),

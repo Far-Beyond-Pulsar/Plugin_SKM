@@ -15,13 +15,13 @@ pub const ANIMATION_FILE: &str = "animation.json";
 
 pub fn load_skeleton(asset_dir: &Path) -> anyhow::Result<Skeleton> {
     let path = asset_dir.join(SKELETON_FILE);
-    let text = std::fs::read_to_string(&path)?;
+    let text = engine_fs::virtual_fs::read_to_string(&path)?;
     Ok(serde_json::from_str(&text)?)
 }
 
 pub fn load_animation(asset_dir: &Path) -> anyhow::Result<AnimationClip> {
     let path = asset_dir.join(ANIMATION_FILE);
-    let text = std::fs::read_to_string(&path)?;
+    let text = engine_fs::virtual_fs::read_to_string(&path)?;
     Ok(serde_json::from_str(&text)?)
 }
 

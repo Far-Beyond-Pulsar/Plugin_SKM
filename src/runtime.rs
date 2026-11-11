@@ -116,6 +116,48 @@ inventory::submit! {
     }
 }
 
+// ── Asset updates ───────────────────────────────────────────────────────────
+
+/// The custom asset kind animation files publish their updates under.
+pub const ANIMATION_ASSET_KIND: &str = "animation";
+
+/// Files of the animation family (skeleton, sequence, blend space, Montage,
+/// graph, IK rig and retarget assets, pose database).
+pub fn is_animation_extension(extension: &str) -> bool {
+    [
+        "skeleton",
+        "animseq",
+        "blendspace",
+        "montage",
+        "animgraph",
+        "ikrig",
+        "ikretarget",
+        "animretarget",
+        "posedb",
+    ]
+    .iter()
+    .any(|known| extension.eq_ignore_ascii_case(known))
+}
+
+/// An animation file changed on disk is an animation update: the project
+/// watcher publishes it and the asset-changed hooks
+/// (`reload_animation_dependencies`) reload what uses it. The editor's
+/// animation saves publish nothing themselves, so nothing reloads twice.
+pub fn animation_change(path: &std::path::Path) -> Option<ui_types_common::AssetKind> {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| is_animation_extension(ext))
+        .map(|_| ui_types_common::AssetKind::Custom(ANIMATION_ASSET_KIND.to_string()))
+}
+
+inventory::submit! {
+    engine_fs::AssetChangeKind {
+        origin: pulsar_plugins::origin!(),
+        id: "animation.files",
+        kind_of: animation_change,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// Every registration of the plugin names this root, so it resolves to
@@ -136,6 +178,38 @@ mod tests {
                 "{summary:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_animation_family_is_recognised_by_extension_only() {
+        use super::{animation_change, is_animation_extension, ANIMATION_ASSET_KIND};
+        for extension in [
+            "skeleton",
+            "animseq",
+            "blendspace",
+            "montage",
+            "animgraph",
+            "ikrig",
+            "ikretarget",
+            "animretarget",
+            "posedb",
+            "ANIMSEQ",
+        ] {
+            assert!(is_animation_extension(extension), "{extension}");
+        }
+        for extension in ["png", "mat", "json", "animmontage", "anim_graph", ""] {
+            assert!(!is_animation_extension(extension), "{extension}");
+        }
+        let animation = ui_types_common::AssetKind::Custom(ANIMATION_ASSET_KIND.to_string());
+        assert_eq!(
+            animation_change(std::path::Path::new("a/walk.animseq")),
+            Some(animation.clone())
+        );
+        assert_eq!(
+            animation_change(std::path::Path::new("a/body.SKELETON")),
+            Some(animation)
+        );
+        assert_eq!(animation_change(std::path::Path::new("a/rock.png")), None);
     }
 
     #[test]

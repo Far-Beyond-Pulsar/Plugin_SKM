@@ -4,16 +4,17 @@
 
 use super::*;
 use pulsar_events::{
-    EventCategory, EventHub, FlushPoint, entity_channel,
+    entity_channel,
     gamma::EventDescriptor,
     gamma::{Channel, DynValue, SubscribeOptions},
+    EventCategory, EventHub, FlushPoint,
 };
 use pulsar_scene_model::components::Transform;
 use pulsar_scenedb::World;
 use pulsar_world_registry::ComponentRuntimeState;
 use serde_json::json;
-use skeletal_assets::anim_graph::AnimationGraphAsset;
 use skeletal_assets::anim_graph::builder::GraphBuilder;
+use skeletal_assets::anim_graph::AnimationGraphAsset;
 use skeletal_assets::animation::{AnimationClip, BoneTrack, Keyframe};
 use skeletal_assets::assets::{AnimSeqAsset, SkeletonAsset};
 use skeletal_assets::math::{Transform as AssetTransform, Vec3 as AssetVec3};
@@ -413,26 +414,22 @@ fn montage_authored_notifies_states_and_lifecycle_reach_this_component_once_each
         .iter()
         .filter(|e| e.notify_id == "ms")
         .collect();
-    assert!(
-        ms.iter()
-            .all(|e| e.source_kind == "montage" && e.sequence_id == montage.id)
-    );
+    assert!(ms
+        .iter()
+        .all(|e| e.source_kind == "montage" && e.sequence_id == montage.id));
     assert_eq!(ms.last().unwrap().end_reason, "completed");
     let swing: Vec<_> = sink
         .notifies
         .iter()
         .filter(|e| e.notify_id == "swing")
         .collect();
-    assert!(
-        swing
-            .iter()
-            .all(|e| e.source_kind == "animseq" && e.sequence_id == rig.walk_id)
-    );
+    assert!(swing
+        .iter()
+        .all(|e| e.source_kind == "animseq" && e.sequence_id == rig.walk_id));
     assert_ne!(ms[0].playback_instance, swing[0].playback_instance);
-    assert!(
-        ms.iter()
-            .all(|e| e.playback_instance == ms[0].playback_instance)
-    );
+    assert!(ms
+        .iter()
+        .all(|e| e.playback_instance == ms[0].playback_instance));
     // lifecycle in order, as component-scoped events, exactly once
     assert_eq!(
         lifecycle(&sink)[..3],
@@ -630,31 +627,25 @@ fn two_components_sharing_assets_keep_independent_events_clocks_and_filters() {
             .all(|(_, e)| e.instance == ha.0 as i64),
         "a only sees its own instance"
     );
-    assert!(
-        sink_b
-            .lock()
-            .unwrap()
-            .montage
-            .iter()
-            .all(|(_, e)| e.instance == hb.0 as i64)
-    );
+    assert!(sink_b
+        .lock()
+        .unwrap()
+        .montage
+        .iter()
+        .all(|(_, e)| e.instance == hb.0 as i64));
     // every authored event reached only its own owner
-    assert!(
-        sink_a
-            .lock()
-            .unwrap()
-            .authored
-            .iter()
-            .all(|(_, f)| f[0] == DynValue::U64(oa.bits()))
-    );
-    assert!(
-        sink_b
-            .lock()
-            .unwrap()
-            .authored
-            .iter()
-            .all(|(_, f)| f[0] == DynValue::U64(ob.bits()))
-    );
+    assert!(sink_a
+        .lock()
+        .unwrap()
+        .authored
+        .iter()
+        .all(|(_, f)| f[0] == DynValue::U64(oa.bits())));
+    assert!(sink_b
+        .lock()
+        .unwrap()
+        .authored
+        .iter()
+        .all(|(_, f)| f[0] == DynValue::U64(ob.bits())));
 }
 
 #[test]
@@ -1080,14 +1071,12 @@ fn a_changed_asset_recompiles_only_the_graphs_that_depend_on_it() {
         (1, 1),
         "only the component whose graph names the file recompiled"
     );
-    assert!(
-        world
-            .get::<AnimationComponent>(b)
-            .unwrap()
-            .anim
-            .montages
-            .is_empty()
-    );
+    assert!(world
+        .get::<AnimationComponent>(b)
+        .unwrap()
+        .anim
+        .montages
+        .is_empty());
     for _ in 0..2 {
         frame(&mut world, &hub, 0.1, &mut state);
     }
@@ -1116,8 +1105,8 @@ fn a_changed_asset_recompiles_only_the_graphs_that_depend_on_it() {
 }
 
 fn param_graph(rig: &Rig) -> Arc<CompiledGraph> {
-    use skeletal_assets::anim_graph::GraphParameter;
     use skeletal_assets::anim_graph::catalogue::ParamType;
+    use skeletal_assets::anim_graph::GraphParameter;
     let mut asset = AnimationGraphAsset::default();
     asset.skeleton = Some(
         skeletal_assets::ids::SkeletonId::parse(rig.skeleton.id.as_str())
@@ -1257,43 +1246,35 @@ fn the_blueprint_nodes_are_registered_validate_their_input_and_command_the_anima
     // precise errors, no panics
     let message =
         |r: Result<Option<Box<dyn Any>>, _>| format!("{:?}", r.expect_err("should be refused"));
-    assert!(
-        message(call(
-            &mut world,
-            instance,
-            "anim_set_float",
-            vec![Box::new("nope".to_string()), Box::new(1.0f32)]
-        ))
-        .contains("no parameter `nope`")
-    );
-    assert!(
-        message(call(
-            &mut world,
-            instance,
-            "anim_set_bool",
-            vec![Box::new("speed".to_string()), Box::new(true)]
-        ))
-        .contains("Float")
-    );
-    assert!(
-        message(call(
-            &mut world,
-            instance,
-            "anim_set_float",
-            vec![Box::new("speed".to_string()), Box::new(f32::NAN)]
-        ))
-        .contains("finite")
-    );
+    assert!(message(call(
+        &mut world,
+        instance,
+        "anim_set_float",
+        vec![Box::new("nope".to_string()), Box::new(1.0f32)]
+    ))
+    .contains("no parameter `nope`"));
+    assert!(message(call(
+        &mut world,
+        instance,
+        "anim_set_bool",
+        vec![Box::new("speed".to_string()), Box::new(true)]
+    ))
+    .contains("Float"));
+    assert!(message(call(
+        &mut world,
+        instance,
+        "anim_set_float",
+        vec![Box::new("speed".to_string()), Box::new(f32::NAN)]
+    ))
+    .contains("finite"));
     let unrelated = world.spawn();
-    assert!(
-        message(call(
-            &mut world,
-            unrelated,
-            "anim_set_float",
-            vec![Box::new("speed".to_string()), Box::new(1.0f32)]
-        ))
-        .contains("MissingComponent")
-    );
+    assert!(message(call(
+        &mut world,
+        unrelated,
+        "anim_set_float",
+        vec![Box::new("speed".to_string()), Box::new(1.0f32)]
+    ))
+    .contains("MissingComponent"));
     // Montage commands on a running instance
     let montage = compile_montage_asset(
         &rig,
@@ -1337,15 +1318,13 @@ fn the_blueprint_nodes_are_registered_validate_their_input_and_command_the_anima
         vec![Box::new(handle), Box::new(-1.5f32)],
     )
     .expect("negative rates are reverse playback");
-    assert!(
-        message(call(
-            &mut world,
-            instance,
-            "anim_set_montage_rate",
-            vec![Box::new(handle), Box::new(0.0f32)]
-        ))
-        .contains("non-zero")
-    );
+    assert!(message(call(
+        &mut world,
+        instance,
+        "anim_set_montage_rate",
+        vec![Box::new(handle), Box::new(0.0f32)]
+    ))
+    .contains("non-zero"));
     call(
         &mut world,
         instance,
@@ -1353,15 +1332,13 @@ fn the_blueprint_nodes_are_registered_validate_their_input_and_command_the_anima
         vec![Box::new(handle), Box::new("B".to_string())],
     )
     .expect("jump");
-    assert!(
-        message(call(
-            &mut world,
-            instance,
-            "anim_jump_to_section",
-            vec![Box::new(handle), Box::new("Nope".to_string())]
-        ))
-        .contains("no section `Nope`")
-    );
+    assert!(message(call(
+        &mut world,
+        instance,
+        "anim_jump_to_section",
+        vec![Box::new(handle), Box::new("Nope".to_string())]
+    ))
+    .contains("no section `Nope`"));
     call(
         &mut world,
         instance,
@@ -1373,15 +1350,13 @@ fn the_blueprint_nodes_are_registered_validate_their_input_and_command_the_anima
         ],
     )
     .expect("next section");
-    assert!(
-        message(call(
-            &mut world,
-            instance,
-            "anim_pause_montage",
-            vec![Box::new(-1i64), Box::new(true)]
-        ))
-        .contains("non-negative")
-    );
+    assert!(message(call(
+        &mut world,
+        instance,
+        "anim_pause_montage",
+        vec![Box::new(-1i64), Box::new(true)]
+    ))
+    .contains("non-negative"));
     assert!(flag(call(
         &mut world,
         instance,
@@ -1690,26 +1665,22 @@ fn the_asset_change_hook_only_answers_animation_files() {
         animation_asset_changed(&mut world, Path::new("rock.png")),
         0
     );
-    assert!(
-        !world
-            .get::<AnimationComponent>(player)
-            .unwrap()
-            .anim
-            .montages
-            .is_empty()
-    );
+    assert!(!world
+        .get::<AnimationComponent>(player)
+        .unwrap()
+        .anim
+        .montages
+        .is_empty());
     // an animation file reaches the dependants path (no graph names it: zero
     // recompiles, but Montages compile afresh)
     assert_eq!(
         animation_asset_changed(&mut world, Path::new("other.animseq")),
         0
     );
-    assert!(
-        world
-            .get::<AnimationComponent>(player)
-            .unwrap()
-            .anim
-            .montages
-            .is_empty()
-    );
+    assert!(world
+        .get::<AnimationComponent>(player)
+        .unwrap()
+        .anim
+        .montages
+        .is_empty());
 }

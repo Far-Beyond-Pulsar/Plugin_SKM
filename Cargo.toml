@@ -13,6 +13,9 @@ autoexamples = false
 editor = ["dep:skeletal_animation_editor", "dep:plugin_manager"]
 
 [dependencies]
+# Animation files changed on disk are asset updates (`engine_fs::AssetChangeKind`).
+engine_fs = { workspace = true }
+ui_types_common = { workspace = true }
 # The plugin gate and the registrations' collection.
 pulsar_plugins = { workspace = true }
 inventory = { workspace = true }
@@ -40,7 +43,7 @@ meshes_plugin = { workspace = true }
 meshes_component = { workspace = true }
 pulsar_reflection = { workspace = true }
 engine_state = { workspace = true }
-engine_fs = { workspace = true, features = ["editor"] }
+engine_fs = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

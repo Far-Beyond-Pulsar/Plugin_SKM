@@ -23,8 +23,8 @@ use skeletal_assets::ik_retarget::IkRetargetAsset;
 use skeletal_assets::ik_rig::IkRigAsset;
 use skeletal_assets::montage::AnimationMontageAsset;
 use skeletal_assets::pose_db::{
-    INDEX_BUILDER_VERSION, IndexKey, IndexState, PoseDbAsset, check_index, derived_index_path,
-    encode_index,
+    check_index, derived_index_path, encode_index, IndexKey, IndexState, PoseDbAsset,
+    INDEX_BUILDER_VERSION,
 };
 use skeletal_assets::retarget::RetargetProfileAsset;
 use skeletal_assets::runtime::graph::compile::AssetSource;
@@ -154,7 +154,8 @@ impl AssetSource for ProjectAnimSource {
             builder_version: INDEX_BUILDER_VERSION,
             hash: key.to_string(),
         };
-        let bytes = std::fs::read(derived_index_path(&self.root, &id, &want)).ok()?;
+        let bytes =
+            engine_fs::virtual_fs::read_file(&derived_index_path(&self.root, &id, &want)).ok()?;
         match check_index(&bytes, &want) {
             IndexState::Current(payload) => Some(payload),
             IndexState::Stale { .. } | IndexState::Corrupt => None,
@@ -170,14 +171,13 @@ impl AssetSource for ProjectAnimSource {
             hash: key.to_string(),
         };
         let path = derived_index_path(&self.root, &id, &k);
-        let write = || -> std::io::Result<()> {
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
+        let write = || -> Result<(), String> {
             // write beside the target and rename: a reader never sees half an index
+            // (`write_file` creates the folders)
             let tmp = path.with_extension("tmp");
-            std::fs::write(&tmp, encode_index(&k, payload))?;
-            std::fs::rename(&tmp, &path)
+            engine_fs::virtual_fs::write_file(&tmp, &encode_index(&k, payload))
+                .and_then(|()| engine_fs::virtual_fs::rename(&tmp, &path))
+                .map_err(|e| e.to_string())
         };
         if let Err(error) = write() {
             tracing::warn!(%error, path = %path.display(), "could not store the derived pose index");

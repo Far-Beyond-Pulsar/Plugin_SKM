@@ -27,7 +27,7 @@ pub struct Migrated {
 
 /// Whether `path` is an old-format asset folder.
 pub fn is_legacy_folder(path: &Path) -> bool {
-    path.is_dir() && path.join(SKELETON_FILE).is_file()
+    engine_fs::virtual_fs::is_dir(path) && engine_fs::virtual_fs::is_file(&path.join(SKELETON_FILE))
 }
 
 /// Split an old asset's data into the two new assets.
@@ -60,7 +60,9 @@ pub fn migrate_folder(dir: &Path) -> anyhow::Result<Migrated> {
     };
 
     let (skeleton_path, sequence_path) = paths(&stem);
-    if skeleton_path.is_file() && sequence_path.is_file() {
+    if engine_fs::virtual_fs::is_file(&skeleton_path)
+        && engine_fs::virtual_fs::is_file(&sequence_path)
+    {
         if let (Ok(skeleton), Ok(sequence)) = (
             load_skeleton_asset(&skeleton_path),
             load_animseq_asset(&sequence_path),
@@ -88,7 +90,10 @@ pub fn migrate_folder(dir: &Path) -> anyhow::Result<Migrated> {
             }
         })
         .map(|name| paths(&name))
-        .find(|(s, a)| !s.exists() && !a.exists())
+        .find(|(s, a)| {
+            !engine_fs::virtual_fs::exists(s).unwrap_or(false)
+                && !engine_fs::virtual_fs::exists(a).unwrap_or(false)
+        })
         .expect("an unbounded range always yields a free name");
 
     // The skeleton goes first so that a failure part-way leaves no sequence
