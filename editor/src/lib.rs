@@ -301,12 +301,6 @@ impl EditorPluginComponents for SkeletalAnimationPlugin {
         Vec::new()
     }
 }
-impl EditorPluginSubsystems for SkeletalAnimationPlugin {
-    fn subsystems(&self) -> Vec<Box<dyn Subsystem>> {
-        Vec::new()
-    }
-}
-
 impl SkeletalAnimationPlugin {
     /// Open `file_path` in a new editor panel (for hosts that link this crate).
     /// A `.skeleton` opens the Skeleton editor, an `.animseq` or an old
