@@ -127,6 +127,7 @@ fn animation_asset_file_type(
         default_content: kind.default_json(),
         categories: vec!["Animation".to_string()],
         creation_directory: None,
+        cook: plugin_editor_api::file_types::copy_file_for_cook,
     }
 }
 
@@ -173,6 +174,7 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 }),
                 categories: vec!["Animation".to_string()],
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
             },
             FileTypeDefinition {
                 id: FileTypeId::new(ANIM_SEQUENCE_FILE_TYPE),
@@ -191,6 +193,7 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 }),
                 categories: vec!["Animation".to_string()],
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
             },
             FileTypeDefinition {
                 id: FileTypeId::new(SKELETAL_MESH_FILE_TYPE),
@@ -204,6 +207,7 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 default_content: json!(""),
                 categories: vec!["Animation".to_string()],
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
             },
             FileTypeDefinition {
                 id: FileTypeId::new(LEGACY_FILE_TYPE),
@@ -219,6 +223,7 @@ impl EditorPlugin for SkeletalAnimationPlugin {
                 default_content: json!(""),
                 categories: vec!["Animation".to_string()],
                 creation_directory: None,
+                cook: plugin_editor_api::file_types::copy_file_for_cook,
             },
         ];
         types.extend(
