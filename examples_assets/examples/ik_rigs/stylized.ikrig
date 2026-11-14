@@ -1,0 +1,237 @@
+{
+  "version": 1,
+  "id": "5ce1e7a6-0000-4000-8000-000000000002",
+  "name": "Stylized",
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000002",
+  "retarget_root": "hips",
+  "chains": [
+    {
+      "id": "c-leg-l",
+      "name": "LeftLeg",
+      "start_bone": "leg_up_l",
+      "end_bone": "foot_l",
+      "goal": "g-foot-l"
+    },
+    {
+      "id": "c-arm-l",
+      "name": "LeftArm",
+      "start_bone": "arm_up_l",
+      "end_bone": "hand_l",
+      "goal": "g-hand-l"
+    },
+    {
+      "id": "c-leg-r",
+      "name": "RightLeg",
+      "start_bone": "leg_up_r",
+      "end_bone": "foot_r",
+      "goal": "g-foot-r"
+    },
+    {
+      "id": "c-arm-r",
+      "name": "RightArm",
+      "start_bone": "arm_up_r",
+      "end_bone": "hand_r",
+      "goal": "g-hand-r"
+    },
+    {
+      "id": "c-spine",
+      "name": "Spine",
+      "start_bone": "back",
+      "end_bone": "skull",
+      "goal": "g-head"
+    }
+  ],
+  "goals": [
+    {
+      "id": "g-foot-l",
+      "name": "LeftFoot",
+      "bone": "foot_l",
+      "position_alpha": 1.0,
+      "rotation_alpha": 1.0,
+      "default_offset": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "g-hand-l",
+      "name": "LeftHand",
+      "bone": "hand_l",
+      "position_alpha": 1.0,
+      "rotation_alpha": 0.0,
+      "default_offset": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "g-foot-r",
+      "name": "RightFoot",
+      "bone": "foot_r",
+      "position_alpha": 1.0,
+      "rotation_alpha": 1.0,
+      "default_offset": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "g-hand-r",
+      "name": "RightHand",
+      "bone": "hand_r",
+      "position_alpha": 1.0,
+      "rotation_alpha": 0.0,
+      "default_offset": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "g-head",
+      "name": "Head",
+      "bone": "skull",
+      "position_alpha": 1.0,
+      "rotation_alpha": 1.0,
+      "default_offset": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "solvers": [
+    {
+      "id": "s-leg-l",
+      "name": "LeftLeg",
+      "enabled": true,
+      "type": "two_bone",
+      "chain": "c-leg-l",
+      "goal": "g-foot-l",
+      "pole": {
+        "bone": "leg_up_l",
+        "offset": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "space": "component"
+      },
+      "allow_stretch": false,
+      "max_stretch": 1.25,
+      "take_goal_rotation": true
+    },
+    {
+      "id": "s-arm-l",
+      "name": "LeftArm",
+      "enabled": true,
+      "type": "two_bone",
+      "chain": "c-arm-l",
+      "goal": "g-hand-l",
+      "allow_stretch": true,
+      "max_stretch": 1.1,
+      "take_goal_rotation": false
+    },
+    {
+      "id": "s-leg-r",
+      "name": "RightLeg",
+      "enabled": true,
+      "type": "two_bone",
+      "chain": "c-leg-r",
+      "goal": "g-foot-r",
+      "pole": {
+        "bone": "leg_up_r",
+        "offset": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "space": "component"
+      },
+      "allow_stretch": false,
+      "max_stretch": 1.25,
+      "take_goal_rotation": true
+    },
+    {
+      "id": "s-arm-r",
+      "name": "RightArm",
+      "enabled": true,
+      "type": "two_bone",
+      "chain": "c-arm-r",
+      "goal": "g-hand-r",
+      "allow_stretch": true,
+      "max_stretch": 1.1,
+      "take_goal_rotation": false
+    },
+    {
+      "id": "s-spine",
+      "name": "Spine",
+      "enabled": true,
+      "type": "fabrik",
+      "chain": "c-spine",
+      "goal": "g-head",
+      "precision": 0.001,
+      "max_iterations": 10,
+      "respect_joint_limits": true,
+      "take_goal_rotation": true
+    }
+  ],
+  "joint_limits": [
+    {
+      "bone": "leg_low_l",
+      "min_degrees": [
+        -130.0,
+        0.0,
+        0.0
+      ],
+      "max_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "bone": "arm_low_l",
+      "min_degrees": [
+        0.0,
+        0.0,
+        -140.0
+      ],
+      "max_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "bone": "leg_low_r",
+      "min_degrees": [
+        -130.0,
+        0.0,
+        0.0
+      ],
+      "max_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "bone": "arm_low_r",
+      "min_degrees": [
+        0.0,
+        0.0,
+        -140.0
+      ],
+      "max_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "description": "The stylized character's IK rig, with the same chain names as the humanoid's so a retargeter can map them one to one although the bones are named and proportioned differently."
+}

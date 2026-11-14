@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "id": "5ce1e7a8-0000-4000-8000-000000000001",
+  "name": "Humanoid to Stylized (IK)",
+  "source_rig": "5ce1e7a6-0000-4000-8000-000000000001",
+  "target_rig": "5ce1e7a6-0000-4000-8000-000000000002",
+  "chains": [
+    {
+      "id": "rt-leftleg",
+      "target_chain": "LeftLeg",
+      "source_chain": "LeftLeg",
+      "fk": {
+        "enabled": true,
+        "rotation": "interpolated",
+        "rotation_alpha": 1.0,
+        "translation": "none",
+        "translation_alpha": 1.0
+      },
+      "ik": {
+        "enabled": true,
+        "blend_to_source": 1.0,
+        "static_offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale_vertical": 0.85,
+        "extension": 1.0
+      }
+    },
+    {
+      "id": "rt-rightleg",
+      "target_chain": "RightLeg",
+      "source_chain": "RightLeg",
+      "fk": {
+        "enabled": true,
+        "rotation": "interpolated",
+        "rotation_alpha": 1.0,
+        "translation": "none",
+        "translation_alpha": 1.0
+      },
+      "ik": {
+        "enabled": true,
+        "blend_to_source": 1.0,
+        "static_offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale_vertical": 0.85,
+        "extension": 1.0
+      }
+    },
+    {
+      "id": "rt-leftarm",
+      "target_chain": "LeftArm",
+      "source_chain": "LeftArm",
+      "fk": {
+        "enabled": true,
+        "rotation": "interpolated",
+        "rotation_alpha": 1.0,
+        "translation": "none",
+        "translation_alpha": 1.0
+      },
+      "ik": {
+        "enabled": false,
+        "blend_to_source": 1.0,
+        "static_offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale_vertical": 1.0,
+        "extension": 1.0
+      }
+    },
+    {
+      "id": "rt-rightarm",
+      "target_chain": "RightArm",
+      "source_chain": "RightArm",
+      "fk": {
+        "enabled": true,
+        "rotation": "interpolated",
+        "rotation_alpha": 1.0,
+        "translation": "none",
+        "translation_alpha": 1.0
+      },
+      "ik": {
+        "enabled": false,
+        "blend_to_source": 1.0,
+        "static_offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale_vertical": 1.0,
+        "extension": 1.0
+      }
+    },
+    {
+      "id": "rt-spine",
+      "target_chain": "Spine",
+      "source_chain": "Spine",
+      "fk": {
+        "enabled": true,
+        "rotation": "interpolated",
+        "rotation_alpha": 1.0,
+        "translation": "none",
+        "translation_alpha": 1.0
+      },
+      "ik": {
+        "enabled": false,
+        "blend_to_source": 1.0,
+        "static_offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale_vertical": 1.0,
+        "extension": 1.0
+      }
+    }
+  ],
+  "source_pose": {
+    "bone_rotations": [],
+    "root_translation": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "target_pose": {
+    "bone_rotations": [],
+    "root_translation": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "root": {
+    "rotation_alpha": 1.0,
+    "translation_alpha": 1.0,
+    "scale_horizontal": 0.7,
+    "scale_vertical": 0.75,
+    "offset": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "description": "Retargets animation from the humanoid rig to the stylized rig chain by chain (FK, rotation interpolated). The legs also turn IK on, so the feet land where the source's feet are scaled to the shorter legs (scale_vertical 0.85) instead of sliding. The root scales horizontally by 0.7 and vertically by 0.75 for the smaller character."
+}

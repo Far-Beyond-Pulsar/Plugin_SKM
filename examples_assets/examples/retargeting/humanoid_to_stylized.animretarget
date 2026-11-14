@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "id": "5ce1e7a7-0000-4000-8000-000000000001",
+  "name": "Humanoid to Stylized",
+  "source_skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "target_skeleton": "5ce1e7a0-0000-4000-8000-000000000002",
+  "chain_map": [],
+  "bone_map": [
+    {
+      "id": "bone-root",
+      "source_bone": "root",
+      "target_bone": "root",
+      "rotation": "one_to_one",
+      "translation": "none"
+    },
+    {
+      "id": "bone-pelvis",
+      "source_bone": "pelvis",
+      "target_bone": "hips",
+      "rotation": "interpolated",
+      "translation": "globally_scaled"
+    },
+    {
+      "id": "bone-spine",
+      "source_bone": "spine",
+      "target_bone": "back",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-neck",
+      "source_bone": "neck",
+      "target_bone": "neck",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-head",
+      "source_bone": "head",
+      "target_bone": "skull",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-clavicle_l",
+      "source_bone": "clavicle_l",
+      "target_bone": "shoulder_l",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-upper_arm_l",
+      "source_bone": "upper_arm_l",
+      "target_bone": "arm_up_l",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-lower_arm_l",
+      "source_bone": "lower_arm_l",
+      "target_bone": "arm_low_l",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-hand_l",
+      "source_bone": "hand_l",
+      "target_bone": "hand_l",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-clavicle_r",
+      "source_bone": "clavicle_r",
+      "target_bone": "shoulder_r",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-upper_arm_r",
+      "source_bone": "upper_arm_r",
+      "target_bone": "arm_up_r",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-lower_arm_r",
+      "source_bone": "lower_arm_r",
+      "target_bone": "arm_low_r",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-hand_r",
+      "source_bone": "hand_r",
+      "target_bone": "hand_r",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-thigh_l",
+      "source_bone": "thigh_l",
+      "target_bone": "leg_up_l",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-shin_l",
+      "source_bone": "shin_l",
+      "target_bone": "leg_low_l",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-foot_l",
+      "source_bone": "foot_l",
+      "target_bone": "foot_l",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-thigh_r",
+      "source_bone": "thigh_r",
+      "target_bone": "leg_up_r",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-shin_r",
+      "source_bone": "shin_r",
+      "target_bone": "leg_low_r",
+      "rotation": "interpolated",
+      "translation": "none"
+    },
+    {
+      "id": "bone-foot_r",
+      "source_bone": "foot_r",
+      "target_bone": "foot_r",
+      "rotation": "interpolated",
+      "translation": "none"
+    }
+  ],
+  "source_pose": {
+    "bone_rotations": [],
+    "root_translation": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "target_pose": {
+    "bone_rotations": [],
+    "root_translation": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "root": {
+    "source_root": "pelvis",
+    "target_root": "hips",
+    "scale": {
+      "mode": "auto"
+    },
+    "translation_alpha": 1.0,
+    "rotation_alpha": 1.0
+  },
+  "description": "The bone-to-bone retarget profile from the humanoid skeleton to the stylized one: every bone is mapped by hand to its counterpart (rotation interpolated for the body, one to one for the root) and the pelvis also carries its translation, globally scaled to the shorter character. A profile maps either by bone like this or by IK rig chain (see the IK Retargeter example), not both. The root policy scales automatically from the two hip heights."
+}

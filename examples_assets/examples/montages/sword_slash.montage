@@ -1,0 +1,76 @@
+{
+  "version": 2,
+  "id": "5ce1e7a4-0000-4000-8000-000000000001",
+  "name": "Sword Slash",
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "tracks": [
+    {
+      "id": "track-upper",
+      "slot": "UpperBody",
+      "group": "DefaultGroup",
+      "segments": [
+        {
+          "id": "seg-slash",
+          "sequence": "5ce1e7a2-0000-4000-8000-000000000006",
+          "start": 0.0,
+          "clip_start": 0.0,
+          "play_rate": 1.2,
+          "loop_count": 1
+        }
+      ],
+      "mask": {
+        "branches": [],
+        "default_weight": 0.0,
+        "profile": "UpperBody"
+      }
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-windup",
+      "name": "WindUp",
+      "start": 0.0,
+      "next": "sec-strike"
+    },
+    {
+      "id": "sec-strike",
+      "name": "Strike",
+      "start": 0.2,
+      "next": "sec-recover"
+    },
+    {
+      "id": "sec-recover",
+      "name": "Recover",
+      "start": 0.4
+    }
+  ],
+  "blend_in": {
+    "duration": 0.1,
+    "curve": "ease_out"
+  },
+  "blend_out": {
+    "duration": 0.2,
+    "curve": "ease_in_out"
+  },
+  "blend_out_time": 0.15,
+  "group": "DefaultGroup",
+  "interrupt": "replace_group",
+  "priority": 1,
+  "root_motion": "graph",
+  "notifies": [
+    {
+      "id": "5ce1e7b1-0000-4000-8000-000000000031",
+      "name": "SwordSwing",
+      "time": 0.2
+    }
+  ],
+  "notify_states": [
+    {
+      "id": "5ce1e7b4-0000-4000-8000-000000000031",
+      "name": "HitWindow",
+      "start": 0.2,
+      "end": 0.36
+    }
+  ],
+  "description": "An upper-body attack. One slot track (UpperBody) plays the slash clip at 1.2x through the Upper Body mask of the skeleton, so the legs keep walking. Three sections (WindUp, Strike, Recover) chain by id; blend in is quick, blend out starts 0.15 s before the end, and a new slash replaces a running one (interrupt replace_group). HitWindow is a notify state a script can listen for."
+}

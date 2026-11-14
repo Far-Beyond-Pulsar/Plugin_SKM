@@ -1,0 +1,249 @@
+{
+  "version": 2,
+  "id": "5ce1e7a2-0000-4000-8000-000000000005",
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "preview_mesh": "5ce1e7a1-0000-4000-8000-0000000000a1",
+  "name": "Wave",
+  "duration": 2.0,
+  "fps": 30.0,
+  "tracks": [
+    {
+      "bone_id": "upper_arm_r",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.4,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -80.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.6,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -80.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 2.0,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "lower_arm_r",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.4,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -10.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.7,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 30.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -10.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.3,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 30.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.6,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -10.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 2.0,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "notifies": [
+    {
+      "id": "5ce1e7b1-0000-4000-8000-000000000021",
+      "name": "WaveStart",
+      "time": 0.4
+    }
+  ],
+  "description": "A friendly wave that only has tracks for the right arm. A sequence does not have to key every bone: the bones it leaves out keep whatever the rest of the graph gives them, which is what makes it a good overlay (see the Upper Body mask in humanoid.skeleton and wave.montage)."
+}

@@ -30,6 +30,7 @@ pub use animation_component;
 #[cfg(feature = "editor")]
 pub use skeletal_animation_editor;
 
+mod examples;
 pub mod runtime;
 
 #[cfg(feature = "editor")]
@@ -38,6 +39,8 @@ pub mod editor;
 /// Everything the plugin registers (runtime always, editor with the `editor`
 /// feature), through the builder the kernel hands the plugin's root.
 pub fn build(p: &mut pulsar_plugins::PluginBuilder) {
+    // The plugin's `examples/` folder, read-only (`examples`).
+    p.add(examples::provider(p.origin()));
     runtime::build(p);
     #[cfg(feature = "editor")]
     editor::build(p);

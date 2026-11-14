@@ -1,0 +1,1603 @@
+{
+  "description": "Locomotion for the example humanoid: a state machine (Idle, Locomotion, Jump) driven by two parameters, then a Slot where montages (slash, wave) play on the upper body. The Locomotion state plays the 1D blend space by the Speed parameter; the transitions are small rule graphs.",
+  "id": "5ce1e7a5-0000-4000-8000-000000000001",
+  "main": {
+    "comments": [],
+    "connections": [
+      {
+        "connection_type": "Data",
+        "id": "sm.pose->slot.source",
+        "source_node": "sm",
+        "source_pin": "pose",
+        "target_node": "slot",
+        "target_pin": "source"
+      },
+      {
+        "connection_type": "Data",
+        "id": "slot.pose->output.pose",
+        "source_node": "slot",
+        "source_pin": "pose",
+        "target_node": "output",
+        "target_pin": "pose"
+      }
+    ],
+    "custom_event_defs": {},
+    "metadata": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "description": "The final pose: the locomotion state machine, then the UpperBody slot so montages can overlay the arms.",
+      "modified_at": "2026-01-01T00:00:00+00:00",
+      "name": "AnimGraph",
+      "version": "1.0.0"
+    },
+    "nodes": {
+      "output": {
+        "id": "output",
+        "inputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "pose",
+            "name": "pose",
+            "pin_type": "Input"
+          }
+        ],
+        "node_type": "anim.output_pose",
+        "outputs": [],
+        "position": {
+          "x": 520.0,
+          "y": 0.0
+        },
+        "properties": {}
+      },
+      "slot": {
+        "id": "slot",
+        "inputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "source",
+            "name": "source",
+            "pin_type": "Input"
+          }
+        ],
+        "node_type": "anim.slot",
+        "outputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "pose",
+            "name": "pose",
+            "pin_type": "Output"
+          }
+        ],
+        "position": {
+          "x": 260.0,
+          "y": 0.0
+        },
+        "properties": {
+          "always_update_source": false,
+          "group": "DefaultGroup",
+          "slot": "UpperBody"
+        }
+      },
+      "sm": {
+        "id": "sm",
+        "inputs": [],
+        "node_type": "anim.state_machine",
+        "outputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "pose",
+            "name": "pose",
+            "pin_type": "Output"
+          }
+        ],
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "properties": {
+          "machine": "machine"
+        }
+      }
+    }
+  },
+  "name": "Humanoid Locomotion",
+  "parameters": [
+    {
+      "default": 0.0,
+      "description": "Ground speed in cm/s, set by the character component each frame. 0 to 600.",
+      "id": "param-speed",
+      "name": "Speed",
+      "type": "float"
+    },
+    {
+      "default": false,
+      "description": "True while the character is in the air.",
+      "id": "param-is-falling",
+      "name": "IsFalling",
+      "type": "bool"
+    }
+  ],
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "subgraphs": [
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "entry.start->idle.default",
+            "source_node": "entry",
+            "source_pin": "start",
+            "target_node": "idle",
+            "target_pin": "default"
+          },
+          {
+            "connection_type": "Data",
+            "id": "idle.leave->t_start.from",
+            "source_node": "idle",
+            "source_pin": "leave",
+            "target_node": "t_start",
+            "target_pin": "from"
+          },
+          {
+            "connection_type": "Data",
+            "id": "loco.arrive->t_start.to",
+            "source_node": "loco",
+            "source_pin": "arrive",
+            "target_node": "t_start",
+            "target_pin": "to"
+          },
+          {
+            "connection_type": "Data",
+            "id": "loco.leave->t_stop.from",
+            "source_node": "loco",
+            "source_pin": "leave",
+            "target_node": "t_stop",
+            "target_pin": "from"
+          },
+          {
+            "connection_type": "Data",
+            "id": "idle.arrive->t_stop.to",
+            "source_node": "idle",
+            "source_pin": "arrive",
+            "target_node": "t_stop",
+            "target_pin": "to"
+          },
+          {
+            "connection_type": "Data",
+            "id": "idle.leave->t_fall_idle.from",
+            "source_node": "idle",
+            "source_pin": "leave",
+            "target_node": "t_fall_idle",
+            "target_pin": "from"
+          },
+          {
+            "connection_type": "Data",
+            "id": "jump.arrive->t_fall_idle.to",
+            "source_node": "jump",
+            "source_pin": "arrive",
+            "target_node": "t_fall_idle",
+            "target_pin": "to"
+          },
+          {
+            "connection_type": "Data",
+            "id": "loco.leave->t_fall_loco.from",
+            "source_node": "loco",
+            "source_pin": "leave",
+            "target_node": "t_fall_loco",
+            "target_pin": "from"
+          },
+          {
+            "connection_type": "Data",
+            "id": "jump.arrive->t_fall_loco.to",
+            "source_node": "jump",
+            "source_pin": "arrive",
+            "target_node": "t_fall_loco",
+            "target_pin": "to"
+          },
+          {
+            "connection_type": "Data",
+            "id": "jump.leave->t_land.from",
+            "source_node": "jump",
+            "source_pin": "leave",
+            "target_node": "t_land",
+            "target_pin": "from"
+          },
+          {
+            "connection_type": "Data",
+            "id": "idle.arrive->t_land.to",
+            "source_node": "idle",
+            "source_pin": "arrive",
+            "target_node": "t_land",
+            "target_pin": "to"
+          },
+          {
+            "connection_type": "Data",
+            "id": "jump.leave->t_unused.from",
+            "source_node": "jump",
+            "source_pin": "leave",
+            "target_node": "t_unused",
+            "target_pin": "from"
+          },
+          {
+            "connection_type": "Data",
+            "id": "loco.arrive->t_unused.to",
+            "source_node": "loco",
+            "source_pin": "arrive",
+            "target_node": "t_unused",
+            "target_pin": "to"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "Idle <-> Locomotion by Speed; either goes to Jump while IsFalling, and Jump returns when it lands.",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "machine",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "entry": {
+            "id": "entry",
+            "inputs": [],
+            "node_type": "sm.entry",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "start",
+                "name": "start",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 140.0
+            },
+            "properties": {}
+          },
+          "idle": {
+            "id": "idle",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "default",
+                "name": "default",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.state",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "leave",
+                "name": "leave",
+                "pin_type": "Output"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "arrive",
+                "name": "arrive",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 220.0,
+              "y": 0.0
+            },
+            "properties": {
+              "name": "Idle",
+              "pose_graph": "pose_idle",
+              "reset_on_entry": true
+            }
+          },
+          "jump": {
+            "id": "jump",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "default",
+                "name": "default",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.state",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "leave",
+                "name": "leave",
+                "pin_type": "Output"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "arrive",
+                "name": "arrive",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 420.0,
+              "y": 320.0
+            },
+            "properties": {
+              "name": "Jump",
+              "pose_graph": "pose_jump",
+              "reset_on_entry": true
+            }
+          },
+          "loco": {
+            "id": "loco",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "default",
+                "name": "default",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.state",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "leave",
+                "name": "leave",
+                "pin_type": "Output"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "arrive",
+                "name": "arrive",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 620.0,
+              "y": 0.0
+            },
+            "properties": {
+              "name": "Locomotion",
+              "pose_graph": "pose_locomotion",
+              "reset_on_entry": true
+            }
+          },
+          "t_fall_idle": {
+            "id": "t_fall_idle",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "from",
+                "name": "from",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "to",
+                "name": "to",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.transition",
+            "outputs": [],
+            "position": {
+              "x": 300.0,
+              "y": 200.0
+            },
+            "properties": {
+              "allow_reentry": false,
+              "curve": "ease_in_out",
+              "duration": 0.1,
+              "interrupt": "none",
+              "priority": 0,
+              "rule": "rule_fall"
+            }
+          },
+          "t_fall_loco": {
+            "id": "t_fall_loco",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "from",
+                "name": "from",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "to",
+                "name": "to",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.transition",
+            "outputs": [],
+            "position": {
+              "x": 540.0,
+              "y": 200.0
+            },
+            "properties": {
+              "allow_reentry": false,
+              "curve": "ease_in_out",
+              "duration": 0.1,
+              "interrupt": "none",
+              "priority": 0,
+              "rule": "rule_fall"
+            }
+          },
+          "t_land": {
+            "id": "t_land",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "from",
+                "name": "from",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "to",
+                "name": "to",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.transition",
+            "outputs": [],
+            "position": {
+              "x": 300.0,
+              "y": 420.0
+            },
+            "properties": {
+              "allow_reentry": false,
+              "curve": "ease_in_out",
+              "duration": 0.15,
+              "interrupt": "none",
+              "priority": 0,
+              "rule": "rule_land"
+            }
+          },
+          "t_start": {
+            "id": "t_start",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "from",
+                "name": "from",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "to",
+                "name": "to",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.transition",
+            "outputs": [],
+            "position": {
+              "x": 420.0,
+              "y": -60.0
+            },
+            "properties": {
+              "allow_reentry": false,
+              "curve": "ease_in_out",
+              "duration": 0.2,
+              "interrupt": "none",
+              "priority": 1,
+              "rule": "rule_start"
+            }
+          },
+          "t_stop": {
+            "id": "t_stop",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "from",
+                "name": "from",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "to",
+                "name": "to",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.transition",
+            "outputs": [],
+            "position": {
+              "x": 420.0,
+              "y": 60.0
+            },
+            "properties": {
+              "allow_reentry": false,
+              "curve": "ease_in_out",
+              "duration": 0.25,
+              "interrupt": "none",
+              "priority": 1,
+              "rule": "rule_stop"
+            }
+          },
+          "t_unused": {
+            "id": "t_unused",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "from",
+                "name": "from",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::StateFlow",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "to",
+                "name": "to",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "sm.transition",
+            "outputs": [],
+            "position": {
+              "x": 540.0,
+              "y": 420.0
+            },
+            "properties": {
+              "allow_reentry": false,
+              "curve": "ease_in_out",
+              "duration": 0.15,
+              "interrupt": "none",
+              "priority": 5,
+              "rule": "rule_land"
+            }
+          }
+        }
+      },
+      "id": "machine",
+      "kind": "state_machine",
+      "name": "Locomotion"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "player.pose->result.pose",
+            "source_node": "player",
+            "source_pin": "pose",
+            "target_node": "result",
+            "target_pin": "pose"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "Plays the idle clip in a loop.",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "state",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "player": {
+            "id": "player",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "play_rate",
+                "name": "play_rate",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "start_position",
+                "name": "start_position",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "anim.sequence_player",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::Pose",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "pose",
+                "name": "pose",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "looping": "loop",
+              "play_rate": 1.0,
+              "sequence": "5ce1e7a2-0000-4000-8000-000000000001",
+              "start_position": 0.0,
+              "sync_role": "auto"
+            }
+          },
+          "result": {
+            "id": "result",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::Pose",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "pose",
+                "name": "pose",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "anim.state_result",
+            "outputs": [],
+            "position": {
+              "x": 280.0,
+              "y": 0.0
+            },
+            "properties": {}
+          }
+        }
+      },
+      "id": "pose_idle",
+      "kind": "state_pose",
+      "name": "Idle pose"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "speed.value->space.x",
+            "source_node": "speed",
+            "source_pin": "value",
+            "target_node": "space",
+            "target_pin": "x"
+          },
+          {
+            "connection_type": "Data",
+            "id": "space.pose->result.pose",
+            "source_node": "space",
+            "source_pin": "pose",
+            "target_node": "result",
+            "target_pin": "pose"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "The locomotion blend space, its X input wired to the Speed parameter.",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "state",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "result": {
+            "id": "result",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::Pose",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "pose",
+                "name": "pose",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "anim.state_result",
+            "outputs": [],
+            "position": {
+              "x": 540.0,
+              "y": 0.0
+            },
+            "properties": {}
+          },
+          "space": {
+            "id": "space",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "x",
+                "name": "x",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "y",
+                "name": "y",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "anim.blend_space_player",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::Pose",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "pose",
+                "name": "pose",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 240.0,
+              "y": 0.0
+            },
+            "properties": {
+              "blend_space": "5ce1e7a3-0000-4000-8000-000000000001",
+              "looping": "inherit",
+              "play_rate": 1.0,
+              "sync_group": "locomotion",
+              "sync_role": "auto",
+              "x": 0.0,
+              "y": 0.0
+            }
+          },
+          "speed": {
+            "id": "speed",
+            "inputs": [],
+            "node_type": "anim.get_parameter",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "value",
+                "name": "value",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "parameter": "Speed"
+            }
+          }
+        }
+      },
+      "id": "pose_locomotion",
+      "kind": "state_pose",
+      "name": "Locomotion pose"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "player.pose->result.pose",
+            "source_node": "player",
+            "source_pin": "pose",
+            "target_node": "result",
+            "target_pin": "pose"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "Plays the jump once; the transition out waits for IsFalling to go false.",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "state",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "player": {
+            "id": "player",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "play_rate",
+                "name": "play_rate",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "start_position",
+                "name": "start_position",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "anim.sequence_player",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::Pose",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "pose",
+                "name": "pose",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "looping": "once",
+              "play_rate": 1.0,
+              "sequence": "5ce1e7a2-0000-4000-8000-000000000004",
+              "start_position": 0.0,
+              "sync_role": "auto"
+            }
+          },
+          "result": {
+            "id": "result",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "anim::Pose",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "pose",
+                "name": "pose",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "anim.state_result",
+            "outputs": [],
+            "position": {
+              "x": 280.0,
+              "y": 0.0
+            },
+            "properties": {}
+          }
+        }
+      },
+      "id": "pose_jump",
+      "kind": "state_pose",
+      "name": "Jump pose"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "speed.value->cmp.a",
+            "source_node": "speed",
+            "source_pin": "value",
+            "target_node": "cmp",
+            "target_pin": "a"
+          },
+          {
+            "connection_type": "Data",
+            "id": "cmp.result->res.can_enter",
+            "source_node": "cmp",
+            "source_pin": "result",
+            "target_node": "res",
+            "target_pin": "can_enter"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "True once the character moves faster than 5 cm/s.",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "rule",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "cmp": {
+            "id": "cmp",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "a",
+                "name": "a",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "b",
+                "name": "b",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "math.compare",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "result",
+                "name": "result",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 230.0,
+              "y": 0.0
+            },
+            "properties": {
+              "b": 5.0,
+              "op": "gt",
+              "tolerance": 0.0001
+            }
+          },
+          "res": {
+            "id": "res",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "can_enter",
+                "name": "can_enter",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "rule.result",
+            "outputs": [],
+            "position": {
+              "x": 480.0,
+              "y": 0.0
+            },
+            "properties": {}
+          },
+          "speed": {
+            "id": "speed",
+            "inputs": [],
+            "node_type": "anim.get_parameter",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "value",
+                "name": "value",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "parameter": "Speed"
+            }
+          }
+        }
+      },
+      "id": "rule_start",
+      "kind": "transition_rule",
+      "name": "Speed above 5"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "speed.value->cmp.a",
+            "source_node": "speed",
+            "source_pin": "value",
+            "target_node": "cmp",
+            "target_pin": "a"
+          },
+          {
+            "connection_type": "Data",
+            "id": "cmp.result->res.can_enter",
+            "source_node": "cmp",
+            "source_pin": "result",
+            "target_node": "res",
+            "target_pin": "can_enter"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "True once the character is practically still.",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "rule",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "cmp": {
+            "id": "cmp",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "a",
+                "name": "a",
+                "pin_type": "Input"
+              },
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "b",
+                "name": "b",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "math.compare",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "result",
+                "name": "result",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 230.0,
+              "y": 0.0
+            },
+            "properties": {
+              "b": 5.0,
+              "op": "le",
+              "tolerance": 0.0001
+            }
+          },
+          "res": {
+            "id": "res",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "can_enter",
+                "name": "can_enter",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "rule.result",
+            "outputs": [],
+            "position": {
+              "x": 480.0,
+              "y": 0.0
+            },
+            "properties": {}
+          },
+          "speed": {
+            "id": "speed",
+            "inputs": [],
+            "node_type": "anim.get_parameter",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "f32",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "value",
+                "name": "value",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "parameter": "Speed"
+            }
+          }
+        }
+      },
+      "id": "rule_stop",
+      "kind": "transition_rule",
+      "name": "Speed at most 5"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "falling.value->res.can_enter",
+            "source_node": "falling",
+            "source_pin": "value",
+            "target_node": "res",
+            "target_pin": "can_enter"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "True while IsFalling is set.",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "rule",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "falling": {
+            "id": "falling",
+            "inputs": [],
+            "node_type": "anim.get_parameter",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "value",
+                "name": "value",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "parameter": "IsFalling"
+            }
+          },
+          "res": {
+            "id": "res",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "can_enter",
+                "name": "can_enter",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "rule.result",
+            "outputs": [],
+            "position": {
+              "x": 260.0,
+              "y": 0.0
+            },
+            "properties": {}
+          }
+        }
+      },
+      "id": "rule_fall",
+      "kind": "transition_rule",
+      "name": "Falling"
+    },
+    {
+      "graph": {
+        "comments": [],
+        "connections": [
+          {
+            "connection_type": "Data",
+            "id": "falling.value->not.value",
+            "source_node": "falling",
+            "source_pin": "value",
+            "target_node": "not",
+            "target_pin": "value"
+          },
+          {
+            "connection_type": "Data",
+            "id": "not.result->res.can_enter",
+            "source_node": "not",
+            "source_pin": "result",
+            "target_node": "res",
+            "target_pin": "can_enter"
+          }
+        ],
+        "custom_event_defs": {},
+        "metadata": {
+          "created_at": "2026-01-01T00:00:00+00:00",
+          "description": "True when IsFalling is cleared.",
+          "modified_at": "2026-01-01T00:00:00+00:00",
+          "name": "rule",
+          "version": "1.0.0"
+        },
+        "nodes": {
+          "falling": {
+            "id": "falling",
+            "inputs": [],
+            "node_type": "anim.get_parameter",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "value",
+                "name": "value",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "properties": {
+              "parameter": "IsFalling"
+            }
+          },
+          "not": {
+            "id": "not",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "value",
+                "name": "value",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "logic.not",
+            "outputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "result",
+                "name": "result",
+                "pin_type": "Output"
+              }
+            ],
+            "position": {
+              "x": 230.0,
+              "y": 0.0
+            },
+            "properties": {}
+          },
+          "res": {
+            "id": "res",
+            "inputs": [
+              {
+                "connected_to": [],
+                "data_type": {
+                  "Data": {
+                    "base_type": "bool",
+                    "is_wildcard": false,
+                    "wrappers": []
+                  }
+                },
+                "id": "can_enter",
+                "name": "can_enter",
+                "pin_type": "Input"
+              }
+            ],
+            "node_type": "rule.result",
+            "outputs": [],
+            "position": {
+              "x": 440.0,
+              "y": 0.0
+            },
+            "properties": {}
+          }
+        }
+      },
+      "id": "rule_land",
+      "kind": "transition_rule",
+      "name": "Landed"
+    }
+  ],
+  "version": 2
+}

@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "id": "5ce1e7a9-0000-4000-8000-000000000001",
+  "name": "Humanoid Locomotion DB",
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "sources": [
+    {
+      "id": "src-idle",
+      "type": "sequence",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000001",
+      "enabled": true,
+      "mirrored": false,
+      "looping": true,
+      "cost_bias": 0.5
+    },
+    {
+      "id": "src-walk",
+      "type": "sequence",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000002",
+      "enabled": true,
+      "mirrored": false,
+      "looping": true,
+      "cost_bias": 0.0
+    },
+    {
+      "id": "src-walk-mirrored",
+      "type": "sequence",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000002",
+      "enabled": true,
+      "mirrored": true,
+      "looping": true,
+      "cost_bias": 0.0
+    },
+    {
+      "id": "src-run",
+      "type": "sequence",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000003",
+      "enabled": true,
+      "mirrored": false,
+      "looping": true,
+      "exclusions": [
+        {
+          "start": 0.0,
+          "end": 0.05
+        }
+      ],
+      "cost_bias": 0.0
+    },
+    {
+      "id": "src-loco",
+      "type": "blend_space",
+      "blend_space": "5ce1e7a3-0000-4000-8000-000000000001",
+      "enabled": false,
+      "mirrored": false,
+      "looping": false,
+      "cost_bias": 1.0
+    }
+  ],
+  "channels": [
+    {
+      "id": "ch-foot-l",
+      "name": "FootLPosition",
+      "weight": 1.0,
+      "normalization": "standardize",
+      "type": "bone_position",
+      "bone": "foot_l"
+    },
+    {
+      "id": "ch-foot-r",
+      "name": "FootRPosition",
+      "weight": 1.0,
+      "normalization": "standardize",
+      "type": "bone_position",
+      "bone": "foot_r"
+    },
+    {
+      "id": "ch-foot-l-vel",
+      "name": "FootLVelocity",
+      "weight": 0.6,
+      "normalization": "standardize",
+      "type": "bone_velocity",
+      "bone": "foot_l"
+    },
+    {
+      "id": "ch-foot-r-vel",
+      "name": "FootRVelocity",
+      "weight": 0.6,
+      "normalization": "standardize",
+      "type": "bone_velocity",
+      "bone": "foot_r"
+    },
+    {
+      "id": "ch-pelvis-vel",
+      "name": "PelvisVelocity",
+      "weight": 1.5,
+      "normalization": "standardize",
+      "type": "bone_velocity",
+      "bone": "pelvis"
+    },
+    {
+      "id": "ch-traj",
+      "name": "Trajectory",
+      "weight": 2.0,
+      "normalization": "standardize",
+      "type": "trajectory",
+      "offsets": [
+        -0.2,
+        0.2,
+        0.5
+      ],
+      "position": true,
+      "facing": true,
+      "velocity": true
+    },
+    {
+      "id": "ch-phase",
+      "name": "Phase",
+      "weight": 0.25,
+      "normalization": "none",
+      "type": "phase"
+    }
+  ],
+  "sampling": {
+    "interval": 0.033333335,
+    "end_margin": 0.1
+  },
+  "search": {
+    "candidate_count": 2,
+    "continuing_pose_bias": 0.1,
+    "blend_time": 0.2,
+    "query_history": 64
+  },
+  "description": "A pose search (motion matching) database over the locomotion clips: idle, walk and run, plus the locomotion blend space (disabled here, to show a source that stays listed but unindexed). It matches on both feet's position and velocity, the pelvis velocity, and the character's trajectory 0.2 s back and 0.2 and 0.5 s ahead; the cycle phase breaks ties. The index is built from this file and kept in the project's cache, never next to the source."
+}

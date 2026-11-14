@@ -1,0 +1,45 @@
+{
+  "version": 2,
+  "id": "5ce1e7a3-0000-4000-8000-000000000001",
+  "name": "Humanoid Locomotion",
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "x_axis": {
+    "name": "Speed",
+    "min": 0.0,
+    "max": 600.0,
+    "grid_divisions": 4,
+    "edge": "clamp",
+    "smoothing_time": 0.15
+  },
+  "samples": [
+    {
+      "id": "s-idle",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000001",
+      "x": 0.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    },
+    {
+      "id": "s-walk",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000002",
+      "x": 150.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    },
+    {
+      "id": "s-run",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000003",
+      "x": 450.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    }
+  ],
+  "sync": {
+    "mode": "phase",
+    "leader": "s-walk"
+  },
+  "description": "A 1D blend space on Speed (cm/s): idle at rest, walk at 150, run at 450. Phase sync keeps the walk and run foot cycles aligned while they blend, so the feet do not slide past each other."
+}

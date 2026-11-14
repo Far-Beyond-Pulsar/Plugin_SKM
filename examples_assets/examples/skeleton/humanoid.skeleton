@@ -1,0 +1,596 @@
+{
+  "version": 1,
+  "id": "5ce1e7a0-0000-4000-8000-000000000001",
+  "bones": [
+    {
+      "id": "root",
+      "name": "Root",
+      "parent": null,
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "pelvis",
+      "name": "Pelvis",
+      "parent": "root",
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 0.95,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "spine",
+      "name": "Spine",
+      "parent": "pelvis",
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 0.12,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "neck",
+      "name": "Neck",
+      "parent": "spine",
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 0.38,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "head",
+      "name": "Head",
+      "parent": "neck",
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 0.12,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "clavicle_l",
+      "name": "Clavicle L",
+      "parent": "spine",
+      "bind_transform": {
+        "translation": {
+          "x": 0.07,
+          "y": 0.3,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "upper_arm_l",
+      "name": "Upper Arm L",
+      "parent": "clavicle_l",
+      "bind_transform": {
+        "translation": {
+          "x": 0.12,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "lower_arm_l",
+      "name": "Lower Arm L",
+      "parent": "upper_arm_l",
+      "bind_transform": {
+        "translation": {
+          "x": 0.28,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "hand_l",
+      "name": "Hand L",
+      "parent": "lower_arm_l",
+      "bind_transform": {
+        "translation": {
+          "x": 0.26,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "clavicle_r",
+      "name": "Clavicle R",
+      "parent": "spine",
+      "bind_transform": {
+        "translation": {
+          "x": -0.07,
+          "y": 0.3,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "upper_arm_r",
+      "name": "Upper Arm R",
+      "parent": "clavicle_r",
+      "bind_transform": {
+        "translation": {
+          "x": -0.12,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "lower_arm_r",
+      "name": "Lower Arm R",
+      "parent": "upper_arm_r",
+      "bind_transform": {
+        "translation": {
+          "x": -0.28,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "hand_r",
+      "name": "Hand R",
+      "parent": "lower_arm_r",
+      "bind_transform": {
+        "translation": {
+          "x": -0.26,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "thigh_l",
+      "name": "Thigh L",
+      "parent": "pelvis",
+      "bind_transform": {
+        "translation": {
+          "x": 0.09,
+          "y": -0.05,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "shin_l",
+      "name": "Shin L",
+      "parent": "thigh_l",
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": -0.43,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "foot_l",
+      "name": "Foot L",
+      "parent": "shin_l",
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": -0.42,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "toe_l",
+      "name": "Toe L",
+      "parent": "foot_l",
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": -0.05,
+          "z": 0.14
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "thigh_r",
+      "name": "Thigh R",
+      "parent": "pelvis",
+      "bind_transform": {
+        "translation": {
+          "x": -0.09,
+          "y": -0.05,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "shin_r",
+      "name": "Shin R",
+      "parent": "thigh_r",
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": -0.43,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "foot_r",
+      "name": "Foot R",
+      "parent": "shin_r",
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": -0.42,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "toe_r",
+      "name": "Toe R",
+      "parent": "foot_r",
+      "bind_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": -0.05,
+          "z": 0.14
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    }
+  ],
+  "preview_mesh": "5ce1e7a1-0000-4000-8000-0000000000a1",
+  "sockets": [
+    {
+      "id": "socket-weapon",
+      "name": "WeaponGrip",
+      "bone_id": "hand_r",
+      "local_transform": {
+        "translation": {
+          "x": 0.05,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 90.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "socket-hat",
+      "name": "HatTop",
+      "bone_id": "head",
+      "local_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 0.2,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    },
+    {
+      "id": "socket-back",
+      "name": "BackHolster",
+      "bone_id": "spine",
+      "local_transform": {
+        "translation": {
+          "x": 0.0,
+          "y": 0.1,
+          "z": -0.12
+        },
+        "rotation": {
+          "x": 90.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        }
+      }
+    }
+  ],
+  "masks": [
+    {
+      "name": "UpperBody",
+      "spec": {
+        "branches": [
+          {
+            "bone": "spine",
+            "weight": 1.0
+          }
+        ],
+        "default_weight": 0.0
+      }
+    },
+    {
+      "name": "RightArm",
+      "spec": {
+        "branches": [
+          {
+            "bone": "clavicle_r",
+            "weight": 1.0
+          }
+        ],
+        "default_weight": 0.0
+      }
+    },
+    {
+      "name": "LowerBody",
+      "spec": {
+        "branches": [
+          {
+            "bone": "thigh_l",
+            "weight": 1.0
+          },
+          {
+            "bone": "thigh_r",
+            "weight": 1.0
+          }
+        ],
+        "default_weight": 0.0
+      }
+    },
+    {
+      "name": "HeadSoft",
+      "spec": {
+        "branches": [
+          {
+            "bone": "neck",
+            "depth": 0,
+            "weight": 0.5
+          },
+          {
+            "bone": "head",
+            "weight": 1.0
+          }
+        ],
+        "default_weight": 0.0
+      }
+    }
+  ]
+}

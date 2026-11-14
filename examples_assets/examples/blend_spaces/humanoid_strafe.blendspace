@@ -1,0 +1,97 @@
+{
+  "version": 2,
+  "id": "5ce1e7a3-0000-4000-8000-000000000002",
+  "name": "Humanoid Strafe",
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "x_axis": {
+    "name": "Direction",
+    "min": -180.0,
+    "max": 180.0,
+    "grid_divisions": 4,
+    "edge": "wrap",
+    "smoothing_time": 0.1
+  },
+  "y_axis": {
+    "name": "Speed",
+    "min": 0.0,
+    "max": 600.0,
+    "grid_divisions": 4,
+    "edge": "clamp",
+    "smoothing_time": 0.1
+  },
+  "samples": [
+    {
+      "id": "idle",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000001",
+      "x": 0.0,
+      "y": 0.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    },
+    {
+      "id": "walk-fwd",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000002",
+      "x": 0.0,
+      "y": 150.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    },
+    {
+      "id": "walk-left",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000002",
+      "x": -90.0,
+      "y": 150.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    },
+    {
+      "id": "walk-right",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000002",
+      "x": 90.0,
+      "y": 150.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    },
+    {
+      "id": "walk-back",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000002",
+      "x": 180.0,
+      "y": 150.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    },
+    {
+      "id": "run-fwd",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000003",
+      "x": 0.0,
+      "y": 450.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    },
+    {
+      "id": "run-left",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000003",
+      "x": -90.0,
+      "y": 450.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    },
+    {
+      "id": "run-right",
+      "sequence": "5ce1e7a2-0000-4000-8000-000000000003",
+      "x": 90.0,
+      "y": 450.0,
+      "play_rate": 1.0,
+      "looping": "loop",
+      "phase_offset": 0.0
+    }
+  ],
+  "description": "A 2D blend space: X is the movement direction relative to where the character faces (-180 to 180 degrees, wrapping at the back), Y is speed. Only the walk and run clips exist, so strafing reuses them at the sides and the backwards case is the plain walk again. A real project would have strafe and backwards clips here."
+}

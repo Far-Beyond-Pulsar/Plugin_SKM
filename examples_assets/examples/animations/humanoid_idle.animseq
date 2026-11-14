@@ -1,0 +1,1122 @@
+{
+  "version": 1,
+  "id": "5ce1e7a2-0000-4000-8000-000000000001",
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "preview_mesh": "5ce1e7a1-0000-4000-8000-0000000000a1",
+  "name": "Idle",
+  "duration": 2.0,
+  "fps": 30.0,
+  "tracks": [
+    {
+      "bone_id": "spine",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.25,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 1.061,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 1.5,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.75,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 1.061,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.25,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -1.061,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.5,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -1.5,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.75,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -1.061,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 2.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "head",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.25,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -0.566,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -0.8,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.75,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -0.566,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.25,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.566,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.5,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.8,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.75,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.566,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 2.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.12,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "upper_arm_l",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 1.5,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.25,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 1.061,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": -0.0,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.75,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": -1.061,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": -1.5,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.25,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": -1.061,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.5,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.75,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 1.061,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 2.0,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 1.5,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "upper_arm_r",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 1.5,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.25,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 1.061,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": -0.0,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.75,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": -1.061,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": -1.5,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.25,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": -1.061,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.5,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.75,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 1.061,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 2.0,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 1.5,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "lower_arm_l",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": 0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -8.9
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.25,
+          "transform": {
+            "translation": {
+              "x": 0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -8.768
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": 0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -8.45
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.75,
+          "transform": {
+            "translation": {
+              "x": 0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -8.132
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": 0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -8.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.25,
+          "transform": {
+            "translation": {
+              "x": 0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -8.132
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.5,
+          "transform": {
+            "translation": {
+              "x": 0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -8.45
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.75,
+          "transform": {
+            "translation": {
+              "x": 0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -8.768
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 2.0,
+          "transform": {
+            "translation": {
+              "x": 0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -8.9
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "lower_arm_r",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.25,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.132
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.45
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.75,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.768
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.9
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.25,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.768
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.5,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.45
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.75,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.132
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 2.0,
+          "transform": {
+            "translation": {
+              "x": -0.28,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 8.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "description": "A looping idle: the chest breathes (the spine rocks 1.5 degrees over 2 seconds) and the arms hang at the sides, so the pose stays alive without moving the feet. Keys are local transforms: each key holds the bone's whole local transform, so the translation of every track starts at the bone's bind translation."
+}

@@ -1,0 +1,350 @@
+{
+  "description": "A graph without a state machine: the locomotion blend space is the base pose and the wave clip is layered over it through the Upper Body mask of humanoid.skeleton, by the WaveAmount parameter (0 none, 1 full). The Pose Search node is the alternative: a motion matching database in place of the blend space.",
+  "id": "5ce1e7a5-0000-4000-8000-000000000002",
+  "main": {
+    "comments": [],
+    "connections": [
+      {
+        "connection_type": "Data",
+        "id": "speed.value->base.x",
+        "source_node": "speed",
+        "source_pin": "value",
+        "target_node": "base",
+        "target_pin": "x"
+      },
+      {
+        "connection_type": "Data",
+        "id": "base.pose->layered.base",
+        "source_node": "base",
+        "source_pin": "pose",
+        "target_node": "layered",
+        "target_pin": "base"
+      },
+      {
+        "connection_type": "Data",
+        "id": "wave_clip.pose->layered.layer_0",
+        "source_node": "wave_clip",
+        "source_pin": "pose",
+        "target_node": "layered",
+        "target_pin": "layer_0"
+      },
+      {
+        "connection_type": "Data",
+        "id": "amount.value->layered.layer_weight_0",
+        "source_node": "amount",
+        "source_pin": "value",
+        "target_node": "layered",
+        "target_pin": "layer_weight_0"
+      },
+      {
+        "connection_type": "Data",
+        "id": "layered.pose->output.pose",
+        "source_node": "layered",
+        "source_pin": "pose",
+        "target_node": "output",
+        "target_pin": "pose"
+      }
+    ],
+    "custom_event_defs": {},
+    "metadata": {
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "description": "Base locomotion plus a masked upper-body wave.",
+      "modified_at": "2026-01-01T00:00:00+00:00",
+      "name": "AnimGraph",
+      "version": "1.0.0"
+    },
+    "nodes": {
+      "amount": {
+        "id": "amount",
+        "inputs": [],
+        "node_type": "anim.get_parameter",
+        "outputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "f32",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "value",
+            "name": "value",
+            "pin_type": "Output"
+          }
+        ],
+        "position": {
+          "x": 240.0,
+          "y": 380.0
+        },
+        "properties": {
+          "parameter": "WaveAmount"
+        }
+      },
+      "base": {
+        "id": "base",
+        "inputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "f32",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "x",
+            "name": "x",
+            "pin_type": "Input"
+          },
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "f32",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "y",
+            "name": "y",
+            "pin_type": "Input"
+          }
+        ],
+        "node_type": "anim.blend_space_player",
+        "outputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "pose",
+            "name": "pose",
+            "pin_type": "Output"
+          }
+        ],
+        "position": {
+          "x": 240.0,
+          "y": 0.0
+        },
+        "properties": {
+          "blend_space": "5ce1e7a3-0000-4000-8000-000000000001",
+          "looping": "inherit",
+          "play_rate": 1.0,
+          "sync_group": "locomotion",
+          "sync_role": "auto",
+          "x": 0.0,
+          "y": 0.0
+        }
+      },
+      "layered": {
+        "id": "layered",
+        "inputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "base",
+            "name": "base",
+            "pin_type": "Input"
+          },
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "layer_0",
+            "name": "layer_0",
+            "pin_type": "Input"
+          },
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "f32",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "layer_weight_0",
+            "name": "layer_weight_0",
+            "pin_type": "Input"
+          }
+        ],
+        "node_type": "anim.layered_blend_per_bone",
+        "outputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "pose",
+            "name": "pose",
+            "pin_type": "Output"
+          }
+        ],
+        "position": {
+          "x": 560.0,
+          "y": 100.0
+        },
+        "properties": {
+          "count": 1,
+          "curve_blend": "base",
+          "masks": [
+            {
+              "profile": "UpperBody"
+            }
+          ],
+          "mesh_space_rotation": false,
+          "root_motion_from": "base"
+        }
+      },
+      "output": {
+        "id": "output",
+        "inputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "pose",
+            "name": "pose",
+            "pin_type": "Input"
+          }
+        ],
+        "node_type": "anim.output_pose",
+        "outputs": [],
+        "position": {
+          "x": 860.0,
+          "y": 100.0
+        },
+        "properties": {}
+      },
+      "speed": {
+        "id": "speed",
+        "inputs": [],
+        "node_type": "anim.get_parameter",
+        "outputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "f32",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "value",
+            "name": "value",
+            "pin_type": "Output"
+          }
+        ],
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "properties": {
+          "parameter": "Speed"
+        }
+      },
+      "wave_clip": {
+        "id": "wave_clip",
+        "inputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "f32",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "play_rate",
+            "name": "play_rate",
+            "pin_type": "Input"
+          },
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "f32",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "start_position",
+            "name": "start_position",
+            "pin_type": "Input"
+          }
+        ],
+        "node_type": "anim.sequence_player",
+        "outputs": [
+          {
+            "connected_to": [],
+            "data_type": {
+              "Data": {
+                "base_type": "anim::Pose",
+                "is_wildcard": false,
+                "wrappers": []
+              }
+            },
+            "id": "pose",
+            "name": "pose",
+            "pin_type": "Output"
+          }
+        ],
+        "position": {
+          "x": 240.0,
+          "y": 200.0
+        },
+        "properties": {
+          "looping": "loop",
+          "play_rate": 1.0,
+          "sequence": "5ce1e7a2-0000-4000-8000-000000000005",
+          "start_position": 0.0,
+          "sync_role": "auto"
+        }
+      }
+    }
+  },
+  "name": "Humanoid Upper Body Layer",
+  "parameters": [
+    {
+      "default": 0.0,
+      "id": "param-speed",
+      "name": "Speed",
+      "type": "float"
+    },
+    {
+      "default": 0.0,
+      "description": "How strongly the wave overlay is applied.",
+      "id": "param-wave",
+      "name": "WaveAmount",
+      "type": "float"
+    }
+  ],
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "subgraphs": [],
+  "version": 2
+}

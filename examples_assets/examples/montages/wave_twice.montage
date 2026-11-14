@@ -1,0 +1,54 @@
+{
+  "version": 2,
+  "id": "5ce1e7a4-0000-4000-8000-000000000002",
+  "name": "Wave Twice",
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "tracks": [
+    {
+      "id": "track-arm",
+      "slot": "UpperBody",
+      "group": "DefaultGroup",
+      "segments": [
+        {
+          "id": "seg-wave",
+          "sequence": "5ce1e7a2-0000-4000-8000-000000000005",
+          "start": 0.0,
+          "clip_start": 0.0,
+          "clip_end": 1.5,
+          "play_rate": 1.0,
+          "loop_count": 2
+        }
+      ],
+      "mask": {
+        "branches": [
+          {
+            "bone": "clavicle_r",
+            "weight": 1.0
+          }
+        ],
+        "default_weight": 0.0
+      }
+    }
+  ],
+  "sections": [
+    {
+      "id": "sec-wave",
+      "name": "Wave",
+      "start": 0.0
+    }
+  ],
+  "blend_in": {
+    "duration": 0.25,
+    "curve": "ease_in_out"
+  },
+  "blend_out": {
+    "duration": 0.3,
+    "curve": "linear"
+  },
+  "blend_out_time": 0.3,
+  "group": "DefaultGroup",
+  "interrupt": "overlap",
+  "priority": 0,
+  "root_motion": "ignore",
+  "description": "A greeting that plays the wave clip's first 1.5 seconds twice (loop_count 2) over an inline mask (the right arm, as branches rather than a skeleton profile). It plays alongside others (interrupt overlap), blends out early at 0.3 s from the end, and leaves root motion to the graph."
+}

@@ -1,0 +1,799 @@
+{
+  "version": 4,
+  "id": "5ce1e7a2-0000-4000-8000-000000000004",
+  "skeleton": "5ce1e7a0-0000-4000-8000-000000000001",
+  "preview_mesh": "5ce1e7a1-0000-4000-8000-0000000000a1",
+  "name": "Jump",
+  "duration": 1.0,
+  "fps": 30.0,
+  "tracks": [
+    {
+      "bone_id": "pelvis",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.95,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.15,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.8,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 10.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 1.35,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -5.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.85,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.82,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 8.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": 0.95,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "thigh_l",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": 0.09,
+              "y": -0.05,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.15,
+          "transform": {
+            "translation": {
+              "x": 0.09,
+              "y": -0.05,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -50.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": 0.09,
+              "y": -0.05,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -20.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.85,
+          "transform": {
+            "translation": {
+              "x": 0.09,
+              "y": -0.05,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -55.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": 0.09,
+              "y": -0.05,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "shin_l",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": -0.43,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.15,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": -0.43,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -80.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": -0.43,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -35.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.85,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": -0.43,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -85.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": -0.43,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "thigh_r",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": -0.09,
+              "y": -0.05,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.15,
+          "transform": {
+            "translation": {
+              "x": -0.09,
+              "y": -0.05,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -50.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": -0.09,
+              "y": -0.05,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -20.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.85,
+          "transform": {
+            "translation": {
+              "x": -0.09,
+              "y": -0.05,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -55.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": -0.09,
+              "y": -0.05,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "shin_r",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": -0.43,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.15,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": -0.43,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -80.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": -0.43,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -35.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.85,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": -0.43,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": -85.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": 0.0,
+              "y": -0.43,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "upper_arm_l",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.15,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": -20.0,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 10.0,
+              "z": -35.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": 0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "bone_id": "upper_arm_r",
+      "keyframes": [
+        {
+          "time": 0.0,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.15,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 20.0,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 0.5,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": -10.0,
+              "z": 35.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        },
+        {
+          "time": 1.0,
+          "transform": {
+            "translation": {
+              "x": -0.12,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "rotation": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 75.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "notifies": [
+    {
+      "id": "5ce1e7b1-0000-4000-8000-000000000011",
+      "name": "Launch",
+      "time": 0.15,
+      "fields": [
+        {
+          "name": "cue",
+          "type": "string",
+          "value": "jump_launch"
+        }
+      ],
+      "schema": "5ce1e7b0-0000-4000-8000-000000000002"
+    },
+    {
+      "id": "5ce1e7b1-0000-4000-8000-000000000012",
+      "name": "Land",
+      "time": 0.85,
+      "fields": [
+        {
+          "name": "cue",
+          "type": "string",
+          "value": "jump_land"
+        },
+        {
+          "name": "volume",
+          "type": "float",
+          "value": 1.2
+        }
+      ],
+      "schema": "5ce1e7b0-0000-4000-8000-000000000002"
+    }
+  ],
+  "notify_states": [
+    {
+      "id": "5ce1e7b4-0000-4000-8000-000000000001",
+      "name": "Airborne",
+      "start": 0.2,
+      "end": 0.8,
+      "tick_interval": 0.1
+    }
+  ],
+  "notify_schemas": [
+    {
+      "id": "5ce1e7b0-0000-4000-8000-000000000002",
+      "name": "SoundCue",
+      "fields": [
+        {
+          "name": "cue",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "volume",
+          "type": "float",
+          "default": {
+            "type": "float",
+            "value": 1.0
+          }
+        }
+      ]
+    }
+  ],
+  "curves": [
+    {
+      "id": "5ce1e7b2-0000-4000-8000-000000000002",
+      "name": "JumpHeight",
+      "data": {
+        "kind": "Float",
+        "keys": [
+          {
+            "id": "5ce1e7b3-0000-4000-8000-000000000011",
+            "time": 0.15,
+            "value": 0.0,
+            "interpolation": "Linear"
+          },
+          {
+            "id": "5ce1e7b3-0000-4000-8000-000000000012",
+            "time": 0.5,
+            "value": 0.4,
+            "interpolation": "Linear"
+          },
+          {
+            "id": "5ce1e7b3-0000-4000-8000-000000000013",
+            "time": 0.85,
+            "value": 0.0,
+            "interpolation": "Linear"
+          }
+        ]
+      }
+    }
+  ],
+  "description": "A one-shot jump: crouch, launch, airtime, land. Launch and Land are instant notifies; Airborne is a notify state (begin, tick every 0.1 s, end) covering the time off the ground; JumpHeight is a float curve a graph can read. It does not loop, so play it with looping set to once."
+}
