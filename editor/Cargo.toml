@@ -19,7 +19,7 @@ plugin_manager = { workspace = true }
 gpui-ce = { workspace = true }
 ui      = { workspace = true }
 
-plugin_editor_api = { workspace = true }
+plugin_editor_api = { workspace = true, features = ["editor"] }
 skeletal_assets   = { workspace = true }
 ui_common         = { workspace = true }
 engine_fs         = { workspace = true }
