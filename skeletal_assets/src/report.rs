@@ -26,7 +26,9 @@ use pulsar_reflection::{
 
 fn load_skeleton(source: &dyn AssetSource, id: &str) -> Option<Skeleton> {
     match source.read(SkeletonAssetKind::KIND, id) {
-        Lookup::Found(bytes) => SkeletonAsset::parse(std::str::from_utf8(&bytes).ok()?).ok().map(|a| a.skeleton()),
+        Lookup::Found(bytes) => SkeletonAsset::parse(std::str::from_utf8(&bytes).ok()?)
+            .ok()
+            .map(|a| a.skeleton()),
         _ => None,
     }
 }
@@ -40,19 +42,27 @@ fn load_rig(source: &dyn AssetSource, id: &str) -> Option<IkRigAsset> {
 
 fn sequence_duration(source: &dyn AssetSource, id: &str) -> Option<f32> {
     match source.read(AnimationSequenceAssetKind::KIND, id) {
-        Lookup::Found(bytes) => AnimSeqAsset::parse(std::str::from_utf8(&bytes).ok()?).ok().map(|a| a.clip.duration),
+        Lookup::Found(bytes) => AnimSeqAsset::parse(std::str::from_utf8(&bytes).ok()?)
+            .ok()
+            .map(|a| a.clip.duration),
         _ => None,
     }
 }
 
-fn skeleton_asset_of(source: &dyn AssetSource, reference: &Option<AssetRef<SkeletonAssetKind>>) -> Option<SkeletonAsset> {
+fn skeleton_asset_of(
+    source: &dyn AssetSource,
+    reference: &Option<AssetRef<SkeletonAssetKind>>,
+) -> Option<SkeletonAsset> {
     match source.read(SkeletonAssetKind::KIND, reference.as_ref()?.as_str()) {
         Lookup::Found(bytes) => SkeletonAsset::parse(std::str::from_utf8(&bytes).ok()?).ok(),
         _ => None,
     }
 }
 
-fn skeleton_of(source: &dyn AssetSource, reference: &Option<AssetRef<SkeletonAssetKind>>) -> Option<Skeleton> {
+fn skeleton_of(
+    source: &dyn AssetSource,
+    reference: &Option<AssetRef<SkeletonAssetKind>>,
+) -> Option<Skeleton> {
     load_skeleton(source, reference.as_ref()?.as_str())
 }
 
@@ -60,7 +70,10 @@ fn skeleton_of(source: &dyn AssetSource, reference: &Option<AssetRef<SkeletonAss
 pub fn asset_report(source: &dyn AssetSource, kind: &str, bytes: &[u8]) -> Vec<Diagnostic> {
     let extracted = match extract(kind, bytes) {
         Ok(e) => e,
-        Err(message) => return vec![Diagnostic::error("asset.unreadable", message).repair("Fix or replace the file; it cannot be read with its format")],
+        Err(message) => {
+            return vec![Diagnostic::error("asset.unreadable", message)
+                .repair("Fix or replace the file; it cannot be read with its format")]
+        }
     };
     let text = std::str::from_utf8(bytes).unwrap_or_default();
     let mut out = own_diagnostics(source, kind, text, bytes);
@@ -68,7 +81,12 @@ pub fn asset_report(source: &dyn AssetSource, kind: &str, bytes: &[u8]) -> Vec<D
     out
 }
 
-fn own_diagnostics(source: &dyn AssetSource, kind: &str, text: &str, bytes: &[u8]) -> Vec<Diagnostic> {
+fn own_diagnostics(
+    source: &dyn AssetSource,
+    kind: &str,
+    text: &str,
+    bytes: &[u8],
+) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     match kind {
         k if k == SkeletonAssetKind::KIND => {
@@ -80,7 +98,10 @@ fn own_diagnostics(source: &dyn AssetSource, kind: &str, text: &str, bytes: &[u8
         }
         k if k == AnimationSequenceAssetKind::KIND => {
             if let Ok(a) = AnimSeqAsset::parse(text) {
-                let skeleton = a.skeleton.as_ref().and_then(|s| load_skeleton(source, s.as_str()));
+                let skeleton = a
+                    .skeleton
+                    .as_ref()
+                    .and_then(|s| load_skeleton(source, s.as_str()));
                 if let Some(skeleton) = skeleton {
                     for track in &a.clip.tracks {
                         if skeleton.bone(&track.bone_id).is_none() {
@@ -99,7 +120,10 @@ fn own_diagnostics(source: &dyn AssetSource, kind: &str, text: &str, bytes: &[u8
             if let Ok(a) = BlendSpaceAsset::parse(text) {
                 out.extend(a.diagnostics());
                 if a.skeleton.is_none() {
-                    out.push(Diagnostic::warning("blendspace.no_skeleton", "No skeleton set").repair("Pick the blend space\u{2019}s skeleton"));
+                    out.push(
+                        Diagnostic::warning("blendspace.no_skeleton", "No skeleton set")
+                            .repair("Pick the blend space\u{2019}s skeleton"),
+                    );
                 }
             }
         }
@@ -116,7 +140,14 @@ fn own_diagnostics(source: &dyn AssetSource, kind: &str, text: &str, bytes: &[u8
                                         out.push(Diagnostic::error("montage.unknown_bone", format!("Slot `{}` mask names bone `{bone}` which the skeleton does not have", track.slot)).at(&track.id));
                                     }
                                 }
-                                Err(e) => out.push(Diagnostic::error("montage.unknown_mask", format!("Slot `{}`: {e}", track.slot)).at(&track.id).repair("Pick a mask the skeleton defines")),
+                                Err(e) => out.push(
+                                    Diagnostic::error(
+                                        "montage.unknown_mask",
+                                        format!("Slot `{}`: {e}", track.slot),
+                                    )
+                                    .at(&track.id)
+                                    .repair("Pick a mask the skeleton defines"),
+                                ),
                             }
                         }
                     }
@@ -127,7 +158,11 @@ fn own_diagnostics(source: &dyn AssetSource, kind: &str, text: &str, bytes: &[u8
             if let Ok(a) = AnimationGraphAsset::parse(text) {
                 out.extend(validate::validate(&a));
                 if let Some(asset) = skeleton_asset_of(source, &a.skeleton) {
-                    out.extend(validate::validate_against_skeleton_masks(&a, &asset.skeleton(), &asset.masks));
+                    out.extend(validate::validate_against_skeleton_masks(
+                        &a,
+                        &asset.skeleton(),
+                        &asset.masks,
+                    ));
                 }
             }
         }
@@ -146,7 +181,9 @@ fn own_diagnostics(source: &dyn AssetSource, kind: &str, text: &str, bytes: &[u8
                 let target_skeleton = skeleton_of(source, &a.target_skeleton);
                 if let (Some(s), Some(t)) = (&source_skeleton, &target_skeleton) {
                     let rigs = match (&a.source_rig, &a.target_rig) {
-                        (Some(sr), Some(tr)) => load_rig(source, sr.as_str()).zip(load_rig(source, tr.as_str())),
+                        (Some(sr), Some(tr)) => {
+                            load_rig(source, sr.as_str()).zip(load_rig(source, tr.as_str()))
+                        }
                         _ => None,
                     };
                     out.extend(a.diagnostics(s, t, rigs.as_ref().map(|(s, t)| (s, t))));
@@ -157,7 +194,9 @@ fn own_diagnostics(source: &dyn AssetSource, kind: &str, text: &str, bytes: &[u8
             if let Ok(a) = IkRetargetAsset::parse(text) {
                 out.extend(a.reference_diagnostics());
                 if let (Some(sr), Some(tr)) = (&a.source_rig, &a.target_rig) {
-                    if let (Some(s), Some(t)) = (load_rig(source, sr.as_str()), load_rig(source, tr.as_str())) {
+                    if let (Some(s), Some(t)) =
+                        (load_rig(source, sr.as_str()), load_rig(source, tr.as_str()))
+                    {
                         out.extend(a.diagnostics(&s, &t));
                     }
                 }

@@ -986,7 +986,7 @@ impl Render for ViewportPanel {
         }
 
         // Build the frame's geometry from the editor's current pose.
-        let (mut geo, options, tracers_on, mesh_lod_count, hud, labels) = {
+        let (geo, options, tracers_on, mesh_lod_count, hud, labels) = {
             let e = editor.read(cx);
             let (start, end) = e.play_range_seconds();
             let transform_gizmo = if e.transform_editable() {

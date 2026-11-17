@@ -46,7 +46,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use crate::assets::AnimSeqAsset;
-use crate::notifies::{candidate_cycles, AnimationNotify, NotifyField, NotifyIndex, NotifyTarget, PlaybackInterval};
+use crate::notifies::{
+    candidate_cycles, AnimationNotify, NotifyField, NotifyIndex, NotifyTarget, PlaybackInterval,
+};
 use crate::notify_schema::AnimationNotifyState;
 
 use super::graph::{PlaybackSpan, SpanOrigin};
@@ -125,7 +127,13 @@ pub struct PlaybackKey {
 impl PlaybackKey {
     /// A Montage instance's own timeline (its authored notifies), not a segment's clip.
     pub fn montage_timeline(handle: u64, montage: &str) -> Self {
-        Self { scope: handle, origin: SpanOrigin::Montage { montage: montage.to_string(), segment: String::new() } }
+        Self {
+            scope: handle,
+            origin: SpanOrigin::Montage {
+                montage: montage.to_string(),
+                segment: String::new(),
+            },
+        }
     }
 }
 
@@ -217,20 +225,32 @@ impl NotifyOccurrence {
     }
 
     pub fn id(&self) -> &str {
-        self.notify().map(|n| n.id.as_str()).or_else(|| self.state().map(|s| s.id.as_str())).unwrap_or("")
+        self.notify()
+            .map(|n| n.id.as_str())
+            .or_else(|| self.state().map(|s| s.id.as_str()))
+            .unwrap_or("")
     }
 
     pub fn name(&self) -> &str {
-        self.notify().map(|n| n.name.as_str()).or_else(|| self.state().map(|s| s.name.as_str())).unwrap_or("")
+        self.notify()
+            .map(|n| n.name.as_str())
+            .or_else(|| self.state().map(|s| s.name.as_str()))
+            .unwrap_or("")
     }
 
     pub fn target(&self) -> &NotifyTarget {
         static SELF: NotifyTarget = NotifyTarget::Self_;
-        self.notify().map(|n| &n.target).or_else(|| self.state().map(|s| &s.target)).unwrap_or(&SELF)
+        self.notify()
+            .map(|n| &n.target)
+            .or_else(|| self.state().map(|s| &s.target))
+            .unwrap_or(&SELF)
     }
 
     pub fn fields(&self) -> &[NotifyField] {
-        self.notify().map(|n| n.fields.as_slice()).or_else(|| self.state().map(|s| s.fields.as_slice())).unwrap_or(&[])
+        self.notify()
+            .map(|n| n.fields.as_slice())
+            .or_else(|| self.state().map(|s| s.fields.as_slice()))
+            .unwrap_or(&[])
     }
 
     /// Authored time: a notify's time, a state's start (begin) or end (end/tick).
@@ -277,7 +297,9 @@ pub struct NotifyTracker {
 
 impl std::fmt::Debug for NotifyTracker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NotifyTracker").field("playbacks", &self.playbacks.len()).finish()
+        f.debug_struct("NotifyTracker")
+            .field("playbacks", &self.playbacks.len())
+            .finish()
     }
 }
 
@@ -320,11 +342,29 @@ impl NotifyTracker {
 
     /// Feed a span reported for a sequence clip (graph player, Blend Space sample,
     /// Pose Search cursor or Montage segment).
-    pub fn observe_clip(&mut self, span: &PlaybackSpan, out: &mut Vec<NotifyOccurrence>) -> Result<(), String> {
-        let Some(sequence) = &span.clip.source else { return Ok(()) };
+    pub fn observe_clip(
+        &mut self,
+        span: &PlaybackSpan,
+        out: &mut Vec<NotifyOccurrence>,
+    ) -> Result<(), String> {
+        let Some(sequence) = &span.clip.source else {
+            return Ok(());
+        };
         let owner = NotifyOwner::Sequence(sequence.clone());
-        let key = PlaybackKey { scope: span.scope, origin: span.origin.clone() };
-        self.observe_with_seam(key, owner, span.from, span.to, span.looping, span.weight, span.seam, out)
+        let key = PlaybackKey {
+            scope: span.scope,
+            origin: span.origin.clone(),
+        };
+        self.observe_with_seam(
+            key,
+            owner,
+            span.from,
+            span.to,
+            span.looping,
+            span.weight,
+            span.seam,
+            out,
+        )
     }
 
     /// Feed the span of a Montage instance's own timeline.
@@ -338,14 +378,26 @@ impl NotifyTracker {
         out: &mut Vec<NotifyOccurrence>,
     ) -> Result<(), String> {
         let key = PlaybackKey::montage_timeline(handle, &montage.id);
-        self.observe(key, NotifyOwner::Montage(montage.clone()), from, to, false, weight, out)
+        self.observe(
+            key,
+            NotifyOwner::Montage(montage.clone()),
+            from,
+            to,
+            false,
+            weight,
+            out,
+        )
     }
 
     /// Feed everything one advance reported (graph and Montage segment spans, the
     /// Montage timelines) and close the update: playbacks that stopped contributing
     /// end their states, and so do those of Montage instances that finished in it.
     /// Every span is processed even if one fails; the first error is returned.
-    pub fn observe_report(&mut self, report: &super::anim_instance::UpdateReport, out: &mut Vec<NotifyOccurrence>) -> Result<(), String> {
+    pub fn observe_report(
+        &mut self,
+        report: &super::anim_instance::UpdateReport,
+        out: &mut Vec<NotifyOccurrence>,
+    ) -> Result<(), String> {
         self.begin_update();
         let mut first_error = None;
         for span in &report.spans {
@@ -354,7 +406,14 @@ impl NotifyTracker {
             }
         }
         for line in &report.montage_timelines {
-            if let Err(e) = self.observe_montage(line.handle.0, &line.montage, line.from, line.to, line.weight, out) {
+            if let Err(e) = self.observe_montage(
+                line.handle.0,
+                &line.montage,
+                line.from,
+                line.to,
+                line.weight,
+                out,
+            ) {
                 first_error.get_or_insert(e);
             }
         }
@@ -367,8 +426,12 @@ impl NotifyTracker {
 
     /// A Montage instance ended: its segment and timeline playbacks end now.
     pub fn end_montage(&mut self, handle: u64, out: &mut Vec<NotifyOccurrence>) {
-        let gone: Vec<PlaybackKey> =
-            self.playbacks.keys().filter(|k| k.scope == handle && matches!(k.origin, SpanOrigin::Montage { .. })).cloned().collect();
+        let gone: Vec<PlaybackKey> = self
+            .playbacks
+            .keys()
+            .filter(|k| k.scope == handle && matches!(k.origin, SpanOrigin::Montage { .. }))
+            .cloned()
+            .collect();
         for key in gone {
             if let Some(playback) = self.playbacks.remove(&key) {
                 end_states(&key, &playback, EndReason::Stopped, playback.last_to, out);
@@ -379,7 +442,12 @@ impl NotifyTracker {
     /// End of one advance: playbacks that were not seen stopped contributing, so
     /// their active states end (reason `Stopped`).
     pub fn end_update(&mut self, out: &mut Vec<NotifyOccurrence>) {
-        let gone: Vec<PlaybackKey> = self.playbacks.iter().filter(|(_, p)| !p.seen).map(|(k, _)| k.clone()).collect();
+        let gone: Vec<PlaybackKey> = self
+            .playbacks
+            .iter()
+            .filter(|(_, p)| !p.seen)
+            .map(|(k, _)| k.clone())
+            .collect();
         for key in gone {
             if let Some(playback) = self.playbacks.remove(&key) {
                 end_states(&key, &playback, EndReason::Stopped, playback.last_to, out);
@@ -399,7 +467,10 @@ impl NotifyTracker {
         }
     }
 
-    fn index_for<'a>(indexes: &'a mut HashMap<(&'static str, String), CachedIndex>, owner: &NotifyOwner) -> Result<&'a NotifyIndex, String> {
+    fn index_for<'a>(
+        indexes: &'a mut HashMap<(&'static str, String), CachedIndex>,
+        owner: &NotifyOwner,
+    ) -> Result<&'a NotifyIndex, String> {
         let id = (owner.kind(), owner.id());
         let stale = indexes.get(&id).is_none_or(|c| !c.owner.same(owner));
         if stale {
@@ -408,7 +479,13 @@ impl NotifyTracker {
                 state.validate(duration)?;
             }
             let index = NotifyIndex::new(owner.notifies(), duration)?;
-            indexes.insert(id.clone(), CachedIndex { owner: owner.clone(), index });
+            indexes.insert(
+                id.clone(),
+                CachedIndex {
+                    owner: owner.clone(),
+                    index,
+                },
+            );
         }
         Ok(&indexes[&id].index)
     }
@@ -444,13 +521,22 @@ impl NotifyTracker {
         }
         // liveness is recorded even for assets with nothing to report, so an
         // owner swap on the same key is still seen
-        let Self { next_instance, playbacks, indexes } = self;
+        let Self {
+            next_instance,
+            playbacks,
+            indexes,
+        } = self;
         let duration = owner.length() as f64;
 
         // an asset replaced under a running playback: end its states and start over
         if let Some(existing) = playbacks.get(&key) {
             if !existing.owner.same(&owner) {
-                let reason = if existing.owner.kind() == owner.kind() && existing.owner.id() == owner.id() { EndReason::Reload } else { EndReason::Stopped };
+                let reason =
+                    if existing.owner.kind() == owner.kind() && existing.owner.id() == owner.id() {
+                        EndReason::Reload
+                    } else {
+                        EndReason::Stopped
+                    };
                 end_states(&key, existing, reason, existing.last_to, out);
                 playbacks.remove(&key);
             }
@@ -459,7 +545,14 @@ impl NotifyTracker {
             // nothing to track; keep the entry only so a later replacement is noticed
             let playback = playbacks.entry(key).or_insert_with(|| {
                 *next_instance += 1;
-                Playback { instance: *next_instance, owner: owner.clone(), last_to: to, last_cycle: 0, active: Vec::new(), seen: true }
+                Playback {
+                    instance: *next_instance,
+                    owner: owner.clone(),
+                    last_to: to,
+                    last_cycle: 0,
+                    active: Vec::new(),
+                    seen: true,
+                }
             });
             playback.seen = true;
             playback.last_to = to;
@@ -469,7 +562,14 @@ impl NotifyTracker {
         let fresh = !playbacks.contains_key(&key);
         let playback = playbacks.entry(key.clone()).or_insert_with(|| {
             *next_instance += 1;
-            Playback { instance: *next_instance, owner: owner.clone(), last_to: f64::NAN, last_cycle: 0, active: Vec::new(), seen: true }
+            Playback {
+                instance: *next_instance,
+                owner: owner.clone(),
+                last_to: f64::NAN,
+                last_cycle: 0,
+                active: Vec::new(),
+                seen: true,
+            }
         });
         playback.seen = true;
 
@@ -492,7 +592,9 @@ impl NotifyTracker {
                 } else {
                     jumped = true;
                 }
-            } else if let Some((start, end)) = seam.filter(|(start, end)| (playback.last_to - end).abs() <= eps && (from - start).abs() <= eps && end > start) {
+            } else if let Some((start, end)) = seam.filter(|(start, end)| {
+                (playback.last_to - end).abs() <= eps && (from - start).abs() <= eps && end > start
+            }) {
                 // the next cycle of a looping Montage segment: the run goes on across the seam
                 let _ = (start, end);
             } else if gap.abs() > eps {
@@ -507,18 +609,21 @@ impl NotifyTracker {
         let forward = to >= from;
         let travelled = |p: f64| if forward { p - from } else { from - p };
         let mut pending: Vec<Pending> = Vec::new();
-        let occurrence = |playback: &Playback, item, phase, end_reason, position: f64, cycle, delta| NotifyOccurrence {
-            owner: playback.owner.clone(),
-            item,
-            phase,
-            end_reason,
-            key: key.clone(),
-            instance: playback.instance,
-            position,
-            cycle,
-            delta,
-            weight,
-        };
+        let occurrence =
+            |playback: &Playback, item, phase, end_reason, position: f64, cycle, delta| {
+                NotifyOccurrence {
+                    owner: playback.owner.clone(),
+                    item,
+                    phase,
+                    end_reason,
+                    key: key.clone(),
+                    instance: playback.instance,
+                    position,
+                    cycle,
+                    delta,
+                    weight,
+                }
+            };
 
         // instant notifies
         for hit in index.collect(PlaybackInterval::Advance { from, to, looping })? {
@@ -527,7 +632,15 @@ impl NotifyTracker {
                 rank: 3,
                 cycle_order: if forward { hit.cycle } else { -hit.cycle },
                 index: hit.index,
-                occurrence: occurrence(playback, NotifyItem::Notify(hit.index), NotifyPhase::Notify, None, hit.playback_time, hit.cycle, 0.0),
+                occurrence: occurrence(
+                    playback,
+                    NotifyItem::Notify(hit.index),
+                    NotifyPhase::Notify,
+                    None,
+                    hit.playback_time,
+                    hit.cycle,
+                    0.0,
+                ),
             });
         }
 
@@ -535,12 +648,24 @@ impl NotifyTracker {
         let states = playback.owner.states();
         if !states.is_empty() && duration > 0.0 {
             let (lo, hi) = if forward { (from, to) } else { (to, from) };
-            let (first, last) = if looping { candidate_cycles(lo, hi, duration)? } else { (0, 0) };
+            let (first, last) = if looping {
+                candidate_cycles(lo, hi, duration)?
+            } else {
+                (0, 0)
+            };
             let cycles = (last - first + 1) as usize;
             if cycles.saturating_mul(states.len()) > MAX_STATE_TRANSITIONS {
-                return Err("Notify state query exceeds the work limit; split the playback interval".into());
+                return Err(
+                    "Notify state query exceeds the work limit; split the playback interval".into(),
+                );
             }
-            let inside = |a: f64, b: f64, p: f64| if forward { a <= p && p < b } else { a < p && p <= b };
+            let inside = |a: f64, b: f64, p: f64| {
+                if forward {
+                    a <= p && p < b
+                } else {
+                    a < p && p <= b
+                }
+            };
             let mut still_active: Vec<Active> = Vec::new();
             let mut touched: Vec<(usize, i64)> = Vec::new();
             for (index, state) in states.iter().enumerate() {
@@ -550,13 +675,25 @@ impl NotifyTracker {
                 for cycle in first..=last {
                     let base = cycle as f64 * duration;
                     let (a, b) = (base + state.start as f64, base + state.end as f64);
-                    let visits = if forward { lo < b && a <= hi } else { hi > a && lo <= b };
-                    let was = playback.active.iter().find(|x| x.state == index && x.cycle == cycle).copied();
+                    let visits = if forward {
+                        lo < b && a <= hi
+                    } else {
+                        hi > a && lo <= b
+                    };
+                    let was = playback
+                        .active
+                        .iter()
+                        .find(|x| x.state == index && x.cycle == cycle)
+                        .copied();
                     if !visits {
                         continue;
                     }
                     touched.push((index, cycle));
-                    let (entry, exit) = if forward { (lo.max(a), b) } else { (hi.min(b), a) };
+                    let (entry, exit) = if forward {
+                        (lo.max(a), b)
+                    } else {
+                        (hi.min(b), a)
+                    };
                     let overlap = (hi.min(b) - lo.max(a)).max(0.0);
                     let stays = inside(a, b, to);
                     let cycle_order = if forward { cycle } else { -cycle };
@@ -566,12 +703,27 @@ impl NotifyTracker {
                             rank: 2,
                             cycle_order,
                             index,
-                            occurrence: occurrence(playback, NotifyItem::State(index), NotifyPhase::Begin, None, entry, cycle, 0.0),
+                            occurrence: occurrence(
+                                playback,
+                                NotifyItem::State(index),
+                                NotifyPhase::Begin,
+                                None,
+                                entry,
+                                cycle,
+                                0.0,
+                            ),
                         });
                     }
-                    let mut act = was.unwrap_or(Active { state: index, cycle, since_tick: 0.0 });
+                    let mut act = was.unwrap_or(Active {
+                        state: index,
+                        cycle,
+                        since_tick: 0.0,
+                    });
                     act.since_tick += overlap as f32;
-                    let due = overlap > 0.0 && state.tick_interval.is_none_or(|interval| act.since_tick >= interval);
+                    let due = overlap > 0.0
+                        && state
+                            .tick_interval
+                            .is_none_or(|interval| act.since_tick >= interval);
                     if due {
                         let at = if stays { to } else { exit };
                         pending.push(Pending {
@@ -579,7 +731,15 @@ impl NotifyTracker {
                             rank: 0,
                             cycle_order,
                             index,
-                            occurrence: occurrence(playback, NotifyItem::State(index), NotifyPhase::Tick, None, at, cycle, act.since_tick),
+                            occurrence: occurrence(
+                                playback,
+                                NotifyItem::State(index),
+                                NotifyPhase::Tick,
+                                None,
+                                at,
+                                cycle,
+                                act.since_tick,
+                            ),
                         });
                         act.since_tick = 0.0;
                     }
@@ -591,7 +751,15 @@ impl NotifyTracker {
                             rank: 1,
                             cycle_order,
                             index,
-                            occurrence: occurrence(playback, NotifyItem::State(index), NotifyPhase::End, Some(EndReason::Completed), exit, cycle, 0.0),
+                            occurrence: occurrence(
+                                playback,
+                                NotifyItem::State(index),
+                                NotifyPhase::End,
+                                Some(EndReason::Completed),
+                                exit,
+                                cycle,
+                                0.0,
+                            ),
                         });
                     }
                 }
@@ -605,7 +773,15 @@ impl NotifyTracker {
                         rank: 1,
                         cycle_order: if forward { act.cycle } else { -act.cycle },
                         index: act.state,
-                        occurrence: occurrence(playback, NotifyItem::State(act.state), NotifyPhase::End, Some(EndReason::Completed), from, act.cycle, 0.0),
+                        occurrence: occurrence(
+                            playback,
+                            NotifyItem::State(act.state),
+                            NotifyPhase::End,
+                            Some(EndReason::Completed),
+                            from,
+                            act.cycle,
+                            0.0,
+                        ),
                     });
                 }
             }
@@ -613,7 +789,11 @@ impl NotifyTracker {
             playback.active = still_active;
         }
         playback.last_to = to;
-        playback.last_cycle = if duration > 0.0 { (to / duration).floor() as i64 } else { 0 };
+        playback.last_cycle = if duration > 0.0 {
+            (to / duration).floor() as i64
+        } else {
+            0
+        };
 
         pending.sort_by(|a, b| {
             a.progress
@@ -627,7 +807,13 @@ impl NotifyTracker {
     }
 }
 
-fn end_states(key: &PlaybackKey, playback: &Playback, reason: EndReason, position: f64, out: &mut Vec<NotifyOccurrence>) {
+fn end_states(
+    key: &PlaybackKey,
+    playback: &Playback,
+    reason: EndReason,
+    position: f64,
+    out: &mut Vec<NotifyOccurrence>,
+) {
     for act in &playback.active {
         out.push(NotifyOccurrence {
             owner: playback.owner.clone(),

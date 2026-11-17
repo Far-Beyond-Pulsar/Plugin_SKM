@@ -104,9 +104,9 @@ impl ParamType {
             Self::Float => value.as_f64().is_some_and(f64::is_finite),
             Self::Int => value.as_i64().is_some(),
             Self::Bool => value.is_boolean(),
-            Self::Vector => value
-                .as_array()
-                .is_some_and(|a| a.len() == 3 && a.iter().all(|v| v.as_f64().is_some_and(f64::is_finite))),
+            Self::Vector => value.as_array().is_some_and(|a| {
+                a.len() == 3 && a.iter().all(|v| v.as_f64().is_some_and(f64::is_finite))
+            }),
         }
     }
 
@@ -174,17 +174,33 @@ pub struct PinDef {
 }
 
 const fn req(name: &'static str, ty: AnimPinType, doc: &'static str) -> PinDef {
-    PinDef { name, ty, required: true, doc }
+    PinDef {
+        name,
+        ty,
+        required: true,
+        doc,
+    }
 }
 const fn opt(name: &'static str, ty: AnimPinType, doc: &'static str) -> PinDef {
-    PinDef { name, ty, required: false, doc }
+    PinDef {
+        name,
+        ty,
+        required: false,
+        doc,
+    }
 }
 
 /// Which declared sub-graph a property selects.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PropKind {
-    Float { min: f32, max: f32 },
-    Int { min: i64, max: i64 },
+    Float {
+        min: f32,
+        max: f32,
+    },
+    Int {
+        min: i64,
+        max: i64,
+    },
     Bool,
     Text,
     Enum(&'static [&'static str]),
@@ -223,11 +239,28 @@ pub struct PropDef {
     pub doc: &'static str,
 }
 
-const fn prop(name: &'static str, kind: PropKind, default: &'static str, doc: &'static str) -> PropDef {
-    PropDef { name, kind, required: false, default, doc }
+const fn prop(
+    name: &'static str,
+    kind: PropKind,
+    default: &'static str,
+    doc: &'static str,
+) -> PropDef {
+    PropDef {
+        name,
+        kind,
+        required: false,
+        default,
+        doc,
+    }
 }
 const fn need(name: &'static str, kind: PropKind, doc: &'static str) -> PropDef {
-    PropDef { name, kind, required: true, default: "", doc }
+    PropDef {
+        name,
+        kind,
+        required: true,
+        default: "",
+        doc,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -270,8 +303,19 @@ pub struct EvalContract {
     pub needs_skeleton: bool,
 }
 
-const fn eval(summary: &'static str, root_motion: RootMotionFlow, curves: CurveFlow) -> EvalContract {
-    EvalContract { summary, root_motion, curves, notifies: false, stateful: false, needs_skeleton: false }
+const fn eval(
+    summary: &'static str,
+    root_motion: RootMotionFlow,
+    curves: CurveFlow,
+) -> EvalContract {
+    EvalContract {
+        summary,
+        root_motion,
+        curves,
+        notifies: false,
+        stateful: false,
+        needs_skeleton: false,
+    }
 }
 const fn stateful(mut c: EvalContract) -> EvalContract {
     c.stateful = true;
@@ -288,11 +332,19 @@ pub enum DynamicPins {
     None,
     /// `count` copies of the `(pose, weight)` pairs named `<stem>_<i>` /
     /// `<stem>_weight_<i>` after the fixed pins, `i` from 0.
-    PoseWeightPairs { count_prop: &'static str, stem: &'static str, weight_stem: Option<&'static str> },
+    PoseWeightPairs {
+        count_prop: &'static str,
+        stem: &'static str,
+        weight_stem: Option<&'static str>,
+    },
     /// One `Transform` input per name in a `NameList` property, named `goal_<name>`.
-    GoalTransforms { list_prop: &'static str },
+    GoalTransforms {
+        list_prop: &'static str,
+    },
     /// The sole output has the type of the parameter named by `param_prop`.
-    OutputOfParameter { param_prop: &'static str },
+    OutputOfParameter {
+        param_prop: &'static str,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -312,9 +364,9 @@ pub struct NodeDef {
 }
 
 use AnimPinType as T;
+use CurveFlow as CF;
 use PropKind as P;
 use RootMotionFlow as RM;
-use CurveFlow as CF;
 
 const SEQUENCE_KIND: &str = pulsar_reflection::AnimationSequenceAssetKind::KIND;
 const BLEND_SPACE_KIND: &str = pulsar_reflection::BlendSpaceAssetKind::KIND;
@@ -340,7 +392,19 @@ const fn node(
     props: &'static [PropDef],
     eval: EvalContract,
 ) -> NodeDef {
-    NodeDef { type_id, title, category, doc, graphs, inputs, outputs, props, dynamic: DynamicPins::None, eval, max_per_graph: 0 }
+    NodeDef {
+        type_id,
+        title,
+        category,
+        doc,
+        graphs,
+        inputs,
+        outputs,
+        props,
+        dynamic: DynamicPins::None,
+        eval,
+        max_per_graph: 0,
+    }
 }
 const fn dynamic(mut n: NodeDef, d: DynamicPins) -> NodeDef {
     n.dynamic = d;
@@ -807,24 +871,48 @@ pub fn resolve_pins(
     props: &std::collections::HashMap<String, Value>,
     param_type: impl Fn(&str) -> Option<ParamType>,
 ) -> (Vec<PinSpec>, Vec<PinSpec>) {
-    let spec = |p: &PinDef| PinSpec { name: p.name.into(), ty: p.ty, required: p.required };
+    let spec = |p: &PinDef| PinSpec {
+        name: p.name.into(),
+        ty: p.ty,
+        required: p.required,
+    };
     let mut inputs: Vec<PinSpec> = def.inputs.iter().map(spec).collect();
     let mut outputs: Vec<PinSpec> = def.outputs.iter().map(spec).collect();
     match def.dynamic {
         DynamicPins::None => {}
-        DynamicPins::PoseWeightPairs { count_prop, stem, weight_stem } => {
-            let count = props.get(count_prop).and_then(|v| v.as_i64()).unwrap_or(0).clamp(0, 16);
+        DynamicPins::PoseWeightPairs {
+            count_prop,
+            stem,
+            weight_stem,
+        } => {
+            let count = props
+                .get(count_prop)
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0)
+                .clamp(0, 16);
             for i in 0..count {
-                inputs.push(PinSpec { name: format!("{stem}_{i}"), ty: T::Pose, required: true });
+                inputs.push(PinSpec {
+                    name: format!("{stem}_{i}"),
+                    ty: T::Pose,
+                    required: true,
+                });
                 if let Some(w) = weight_stem {
-                    inputs.push(PinSpec { name: format!("{w}_{i}"), ty: T::Float, required: false });
+                    inputs.push(PinSpec {
+                        name: format!("{w}_{i}"),
+                        ty: T::Float,
+                        required: false,
+                    });
                 }
             }
         }
         DynamicPins::GoalTransforms { list_prop } => {
             if let Some(Value::Array(names)) = props.get(list_prop) {
                 for name in names.iter().filter_map(Value::as_str) {
-                    inputs.push(PinSpec { name: format!("goal_{name}"), ty: T::Transform, required: false });
+                    inputs.push(PinSpec {
+                        name: format!("goal_{name}"),
+                        ty: T::Transform,
+                        required: false,
+                    });
                 }
             }
         }
@@ -834,7 +922,11 @@ pub fn resolve_pins(
                 .and_then(Value::as_str)
                 .and_then(param_type)
                 .map_or(T::Float, ParamType::pin_type);
-            outputs = vec![PinSpec { name: "value".into(), ty, required: true }];
+            outputs = vec![PinSpec {
+                name: "value".into(),
+                ty,
+                required: true,
+            }];
         }
     }
     (inputs, outputs)
@@ -858,25 +950,49 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for def in CATALOGUE {
             assert!(seen.insert(def.type_id), "duplicate type {}", def.type_id);
-            assert!(!def.graphs.is_empty(), "{} is placeable nowhere", def.type_id);
-            assert!(!def.eval.summary.is_empty(), "{} has no evaluation contract", def.type_id);
+            assert!(
+                !def.graphs.is_empty(),
+                "{} is placeable nowhere",
+                def.type_id
+            );
+            assert!(
+                !def.eval.summary.is_empty(),
+                "{} has no evaluation contract",
+                def.type_id
+            );
             let mut pins = std::collections::HashSet::new();
             for p in def.inputs.iter().chain(def.outputs) {
                 // input and output may share a name (blend has none); within a direction names are unique
                 let _ = p;
             }
             for p in def.inputs {
-                assert!(pins.insert(("in", p.name)), "{}: duplicate input {}", def.type_id, p.name);
+                assert!(
+                    pins.insert(("in", p.name)),
+                    "{}: duplicate input {}",
+                    def.type_id,
+                    p.name
+                );
             }
             for p in def.outputs {
-                assert!(pins.insert(("out", p.name)), "{}: duplicate output {}", def.type_id, p.name);
+                assert!(
+                    pins.insert(("out", p.name)),
+                    "{}: duplicate output {}",
+                    def.type_id,
+                    p.name
+                );
             }
             let mut names = std::collections::HashSet::new();
             for p in def.props {
-                assert!(names.insert(p.name), "{}: duplicate property {}", def.type_id, p.name);
+                assert!(
+                    names.insert(p.name),
+                    "{}: duplicate property {}",
+                    def.type_id,
+                    p.name
+                );
                 if !p.default.is_empty() {
-                    serde_json::from_str::<Value>(p.default)
-                        .unwrap_or_else(|e| panic!("{}.{} default is not JSON: {e}", def.type_id, p.name));
+                    serde_json::from_str::<Value>(p.default).unwrap_or_else(|e| {
+                        panic!("{}.{} default is not JSON: {e}", def.type_id, p.name)
+                    });
                 }
             }
             // Every optional data input has a same-named property fallback.
@@ -895,7 +1011,13 @@ mod tests {
 
     #[test]
     fn every_graph_kind_has_exactly_one_terminal_definition() {
-        for kind in [GraphKind::Main, GraphKind::Layer, GraphKind::StateMachine, GraphKind::StatePose, GraphKind::TransitionRule] {
+        for kind in [
+            GraphKind::Main,
+            GraphKind::Layer,
+            GraphKind::StateMachine,
+            GraphKind::StatePose,
+            GraphKind::TransitionRule,
+        ] {
             let def = node_def(kind.terminal()).expect("terminal exists");
             assert_eq!(def.max_per_graph, 1);
             assert!(def.graphs.contains(&kind));
@@ -905,11 +1027,26 @@ mod tests {
     #[test]
     fn the_planned_node_families_exist() {
         for id in [
-            "anim.sequence_player", "anim.blend_space_player", "anim.slot", "anim.state_machine",
-            "sm.transition", "rule.result", "anim.save_cached_pose", "anim.use_cached_pose",
-            "anim.layered_blend_per_bone", "anim.apply_additive", "anim.make_additive",
-            "anim.two_bone_ik", "anim.fabrik", "anim.ik_rig", "anim.retarget", "anim.pose_search",
-            "anim.get_curve", "anim.modify_curve", "anim.linked_graph", "anim.layer",
+            "anim.sequence_player",
+            "anim.blend_space_player",
+            "anim.slot",
+            "anim.state_machine",
+            "sm.transition",
+            "rule.result",
+            "anim.save_cached_pose",
+            "anim.use_cached_pose",
+            "anim.layered_blend_per_bone",
+            "anim.apply_additive",
+            "anim.make_additive",
+            "anim.two_bone_ik",
+            "anim.fabrik",
+            "anim.ik_rig",
+            "anim.retarget",
+            "anim.pose_search",
+            "anim.get_curve",
+            "anim.modify_curve",
+            "anim.linked_graph",
+            "anim.layer",
         ] {
             assert!(node_def(id).is_some(), "missing {id}");
         }
@@ -922,12 +1059,23 @@ mod tests {
         props.insert("count".into(), Value::from(2));
         let (inputs, _) = resolve_pins(def, &props, |_| None);
         let names: Vec<_> = inputs.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, ["base", "layer_0", "layer_weight_0", "layer_1", "layer_weight_1"]);
+        assert_eq!(
+            names,
+            [
+                "base",
+                "layer_0",
+                "layer_weight_0",
+                "layer_1",
+                "layer_weight_1"
+            ]
+        );
 
         let get = node_def("anim.get_parameter").unwrap();
         let mut props = default_properties(get);
         props.insert("parameter".into(), Value::from("Grounded"));
-        let (_, outputs) = resolve_pins(get, &props, |n| (n == "Grounded").then_some(ParamType::Bool));
+        let (_, outputs) = resolve_pins(get, &props, |n| {
+            (n == "Grounded").then_some(ParamType::Bool)
+        });
         assert_eq!(outputs[0].ty, AnimPinType::Bool);
     }
 
@@ -935,7 +1083,11 @@ mod tests {
     fn additive_pose_does_not_connect_to_pose() {
         assert!(!AnimPinType::AdditivePose.connects_to(AnimPinType::Pose));
         assert!(AnimPinType::Pose.connects_to(AnimPinType::Pose));
-        for t in [AnimPinType::Pose, AnimPinType::Float, AnimPinType::StateFlow] {
+        for t in [
+            AnimPinType::Pose,
+            AnimPinType::Float,
+            AnimPinType::StateFlow,
+        ] {
             assert_eq!(AnimPinType::from_type_name(t.type_name()), Some(t));
         }
     }

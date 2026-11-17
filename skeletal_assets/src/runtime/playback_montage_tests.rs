@@ -8,11 +8,22 @@ use crate::runtime::montage::tests::{montage, skel};
 use crate::runtime::montage::CompiledMontage;
 use crate::runtime::pose::RuntimeSkeleton;
 
-fn sequence(duration: f32, notifies: &[(&str, f32)], states: &[(&str, f32, f32)]) -> Arc<AnimSeqAsset> {
+fn sequence(
+    duration: f32,
+    notifies: &[(&str, f32)],
+    states: &[(&str, f32, f32)],
+) -> Arc<AnimSeqAsset> {
     let mut asset = clip_asset("c", duration, vec![]);
     asset.features.notifies = notifies
         .iter()
-        .map(|(id, t)| AnimationNotify { id: (*id).into(), name: (*id).into(), time: *t, target: NotifyTarget::Self_, fields: vec![], schema: None })
+        .map(|(id, t)| AnimationNotify {
+            id: (*id).into(),
+            name: (*id).into(),
+            time: *t,
+            target: NotifyTarget::Self_,
+            fields: vec![],
+            schema: None,
+        })
         .collect();
     asset.features.notify_states = states
         .iter()
@@ -39,7 +50,14 @@ fn rig() -> (Arc<RuntimeSkeleton>, Arc<CompiledMontage>) {
     let base = montage(&skel, "m", "DefaultSlot", "b2", None);
     let mut m = (*base).clone();
     m.id = "montage-1".into();
-    m.notifies = vec![AnimationNotify { id: "mn".into(), name: "mn".into(), time: 1.0, target: NotifyTarget::Self_, fields: vec![], schema: None }];
+    m.notifies = vec![AnimationNotify {
+        id: "mn".into(),
+        name: "mn".into(),
+        time: 1.0,
+        target: NotifyTarget::Self_,
+        fields: vec![],
+        schema: None,
+    }];
     m.notify_states = vec![AnimationNotifyState {
         id: "ms".into(),
         name: "ms".into(),
@@ -61,17 +79,28 @@ fn rig() -> (Arc<RuntimeSkeleton>, Arc<CompiledMontage>) {
     (skel, Arc::new(m))
 }
 
-fn drive(inst: &mut AnimInstance, tracker: &mut NotifyTracker, dt: f32, out: &mut Vec<NotifyOccurrence>) {
+fn drive(
+    inst: &mut AnimInstance,
+    tracker: &mut NotifyTracker,
+    dt: f32,
+    out: &mut Vec<NotifyOccurrence>,
+) {
     inst.advance(dt, TimeStep::Variable, UpdateMode::Play);
     tracker.observe_report(&inst.report, out).unwrap();
 }
 
 fn count(events: &[NotifyOccurrence], id: &str, phase: NotifyPhase) -> usize {
-    events.iter().filter(|e| e.id() == id && e.phase == phase).count()
+    events
+        .iter()
+        .filter(|e| e.id() == id && e.phase == phase)
+        .count()
 }
 
 fn names(events: &[NotifyOccurrence]) -> Vec<String> {
-    events.iter().map(|e| format!("{}:{}", e.id(), e.phase.name())).collect()
+    events
+        .iter()
+        .map(|e| format!("{}:{}", e.id(), e.phase.name()))
+        .collect()
 }
 
 #[test]
@@ -84,9 +113,21 @@ fn montage_and_clip_notifies_and_states_fire_exactly_once_each_with_their_source
     for _ in 0..12 {
         drive(&mut inst, &mut tracker, 0.2, &mut out);
     }
-    for (id, kind) in [("mn", "montage"), ("ms", "montage"), ("sn", "animseq"), ("ss", "animseq")] {
-        let owners: Vec<_> = out.iter().filter(|e| e.id() == id).map(|e| e.owner.kind()).collect();
-        assert!(!owners.is_empty() && owners.iter().all(|k| *k == kind), "{id}: {owners:?}");
+    for (id, kind) in [
+        ("mn", "montage"),
+        ("ms", "montage"),
+        ("sn", "animseq"),
+        ("ss", "animseq"),
+    ] {
+        let owners: Vec<_> = out
+            .iter()
+            .filter(|e| e.id() == id)
+            .map(|e| e.owner.kind())
+            .collect();
+        assert!(
+            !owners.is_empty() && owners.iter().all(|k| *k == kind),
+            "{id}: {owners:?}"
+        );
     }
     assert_eq!(count(&out, "mn", NotifyPhase::Notify), 1);
     assert_eq!(count(&out, "sn", NotifyPhase::Notify), 1);
@@ -99,7 +140,10 @@ fn montage_and_clip_notifies_and_states_fire_exactly_once_each_with_their_source
     assert_eq!(tracker.active_states(), 0);
     let ms = out.iter().find(|e| e.id() == "ms").unwrap().instance;
     let ss = out.iter().find(|e| e.id() == "ss").unwrap().instance;
-    assert_ne!(ms, ss, "the Montage timeline and its segment are separate playback instances");
+    assert_ne!(
+        ms, ss,
+        "the Montage timeline and its segment are separate playback instances"
+    );
 }
 
 #[test]
@@ -118,14 +162,35 @@ fn interrupting_a_montage_ends_its_active_states_once() {
     assert_ne!(first, second);
     out.clear();
     drive(&mut inst, &mut tracker, 0.1, &mut out);
-    let ends: Vec<_> = out.iter().filter(|e| e.phase == NotifyPhase::End && e.key.scope == first.0).collect();
-    assert_eq!(ends.len(), 2, "the Montage state and the clip state: {:?}", names(&out));
-    assert!(ends.iter().all(|e| e.end_reason == Some(EndReason::Stopped)));
+    let ends: Vec<_> = out
+        .iter()
+        .filter(|e| e.phase == NotifyPhase::End && e.key.scope == first.0)
+        .collect();
+    assert_eq!(
+        ends.len(),
+        2,
+        "the Montage state and the clip state: {:?}",
+        names(&out)
+    );
+    assert!(ends
+        .iter()
+        .all(|e| e.end_reason == Some(EndReason::Stopped)));
     for _ in 0..15 {
         drive(&mut inst, &mut tracker, 0.2, &mut out);
     }
-    assert_eq!(out.iter().filter(|e| e.key.scope == first.0 && e.phase != NotifyPhase::End).count(), 0);
-    assert_eq!(out.iter().filter(|e| e.key.scope == first.0 && e.phase == NotifyPhase::End).count(), 2, "ended exactly once");
+    assert_eq!(
+        out.iter()
+            .filter(|e| e.key.scope == first.0 && e.phase != NotifyPhase::End)
+            .count(),
+        0
+    );
+    assert_eq!(
+        out.iter()
+            .filter(|e| e.key.scope == first.0 && e.phase == NotifyPhase::End)
+            .count(),
+        2,
+        "ended exactly once"
+    );
     assert_eq!(tracker.live_playbacks(), 0);
 }
 
@@ -143,7 +208,11 @@ fn two_components_sharing_a_montage_keep_independent_clocks_and_events() {
         drive(&mut b, &mut tb, 0.2, &mut ob);
     }
     assert_eq!(count(&ob, "ms", NotifyPhase::End), 1);
-    assert_eq!(count(&oa, "ms", NotifyPhase::End), 0, "a is at 1.0 s and still inside");
+    assert_eq!(
+        count(&oa, "ms", NotifyPhase::End),
+        0,
+        "a is at 1.0 s and still inside"
+    );
     assert_eq!(ta.active_states(), 2);
     assert_eq!(tb.active_states(), 0);
     for _ in 0..6 {
@@ -184,14 +253,30 @@ fn scrubbing_never_reports_and_a_gameplay_seek_ends_states_as_seek() {
     drive(&mut inst, &mut tracker, 1.2, &mut out);
     out.clear();
     inst.advance(0.5, TimeStep::Variable, UpdateMode::Scrub);
-    assert!(inst.report.spans.is_empty() && inst.report.montage_timelines.is_empty(), "a scrub reports no playback");
+    assert!(
+        inst.report.spans.is_empty() && inst.report.montage_timelines.is_empty(),
+        "a scrub reports no playback"
+    );
     inst.montages.seek(h, 1.8);
     tracker.end_all(EndReason::Seek, &mut out);
-    assert_eq!(out.iter().filter(|e| e.end_reason == Some(EndReason::Seek)).count(), 2);
+    assert_eq!(
+        out.iter()
+            .filter(|e| e.end_reason == Some(EndReason::Seek))
+            .count(),
+        2
+    );
     out.clear();
     drive(&mut inst, &mut tracker, 0.1, &mut out);
-    assert_eq!(count(&out, "ms", NotifyPhase::Begin), 0, "1.8 s is past the Montage state");
-    assert_eq!(count(&out, "ss", NotifyPhase::Begin), 0, "and past the clip state");
+    assert_eq!(
+        count(&out, "ms", NotifyPhase::Begin),
+        0,
+        "1.8 s is past the Montage state"
+    );
+    assert_eq!(
+        count(&out, "ss", NotifyPhase::Begin),
+        0,
+        "and past the clip state"
+    );
 }
 
 #[test]
@@ -205,7 +290,10 @@ fn a_seek_without_telling_the_tracker_is_still_a_jump_that_ends_states() {
     out.clear();
     inst.montages.seek(h, 1.8);
     drive(&mut inst, &mut tracker, 0.1, &mut out);
-    let jumps = out.iter().filter(|e| e.end_reason == Some(EndReason::Jump)).count();
+    let jumps = out
+        .iter()
+        .filter(|e| e.end_reason == Some(EndReason::Jump))
+        .count();
     assert_eq!(jumps, 2, "{:?}", names(&out));
 }
 
@@ -220,12 +308,27 @@ fn reverse_playback_raises_the_same_events_in_reverse_order() {
     for _ in 0..10 {
         drive(&mut inst, &mut tracker, 0.2, &mut out);
     }
-    let order: Vec<_> = out.iter().filter(|e| e.phase != NotifyPhase::Tick).map(|e| format!("{}:{}", e.id(), e.phase.name())).collect();
-    let at = |s: &str| order.iter().position(|x| x == s).unwrap_or_else(|| panic!("{s} missing in {order:?}"));
+    let order: Vec<_> = out
+        .iter()
+        .filter(|e| e.phase != NotifyPhase::Tick)
+        .map(|e| format!("{}:{}", e.id(), e.phase.name()))
+        .collect();
+    let at = |s: &str| {
+        order
+            .iter()
+            .position(|x| x == s)
+            .unwrap_or_else(|| panic!("{s} missing in {order:?}"))
+    };
     // from 1.9 down: the clip state (1.75..1.0) is entered first, then the Montage state (1.5..0.5)
     assert!(at("ss:begin") < at("ms:begin"));
-    assert!(at("ms:begin") < at("mn:notify"), "mn at 1.0 comes after entering ms at 1.5");
-    assert!(at("mn:notify") < at("sn:notify"), "sn at 0.5 is later in reverse");
+    assert!(
+        at("ms:begin") < at("mn:notify"),
+        "mn at 1.0 comes after entering ms at 1.5"
+    );
+    assert!(
+        at("mn:notify") < at("sn:notify"),
+        "sn at 0.5 is later in reverse"
+    );
     assert_eq!(count(&out, "mn", NotifyPhase::Notify), 1);
     assert_eq!(count(&out, "sn", NotifyPhase::Notify), 1);
     for state in ["ms", "ss"] {
@@ -248,13 +351,39 @@ fn a_hot_reloaded_montage_ends_its_states_as_reload_and_the_new_asset_takes_over
     let mut reloaded = (*m).clone();
     reloaded.notify_states[0].end = 1.2;
     let reloaded = Arc::new(reloaded);
-    let line = crate::runtime::anim_instance::TimelineSpan { handle: crate::runtime::montage::MontageHandle(0), montage: reloaded.clone(), from: 0.8, to: 0.9, weight: 1.0 };
+    let line = crate::runtime::anim_instance::TimelineSpan {
+        handle: crate::runtime::montage::MontageHandle(0),
+        montage: reloaded.clone(),
+        from: 0.8,
+        to: 0.9,
+        weight: 1.0,
+    };
     tracker.begin_update();
-    tracker.observe_montage(line.handle.0, &line.montage, line.from, line.to, line.weight, &mut out).unwrap();
+    tracker
+        .observe_montage(
+            line.handle.0,
+            &line.montage,
+            line.from,
+            line.to,
+            line.weight,
+            &mut out,
+        )
+        .unwrap();
     tracker.end_update(&mut out);
-    let reasons: Vec<_> = out.iter().filter(|e| e.phase == NotifyPhase::End).map(|e| (e.id().to_string(), e.end_reason)).collect();
-    assert!(reasons.contains(&("ms".to_string(), Some(EndReason::Reload))), "{reasons:?}");
-    assert_eq!(count(&out, "ms", NotifyPhase::Begin), 1, "the reloaded asset begins its own activation");
+    let reasons: Vec<_> = out
+        .iter()
+        .filter(|e| e.phase == NotifyPhase::End)
+        .map(|e| (e.id().to_string(), e.end_reason))
+        .collect();
+    assert!(
+        reasons.contains(&("ms".to_string(), Some(EndReason::Reload))),
+        "{reasons:?}"
+    );
+    assert_eq!(
+        count(&out, "ms", NotifyPhase::Begin),
+        1,
+        "the reloaded asset begins its own activation"
+    );
 }
 
 /// A Montage whose one segment loops three times over the trimmed range 0.25..1.25 of a 2 s clip.
@@ -265,7 +394,11 @@ fn looping_rig(restart: bool) -> (Arc<RuntimeSkeleton>, Arc<CompiledMontage>) {
     let mut m = (*base).clone();
     m.notifies.clear();
     m.notify_states.clear();
-    let clip_seq = sequence(2.0, &[], &[("wide", 0.0, 1.9), ("edge", 1.0, 1.9), ("inner", 0.5, 1.0)]);
+    let clip_seq = sequence(
+        2.0,
+        &[],
+        &[("wide", 0.0, 1.9), ("edge", 1.0, 1.9), ("inner", 0.5, 1.0)],
+    );
     let clip = Arc::new(CompiledClip::compile_shared(&clip_seq, &skel));
     let segment = &mut m.tracks[0].segments[0];
     segment.clip = clip;
@@ -293,9 +426,17 @@ fn play_loops(restart: bool) -> Vec<NotifyOccurrence> {
 #[test]
 fn a_state_covering_a_looping_segments_range_runs_across_the_seam_as_one_activation() {
     let out = play_loops(false);
-    assert_eq!(count(&out, "wide", NotifyPhase::Begin), 1, "{:?}", names(&out));
+    assert_eq!(
+        count(&out, "wide", NotifyPhase::Begin),
+        1,
+        "{:?}",
+        names(&out)
+    );
     assert_eq!(count(&out, "wide", NotifyPhase::End), 1);
-    assert!(count(&out, "wide", NotifyPhase::Tick) >= 20, "it keeps ticking through the seams");
+    assert!(
+        count(&out, "wide", NotifyPhase::Tick) >= 20,
+        "it keeps ticking through the seams"
+    );
     // states that do not span the seam are per cycle, as authored
     assert_eq!(count(&out, "inner", NotifyPhase::Begin), 3);
     assert_eq!(count(&out, "inner", NotifyPhase::End), 3);
@@ -306,8 +447,18 @@ fn a_state_covering_a_looping_segments_range_runs_across_the_seam_as_one_activat
 #[test]
 fn a_segment_authored_to_restart_ends_and_begins_every_state_each_cycle() {
     let out = play_loops(true);
-    assert_eq!(count(&out, "wide", NotifyPhase::Begin), 3, "{:?}", names(&out));
+    assert_eq!(
+        count(&out, "wide", NotifyPhase::Begin),
+        3,
+        "{:?}",
+        names(&out)
+    );
     assert_eq!(count(&out, "wide", NotifyPhase::End), 3);
-    let jumps = out.iter().filter(|e| e.id() == "wide" && e.phase == NotifyPhase::End && e.end_reason == Some(EndReason::Jump)).count();
+    let jumps = out
+        .iter()
+        .filter(|e| {
+            e.id() == "wide" && e.phase == NotifyPhase::End && e.end_reason == Some(EndReason::Jump)
+        })
+        .count();
     assert_eq!(jumps, 2, "the restarts at the two seams");
 }

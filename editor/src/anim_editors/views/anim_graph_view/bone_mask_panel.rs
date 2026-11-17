@@ -7,7 +7,6 @@
 //! of the node's `masks`, checked against the graph's skeleton. The library
 //! section edits the skeleton asset itself and saves it immediately.
 
-use gpui::*;
 use graphy_blueprint::NodeInstance;
 use skeletal_assets::bone_mask::{BoneMaskSpec, NamedBoneMask};
 use skeletal_assets::skeleton::Skeleton;

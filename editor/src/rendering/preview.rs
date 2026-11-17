@@ -122,6 +122,7 @@ impl Gpu {
 
 /// Fraction of pixels differing from the first pixel — a cheap "did anything
 /// get drawn" check.
+#[cfg(test)]
 pub fn coverage(rgba: &[u8]) -> f32 {
     let first = &rgba[0..4];
     let differing = rgba.chunks_exact(4).filter(|px| *px != first).count();

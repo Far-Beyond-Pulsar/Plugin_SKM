@@ -66,7 +66,11 @@ impl AssetSource for MemorySource {
         self.pose_dbs.get(id).cloned()
     }
     fn cached_pose_index(&self, database: &str, key: &str) -> Option<Vec<u8>> {
-        self.indexes.lock().ok()?.get(&(database.to_string(), key.to_string())).cloned()
+        self.indexes
+            .lock()
+            .ok()?
+            .get(&(database.to_string(), key.to_string()))
+            .cloned()
     }
     fn store_pose_index(&self, database: &str, key: &str, payload: &[u8]) {
         if let Ok(mut m) = self.indexes.lock() {

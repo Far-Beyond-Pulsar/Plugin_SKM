@@ -11,7 +11,9 @@ use std::collections::{HashMap, HashSet};
 use graphy_blueprint::{Connection, ConnectionType, DataType, NodeInstance};
 use serde_json::Value;
 
-use super::catalogue::{node_def, resolve_pins, GraphKind, NodeDef, ParamType, PinSpec, PropDef, PropKind};
+use super::catalogue::{
+    node_def, resolve_pins, GraphKind, NodeDef, ParamType, PinSpec, PropDef, PropKind,
+};
 use super::{AnimSubGraph, AnimationGraphAsset};
 use crate::bone_mask::BoneMaskSpec;
 use crate::diagnostics::Diagnostic;
@@ -34,7 +36,9 @@ fn label(sub: Option<&AnimSubGraph>) -> String {
 
 fn is_identifier(s: &str) -> bool {
     let mut chars = s.chars();
-    chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
@@ -47,7 +51,9 @@ pub fn asset_references(asset: &AnimationGraphAsset) -> Vec<GraphAssetRef> {
     let mut out = Vec::new();
     for (sub, _, graph) in asset.graphs() {
         for node in graph.nodes.values() {
-            let Some(def) = node_def(&node.node_type) else { continue };
+            let Some(def) = node_def(&node.node_type) else {
+                continue;
+            };
             for prop in def.props {
                 if let PropKind::Asset(kind) = prop.kind {
                     if let Some(id) = node.properties.get(prop.name).and_then(text) {
@@ -74,8 +80,11 @@ pub fn validate(asset: &AnimationGraphAsset) -> Vec<Diagnostic> {
     for parameter in &asset.parameters {
         if !is_identifier(&parameter.name) {
             out.push(
-                Diagnostic::error("graph.parameter_name", format!("Parameter `{}` needs an identifier name", parameter.name))
-                    .at(&parameter.id),
+                Diagnostic::error(
+                    "graph.parameter_name",
+                    format!("Parameter `{}` needs an identifier name", parameter.name),
+                )
+                .at(&parameter.id),
             );
         }
     }
@@ -91,25 +100,43 @@ pub fn validate(asset: &AnimationGraphAsset) -> Vec<Diagnostic> {
     let mut layer_edges: HashMap<String, Vec<String>> = HashMap::new();
     for (sub, _, graph) in asset.graphs() {
         for node in graph.nodes.values() {
-            let Some(def) = node_def(&node.node_type) else { continue };
+            let Some(def) = node_def(&node.node_type) else {
+                continue;
+            };
             for prop in def.props {
-                let PropKind::SubGraph(want) = prop.kind else { continue };
-                let Some(id) = node.properties.get(prop.name).and_then(text) else { continue };
+                let PropKind::SubGraph(want) = prop.kind else {
+                    continue;
+                };
+                let Some(id) = node.properties.get(prop.name).and_then(text) else {
+                    continue;
+                };
                 let at = format!("{}/{}", label(sub), node.id);
                 match asset.subgraph(id) {
                     None => out.push(
-                        Diagnostic::error("graph.missing_subgraph", format!("`{}` points at a graph that does not exist", prop.name))
-                            .at(at)
-                            .repair("Create the graph or clear the property"),
+                        Diagnostic::error(
+                            "graph.missing_subgraph",
+                            format!("`{}` points at a graph that does not exist", prop.name),
+                        )
+                        .at(at)
+                        .repair("Create the graph or clear the property"),
                     ),
                     Some(target) if target.kind != want => out.push(
-                        Diagnostic::error("graph.wrong_subgraph_kind", format!("`{}` needs a {want:?} graph but `{}` is {:?}", prop.name, target.name, target.kind))
-                            .at(at),
+                        Diagnostic::error(
+                            "graph.wrong_subgraph_kind",
+                            format!(
+                                "`{}` needs a {want:?} graph but `{}` is {:?}",
+                                prop.name, target.name, target.kind
+                            ),
+                        )
+                        .at(at),
                     ),
                     Some(target) => {
                         *referenced.entry(target.id.as_str()).or_default() += 1;
                         if want == GraphKind::Layer {
-                            layer_edges.entry(label(sub)).or_default().push(target.id.clone());
+                            layer_edges
+                                .entry(label(sub))
+                                .or_default()
+                                .push(target.id.clone());
                         }
                     }
                 }
@@ -131,7 +158,13 @@ pub fn validate(asset: &AnimationGraphAsset) -> Vec<Diagnostic> {
         }
     }
     if let Some(cycle) = find_cycle(&layer_edges) {
-        out.push(Diagnostic::error("graph.layer_cycle", format!("Layers run each other in a loop: {}", cycle.join(" -> "))).at(&cycle[0]));
+        out.push(
+            Diagnostic::error(
+                "graph.layer_cycle",
+                format!("Layers run each other in a loop: {}", cycle.join(" -> ")),
+            )
+            .at(&cycle[0]),
+        );
     }
 
     if asset.skeleton.is_none() {
@@ -143,9 +176,15 @@ pub fn validate(asset: &AnimationGraphAsset) -> Vec<Diagnostic> {
             .collect();
         if let Some(first) = needs.first() {
             out.push(
-                Diagnostic::error("graph.skeleton_required", format!("{} node(s) need a skeleton and the graph has none", needs.len()))
-                    .at(first.clone())
-                    .repair("Pick the graph's skeleton"),
+                Diagnostic::error(
+                    "graph.skeleton_required",
+                    format!(
+                        "{} node(s) need a skeleton and the graph has none",
+                        needs.len()
+                    ),
+                )
+                .at(first.clone())
+                .repair("Pick the graph's skeleton"),
             );
         }
     }
@@ -172,12 +211,25 @@ fn validate_graph(
     for id in &node_ids {
         let node = &graph.nodes[*id];
         let Some(def) = node_def(&node.node_type) else {
-            out.push(Diagnostic::error("graph.unknown_node", format!("Node type `{}` is not an animation node", node.node_type)).at(at(&node.id)).repair("Delete the node"));
+            out.push(
+                Diagnostic::error(
+                    "graph.unknown_node",
+                    format!("Node type `{}` is not an animation node", node.node_type),
+                )
+                .at(at(&node.id))
+                .repair("Delete the node"),
+            );
             continue;
         };
         known.insert(node.id.as_str(), def);
         if !def.graphs.contains(&kind) {
-            out.push(Diagnostic::error("graph.wrong_graph_kind", format!("{} cannot be placed in a {kind:?} graph", def.title)).at(at(&node.id)));
+            out.push(
+                Diagnostic::error(
+                    "graph.wrong_graph_kind",
+                    format!("{} cannot be placed in a {kind:?} graph", def.title),
+                )
+                .at(at(&node.id)),
+            );
         }
         if node.node_type == kind.terminal() {
             terminals += 1;
@@ -191,7 +243,11 @@ fn validate_graph(
         let term = super::catalogue::node_def(kind.terminal()).map_or(kind.terminal(), |d| d.title);
         out.push(
             Diagnostic::error(
-                if terminals == 0 { "graph.missing_terminal" } else { "graph.duplicate_terminal" },
+                if terminals == 0 {
+                    "graph.missing_terminal"
+                } else {
+                    "graph.duplicate_terminal"
+                },
                 format!("The {kind:?} graph needs exactly one {term} node and has {terminals}"),
             )
             .at(graph_label.to_string()),
@@ -202,45 +258,90 @@ fn validate_graph(
     let mut fed: HashMap<(&str, &str), usize> = HashMap::new();
     let mut valid: Vec<&Connection> = Vec::new();
     for c in &graph.connections {
-        let (Some(src), Some(dst)) = (graph.nodes.get(&c.source_node), graph.nodes.get(&c.target_node)) else {
-            out.push(Diagnostic::error("graph.dangling_wire", "A wire ends at a node that does not exist").at(format!("{graph_label}/{}", c.id)).repair("Delete the wire"));
+        let (Some(src), Some(dst)) = (
+            graph.nodes.get(&c.source_node),
+            graph.nodes.get(&c.target_node),
+        ) else {
+            out.push(
+                Diagnostic::error(
+                    "graph.dangling_wire",
+                    "A wire ends at a node that does not exist",
+                )
+                .at(format!("{graph_label}/{}", c.id))
+                .repair("Delete the wire"),
+            );
             continue;
         };
         let out_pin = src.outputs.iter().find(|p| p.id == c.source_pin);
         let in_pin = dst.inputs.iter().find(|p| p.id == c.target_pin);
         let (Some(out_pin), Some(in_pin)) = (out_pin, in_pin) else {
-            out.push(Diagnostic::error("graph.dangling_wire", format!("Wire {} uses a pin that does not exist", c.id)).at(format!("{graph_label}/{}", c.id)).repair("Delete the wire"));
+            out.push(
+                Diagnostic::error(
+                    "graph.dangling_wire",
+                    format!("Wire {} uses a pin that does not exist", c.id),
+                )
+                .at(format!("{graph_label}/{}", c.id))
+                .repair("Delete the wire"),
+            );
             continue;
         };
-        if !matches!(c.connection_type, ConnectionType::Data) || matches!(out_pin.pin.data_type, DataType::Execution) {
-            out.push(Diagnostic::error("graph.exec_wire", "Animation graphs have data wires only").at(format!("{graph_label}/{}", c.id)));
+        if !matches!(c.connection_type, ConnectionType::Data)
+            || matches!(out_pin.pin.data_type, DataType::Execution)
+        {
+            out.push(
+                Diagnostic::error("graph.exec_wire", "Animation graphs have data wires only")
+                    .at(format!("{graph_label}/{}", c.id)),
+            );
             continue;
         }
-        if !out_pin.pin.data_type.is_compatible_with(&in_pin.pin.data_type) {
+        if !out_pin
+            .pin
+            .data_type
+            .is_compatible_with(&in_pin.pin.data_type)
+        {
             out.push(
                 Diagnostic::error(
                     "graph.pin_type_mismatch",
-                    format!("{} -> {}: {} does not connect to {}", c.source_pin, c.target_pin, out_pin.pin.data_type, in_pin.pin.data_type),
+                    format!(
+                        "{} -> {}: {} does not connect to {}",
+                        c.source_pin, c.target_pin, out_pin.pin.data_type, in_pin.pin.data_type
+                    ),
                 )
                 .at(at(&c.target_node))
                 .repair("Insert a conversion node or use a pin of the same type"),
             );
             continue;
         }
-        *fed.entry((c.target_node.as_str(), c.target_pin.as_str())).or_default() += 1;
+        *fed.entry((c.target_node.as_str(), c.target_pin.as_str()))
+            .or_default() += 1;
         valid.push(c);
     }
     for ((node, pin), n) in &fed {
         if *n > 1 {
-            out.push(Diagnostic::error("graph.multiple_inputs", format!("Input `{pin}` has {n} wires but takes one")).at(at(node)).repair("Delete all but one wire"));
+            out.push(
+                Diagnostic::error(
+                    "graph.multiple_inputs",
+                    format!("Input `{pin}` has {n} wires but takes one"),
+                )
+                .at(at(node))
+                .repair("Delete all but one wire"),
+            );
         }
     }
     for id in &node_ids {
         let node = &graph.nodes[*id];
-        let Some((inputs, _)) = pins.get(node.id.as_str()) else { continue };
+        let Some((inputs, _)) = pins.get(node.id.as_str()) else {
+            continue;
+        };
         for pin in inputs.iter().filter(|p| p.required) {
             if !fed.contains_key(&(node.id.as_str(), pin.name.as_str())) {
-                out.push(Diagnostic::error("graph.unconnected_input", format!("Required input `{}` is not connected", pin.name)).at(at(&node.id)));
+                out.push(
+                    Diagnostic::error(
+                        "graph.unconnected_input",
+                        format!("Required input `{}` is not connected", pin.name),
+                    )
+                    .at(at(&node.id)),
+                );
             }
         }
     }
@@ -249,7 +350,9 @@ fn validate_graph(
     let mut deps: HashMap<String, Vec<String>> = HashMap::new();
     if kind != GraphKind::StateMachine {
         for c in &valid {
-            deps.entry(c.target_node.clone()).or_default().push(c.source_node.clone());
+            deps.entry(c.target_node.clone())
+                .or_default()
+                .push(c.source_node.clone());
         }
     }
     // cached poses
@@ -259,7 +362,13 @@ fn validate_graph(
         if node.node_type == "anim.save_cached_pose" {
             if let Some(name) = node.properties.get("name").and_then(text) {
                 if saves.insert(name, node).is_some() {
-                    out.push(Diagnostic::error("graph.duplicate_cached_pose", format!("Cached pose `{name}` is saved twice")).at(at(&node.id)));
+                    out.push(
+                        Diagnostic::error(
+                            "graph.duplicate_cached_pose",
+                            format!("Cached pose `{name}` is saved twice"),
+                        )
+                        .at(at(&node.id)),
+                    );
                 }
             }
         }
@@ -272,20 +381,40 @@ fn validate_graph(
                 match saves.get(name) {
                     Some(save) => {
                         used_saves.insert(name);
-                        deps.entry(node.id.clone()).or_default().push(save.id.clone());
+                        deps.entry(node.id.clone())
+                            .or_default()
+                            .push(save.id.clone());
                     }
-                    None => out.push(Diagnostic::error("graph.missing_cached_pose", format!("No Save Cached Pose named `{name}` in this graph")).at(at(&node.id))),
+                    None => out.push(
+                        Diagnostic::error(
+                            "graph.missing_cached_pose",
+                            format!("No Save Cached Pose named `{name}` in this graph"),
+                        )
+                        .at(at(&node.id)),
+                    ),
                 }
             }
         }
     }
     if kind != GraphKind::StateMachine {
         if let Some(cycle) = find_cycle(&deps) {
-            out.push(Diagnostic::error("graph.cycle", format!("Nodes feed each other in a loop: {}", cycle.join(" -> "))).at(at(&cycle[0])).repair("Break the loop; use a cached pose to reuse a result"));
+            out.push(
+                Diagnostic::error(
+                    "graph.cycle",
+                    format!("Nodes feed each other in a loop: {}", cycle.join(" -> ")),
+                )
+                .at(at(&cycle[0]))
+                .repair("Break the loop; use a cached pose to reuse a result"),
+            );
         }
         // reachability from the terminal
         let mut reached: HashSet<String> = HashSet::new();
-        let mut stack: Vec<String> = graph.nodes.values().filter(|n| n.node_type == kind.terminal()).map(|n| n.id.clone()).collect();
+        let mut stack: Vec<String> = graph
+            .nodes
+            .values()
+            .filter(|n| n.node_type == kind.terminal())
+            .map(|n| n.id.clone())
+            .collect();
         while let Some(n) = stack.pop() {
             if reached.insert(n.clone()) {
                 stack.extend(deps.get(&n).cloned().unwrap_or_default());
@@ -296,11 +425,19 @@ fn validate_graph(
                 let node = &graph.nodes[*id];
                 let is_save = node.node_type == "anim.save_cached_pose";
                 let name = node.properties.get("name").and_then(text);
-                let code = if is_save { "graph.unused_cached_pose" } else { "graph.unused_node" };
+                let code = if is_save {
+                    "graph.unused_cached_pose"
+                } else {
+                    "graph.unused_node"
+                };
                 if is_save && name.is_some_and(|n| used_saves.contains(n)) {
                     continue;
                 }
-                out.push(Diagnostic::warning(code, "Node does not contribute to the graph output").at(at(&node.id)).repair("Connect it or delete it"));
+                out.push(
+                    Diagnostic::warning(code, "Node does not contribute to the graph output")
+                        .at(at(&node.id))
+                        .repair("Connect it or delete it"),
+                );
             }
         }
     } else {
@@ -308,20 +445,52 @@ fn validate_graph(
     }
 }
 
-fn check_pins(def: &NodeDef, node: &NodeInstance, expected: &(Vec<PinSpec>, Vec<PinSpec>), at: &str, out: &mut Vec<Diagnostic>) {
-    for (actual, wanted, dir) in [(&node.inputs, &expected.0, "input"), (&node.outputs, &expected.1, "output")] {
+fn check_pins(
+    def: &NodeDef,
+    node: &NodeInstance,
+    expected: &(Vec<PinSpec>, Vec<PinSpec>),
+    at: &str,
+    out: &mut Vec<Diagnostic>,
+) {
+    for (actual, wanted, dir) in [
+        (&node.inputs, &expected.0, "input"),
+        (&node.outputs, &expected.1, "output"),
+    ] {
         for spec in wanted {
             match actual.iter().find(|p| p.id == spec.name) {
-                None => out.push(Diagnostic::error("graph.pin_mismatch", format!("{} is missing {dir} pin `{}`", def.title, spec.name)).at(at).repair("Refresh the node's pins")),
+                None => out.push(
+                    Diagnostic::error(
+                        "graph.pin_mismatch",
+                        format!("{} is missing {dir} pin `{}`", def.title, spec.name),
+                    )
+                    .at(at)
+                    .repair("Refresh the node's pins"),
+                ),
                 Some(p) if p.pin.data_type != spec.ty.data_type() => out.push(
-                    Diagnostic::error("graph.pin_mismatch", format!("{dir} pin `{}` should be {}", spec.name, spec.ty.type_name())).at(at).repair("Refresh the node's pins"),
+                    Diagnostic::error(
+                        "graph.pin_mismatch",
+                        format!(
+                            "{dir} pin `{}` should be {}",
+                            spec.name,
+                            spec.ty.type_name()
+                        ),
+                    )
+                    .at(at)
+                    .repair("Refresh the node's pins"),
                 ),
                 Some(_) => {}
             }
         }
         for p in actual {
             if !wanted.iter().any(|s| s.name == p.id) {
-                out.push(Diagnostic::error("graph.pin_mismatch", format!("{} has an unexpected {dir} pin `{}`", def.title, p.id)).at(at).repair("Refresh the node's pins"));
+                out.push(
+                    Diagnostic::error(
+                        "graph.pin_mismatch",
+                        format!("{} has an unexpected {dir} pin `{}`", def.title, p.id),
+                    )
+                    .at(at)
+                    .repair("Refresh the node's pins"),
+                );
             }
         }
     }
@@ -340,19 +509,34 @@ fn check_properties(
         let unset = value.is_none_or(|v| v.as_str().is_some_and(|s| s.trim().is_empty()));
         if unset {
             if prop.required {
-                out.push(Diagnostic::error("graph.missing_property", format!("{} needs `{}`", def.title, prop.name)).at(at));
+                out.push(
+                    Diagnostic::error(
+                        "graph.missing_property",
+                        format!("{} needs `{}`", def.title, prop.name),
+                    )
+                    .at(at),
+                );
             }
             continue;
         }
         if let Err(message) = check_value(asset, params, prop, value.expect("set"), node) {
-            out.push(Diagnostic::error("graph.bad_property", format!("`{}`: {message}", prop.name)).at(at));
+            out.push(
+                Diagnostic::error("graph.bad_property", format!("`{}`: {message}", prop.name))
+                    .at(at),
+            );
         }
     }
     match def.type_id {
         "anim.retarget" => {
             let set = |n: &str| node.properties.get(n).and_then(text).is_some();
             if set("profile") == set("ik_retargeter") {
-                out.push(Diagnostic::error("graph.retarget_source", "Set exactly one of a retarget profile or an IK retargeter").at(at));
+                out.push(
+                    Diagnostic::error(
+                        "graph.retarget_source",
+                        "Set exactly one of a retarget profile or an IK retargeter",
+                    )
+                    .at(at),
+                );
             }
         }
         "anim.linked_graph" => {
@@ -361,10 +545,25 @@ fn check_properties(
             }
         }
         "anim.layered_blend_per_bone" => {
-            let count = node.properties.get("count").and_then(Value::as_u64).unwrap_or(0) as usize;
-            let masks = node.properties.get("masks").and_then(Value::as_array).map_or(0, Vec::len);
+            let count = node
+                .properties
+                .get("count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            let masks = node
+                .properties
+                .get("masks")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len);
             if masks != count {
-                out.push(Diagnostic::error("graph.mask_count", format!("{count} layer(s) need {count} mask(s) but there are {masks}")).at(at).repair("Add or remove masks to match the layer count"));
+                out.push(
+                    Diagnostic::error(
+                        "graph.mask_count",
+                        format!("{count} layer(s) need {count} mask(s) but there are {masks}"),
+                    )
+                    .at(at)
+                    .repair("Add or remove masks to match the layer count"),
+                );
             }
         }
         _ => {}
@@ -430,7 +629,8 @@ fn check_value(
         PropKind::BoneMask => {
             let masks = value.as_array().ok_or("must be an array of masks")?;
             for mask in masks {
-                let spec: BoneMaskSpec = serde_json::from_value(mask.clone()).map_err(|e| e.to_string())?;
+                let spec: BoneMaskSpec =
+                    serde_json::from_value(mask.clone()).map_err(|e| e.to_string())?;
                 spec.validate()?;
             }
         }
@@ -444,7 +644,10 @@ fn check_value(
             let list = value.as_array().ok_or("must be an array")?;
             let mut seen = HashSet::new();
             for v in list {
-                let name = v.as_str().filter(|s| is_identifier(s)).ok_or("names must be identifiers")?;
+                let name = v
+                    .as_str()
+                    .filter(|s| is_identifier(s))
+                    .ok_or("names must be identifiers")?;
                 if !seen.insert(name) {
                     return Err(format!("`{name}` is listed twice"));
                 }
@@ -469,32 +672,67 @@ fn validate_state_machine(
 ) {
     let at = |node: &str| format!("{graph_label}/{node}");
     let type_of = |id: &str| known.get(id).map(|d| d.type_id);
-    let states: Vec<&NodeInstance> = graph.nodes.values().filter(|n| n.node_type == "sm.state").collect();
+    let states: Vec<&NodeInstance> = graph
+        .nodes
+        .values()
+        .filter(|n| n.node_type == "sm.state")
+        .collect();
     let mut names = HashSet::new();
     for s in &states {
         match s.properties.get("name").and_then(text) {
-            Some(n) if !names.insert(n.to_string()) => out.push(Diagnostic::error("sm.duplicate_state", format!("Two states are named `{n}`")).at(at(&s.id))),
+            Some(n) if !names.insert(n.to_string()) => out.push(
+                Diagnostic::error("sm.duplicate_state", format!("Two states are named `{n}`"))
+                    .at(at(&s.id)),
+            ),
             _ => {}
         }
     }
     // entry
-    let entry_targets: Vec<&&Connection> = wires.iter().filter(|c| type_of(&c.source_node) == Some("sm.entry")).collect();
+    let entry_targets: Vec<&&Connection> = wires
+        .iter()
+        .filter(|c| type_of(&c.source_node) == Some("sm.entry"))
+        .collect();
     match entry_targets.as_slice() {
-        [] => out.push(Diagnostic::error("sm.no_default_state", "Entry is not connected to a state").at(graph_label.to_string()).repair("Connect Entry to the default state")),
-        [only] if type_of(&only.target_node) != Some("sm.state") || only.target_pin != "default" => {
-            out.push(Diagnostic::error("sm.bad_entry", "Entry must connect to a state").at(at(&only.target_node)))
+        [] => out.push(
+            Diagnostic::error("sm.no_default_state", "Entry is not connected to a state")
+                .at(graph_label.to_string())
+                .repair("Connect Entry to the default state"),
+        ),
+        [only]
+            if type_of(&only.target_node) != Some("sm.state") || only.target_pin != "default" =>
+        {
+            out.push(
+                Diagnostic::error("sm.bad_entry", "Entry must connect to a state")
+                    .at(at(&only.target_node)),
+            )
         }
         [_] => {}
-        _ => out.push(Diagnostic::error("sm.multiple_defaults", "Entry connects to more than one state").at(graph_label.to_string())),
+        _ => out.push(
+            Diagnostic::error(
+                "sm.multiple_defaults",
+                "Entry connects to more than one state",
+            )
+            .at(graph_label.to_string()),
+        ),
     }
     // transitions
     let mut by_source: HashMap<&str, Vec<(i64, &str)>> = HashMap::new();
     let mut edges: HashMap<String, Vec<String>> = HashMap::new();
-    for t in graph.nodes.values().filter(|n| n.node_type == "sm.transition") {
-        let from = wires.iter().find(|c| c.target_node == t.id && c.target_pin == "from");
-        let to = wires.iter().find(|c| c.target_node == t.id && c.target_pin == "to");
+    for t in graph
+        .nodes
+        .values()
+        .filter(|n| n.node_type == "sm.transition")
+    {
+        let from = wires
+            .iter()
+            .find(|c| c.target_node == t.id && c.target_pin == "from");
+        let to = wires
+            .iter()
+            .find(|c| c.target_node == t.id && c.target_pin == "to");
         // Missing wires are reported as unconnected required inputs.
-        let (Some(from), Some(to)) = (from, to) else { continue };
+        let (Some(from), Some(to)) = (from, to) else {
+            continue;
+        };
         if type_of(&from.source_node) != Some("sm.state")
             || type_of(&to.source_node) != Some("sm.state")
             || from.source_pin != "leave"
@@ -503,13 +741,34 @@ fn validate_state_machine(
             out.push(Diagnostic::error("sm.bad_transition_endpoint", "A transition's `from` takes a state's `leave` pin and its `to` takes a state's `arrive` pin").at(at(&t.id)));
             continue;
         }
-        let allow = t.properties.get("allow_reentry").and_then(Value::as_bool).unwrap_or(false);
+        let allow = t
+            .properties
+            .get("allow_reentry")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         if from.source_node == to.source_node && !allow {
-            out.push(Diagnostic::error("sm.self_transition", "A transition to the same state needs allow_reentry").at(at(&t.id)).repair("Enable allow_reentry or retarget the transition"));
+            out.push(
+                Diagnostic::error(
+                    "sm.self_transition",
+                    "A transition to the same state needs allow_reentry",
+                )
+                .at(at(&t.id))
+                .repair("Enable allow_reentry or retarget the transition"),
+            );
         }
-        let priority = t.properties.get("priority").and_then(Value::as_i64).unwrap_or(0);
-        by_source.entry(from.source_node.as_str()).or_default().push((priority, t.id.as_str()));
-        edges.entry(from.source_node.clone()).or_default().push(to.source_node.clone());
+        let priority = t
+            .properties
+            .get("priority")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        by_source
+            .entry(from.source_node.as_str())
+            .or_default()
+            .push((priority, t.id.as_str()));
+        edges
+            .entry(from.source_node.clone())
+            .or_default()
+            .push(to.source_node.clone());
     }
     for (source, list) in &by_source {
         let mut seen: HashMap<i64, &str> = HashMap::new();
@@ -536,7 +795,14 @@ fn validate_state_machine(
         }
         for s in &states {
             if !reached.contains(s.id.as_str()) {
-                out.push(Diagnostic::warning("sm.unreachable_state", "No transition path from the default state reaches this state").at(at(&s.id)).repair("Add a transition into it or delete it"));
+                out.push(
+                    Diagnostic::warning(
+                        "sm.unreachable_state",
+                        "No transition path from the default state reaches this state",
+                    )
+                    .at(at(&s.id))
+                    .repair("Add a transition into it or delete it"),
+                );
             }
         }
     }
@@ -550,7 +816,12 @@ pub fn find_cycle(edges: &HashMap<String, Vec<String>>) -> Option<Vec<String>> {
         Visiting,
         Done,
     }
-    fn visit(n: &str, edges: &HashMap<String, Vec<String>>, marks: &mut HashMap<String, Mark>, path: &mut Vec<String>) -> Option<Vec<String>> {
+    fn visit(
+        n: &str,
+        edges: &HashMap<String, Vec<String>>,
+        marks: &mut HashMap<String, Mark>,
+        path: &mut Vec<String>,
+    ) -> Option<Vec<String>> {
         match marks.get(n) {
             Some(Mark::Done) => return None,
             Some(Mark::Visiting) => {
@@ -587,19 +858,28 @@ pub fn find_cycle(edges: &HashMap<String, Vec<String>>) -> Option<Vec<String>> {
 
 /// Checks that need the graph's skeleton: bone properties and masks name real
 /// bones, and IK chains are shaped as the solver needs.
-pub fn validate_against_skeleton(asset: &AnimationGraphAsset, skeleton: &Skeleton) -> Vec<Diagnostic> {
+pub fn validate_against_skeleton(
+    asset: &AnimationGraphAsset,
+    skeleton: &Skeleton,
+) -> Vec<Diagnostic> {
     validate_against_skeleton_masks(asset, skeleton, &[])
 }
 
 /// [`validate_against_skeleton`] with the skeleton's named masks, so a layer that refers to one is checked against it.
-pub fn validate_against_skeleton_masks(asset: &AnimationGraphAsset, skeleton: &Skeleton, library: &[crate::bone_mask::NamedBoneMask]) -> Vec<Diagnostic> {
+pub fn validate_against_skeleton_masks(
+    asset: &AnimationGraphAsset,
+    skeleton: &Skeleton,
+    library: &[crate::bone_mask::NamedBoneMask],
+) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for (sub, _, graph) in asset.graphs() {
         let mut ids: Vec<&String> = graph.nodes.keys().collect();
         ids.sort();
         for id in ids {
             let node = &graph.nodes[id];
-            let Some(def) = node_def(&node.node_type) else { continue };
+            let Some(def) = node_def(&node.node_type) else {
+                continue;
+            };
             let at = format!("{}/{}", label(sub), node.id);
             for prop in def.props {
                 match prop.kind {
@@ -611,7 +891,14 @@ pub fn validate_against_skeleton_masks(asset: &AnimationGraphAsset, skeleton: &S
                         }
                     }
                     PropKind::BoneMask => {
-                        for (i, mask) in node.properties.get(prop.name).and_then(Value::as_array).into_iter().flatten().enumerate() {
+                        for (i, mask) in node
+                            .properties
+                            .get(prop.name)
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .enumerate()
+                        {
                             if let Ok(spec) = serde_json::from_value::<BoneMaskSpec>(mask.clone()) {
                                 match spec.missing_bones_in(skeleton, library) {
                                     Ok(missing) => {
@@ -619,7 +906,14 @@ pub fn validate_against_skeleton_masks(asset: &AnimationGraphAsset, skeleton: &S
                                             out.push(Diagnostic::error("graph.unknown_bone", format!("Mask {i} names bone `{bone}` which the skeleton does not have")).at(&at));
                                         }
                                     }
-                                    Err(e) => out.push(Diagnostic::error("graph.mask_profile", format!("Mask {i}: {e}")).at(&at).repair("Pick a mask the skeleton defines")),
+                                    Err(e) => out.push(
+                                        Diagnostic::error(
+                                            "graph.mask_profile",
+                                            format!("Mask {i}: {e}"),
+                                        )
+                                        .at(&at)
+                                        .repair("Pick a mask the skeleton defines"),
+                                    ),
                                 }
                             }
                         }
@@ -627,11 +921,21 @@ pub fn validate_against_skeleton_masks(asset: &AnimationGraphAsset, skeleton: &S
                     _ => {}
                 }
             }
-            let bone = |p: &str| node.properties.get(p).and_then(text).and_then(|b| skeleton.bone(b));
+            let bone = |p: &str| {
+                node.properties
+                    .get(p)
+                    .and_then(text)
+                    .and_then(|b| skeleton.bone(b))
+            };
             match def.type_id {
                 "anim.two_bone_ik" => {
                     if let Some(end) = bone("end_bone") {
-                        let has_grandparent = end.parent.as_deref().and_then(|p| skeleton.bone(p)).and_then(|p| p.parent.as_deref()).is_some();
+                        let has_grandparent = end
+                            .parent
+                            .as_deref()
+                            .and_then(|p| skeleton.bone(p))
+                            .and_then(|p| p.parent.as_deref())
+                            .is_some();
                         if !has_grandparent {
                             out.push(Diagnostic::error("graph.ik_chain", "Two Bone IK needs the end bone to have a parent and a grandparent").at(&at));
                         }
@@ -649,7 +953,13 @@ pub fn validate_against_skeleton_masks(asset: &AnimationGraphAsset, skeleton: &S
                             cursor = skeleton.bone(c).and_then(|b| b.parent.as_deref());
                         }
                         if !found || tip.id == root.id {
-                            out.push(Diagnostic::error("graph.ik_chain", "FABRIK root bone must be a proper ancestor of the tip bone").at(&at));
+                            out.push(
+                                Diagnostic::error(
+                                    "graph.ik_chain",
+                                    "FABRIK root bone must be a proper ancestor of the tip bone",
+                                )
+                                .at(&at),
+                            );
                         }
                     }
                 }
@@ -671,22 +981,39 @@ pub fn retarget_source_nodes(asset: &AnimationGraphAsset) -> HashSet<(String, St
         let mut stack: Vec<String> = graph
             .connections
             .iter()
-            .filter(|c| c.target_pin == "source" && graph.nodes.get(&c.target_node).is_some_and(|n| n.node_type == "anim.retarget"))
+            .filter(|c| {
+                c.target_pin == "source"
+                    && graph
+                        .nodes
+                        .get(&c.target_node)
+                        .is_some_and(|n| n.node_type == "anim.retarget")
+            })
             .map(|c| c.source_node.clone())
             .collect();
         while let Some(node) = stack.pop() {
             if !out.insert((graph_label.clone(), node.clone())) {
                 continue;
             }
-            stack.extend(graph.connections.iter().filter(|c| c.target_node == node).map(|c| c.source_node.clone()));
-            let Some(n) = graph.nodes.get(&node) else { continue };
+            stack.extend(
+                graph
+                    .connections
+                    .iter()
+                    .filter(|c| c.target_node == node)
+                    .map(|c| c.source_node.clone()),
+            );
+            let Some(n) = graph.nodes.get(&node) else {
+                continue;
+            };
             if n.node_type == "anim.use_cached_pose" {
                 let name = n.properties.get("name").and_then(Value::as_str);
                 stack.extend(
                     graph
                         .nodes
                         .values()
-                        .filter(|s| s.node_type == "anim.save_cached_pose" && s.properties.get("name").and_then(Value::as_str) == name)
+                        .filter(|s| {
+                            s.node_type == "anim.save_cached_pose"
+                                && s.properties.get("name").and_then(Value::as_str) == name
+                        })
                         .map(|s| s.id.clone()),
                 );
             }

@@ -18,8 +18,7 @@ use skeletal_assets::pose_db::{
 use skeletal_assets::runtime::clip::CompiledClip;
 use skeletal_assets::runtime::pose::RuntimeSkeleton;
 use skeletal_assets::runtime::posesearch::{
-    layout, ChannelSpan, DesiredTrajectory, FrameFeatures, MirrorTable, PoseIndex, SearchClip,
-    SearchResult,
+    layout, ChannelSpan, DesiredTrajectory, FrameFeatures, PoseIndex, SearchClip, SearchResult,
 };
 use skeletal_assets::skeleton::Skeleton;
 
@@ -343,24 +342,6 @@ impl PoseDbModel {
         )
     }
 
-    pub fn add_curve_channel(
-        &mut self,
-        name: &str,
-        curve: &str,
-        weight: f32,
-    ) -> Result<usize, String> {
-        if curve.trim().is_empty() {
-            return Err("name a curve".into());
-        }
-        self.push_channel(
-            name,
-            weight,
-            ChannelKind::Curve {
-                curve: curve.trim().to_string(),
-            },
-        )
-    }
-
     pub fn add_phase_channel(&mut self, weight: f32) -> Result<usize, String> {
         self.push_channel("Phase", weight, ChannelKind::Phase)
     }
@@ -514,42 +495,6 @@ impl PoseDbModel {
         }
     }
 
-    /// Run the real index builder over compiled source clips.
-    pub fn build_index(
-        &mut self,
-        skeleton: &Skeleton,
-        clips: Vec<SearchClip>,
-        key: &IndexKey,
-    ) -> Result<BuildInfo, Vec<Diagnostic>> {
-        let runtime = RuntimeSkeleton::new("posedb", skeleton)
-            .map_err(|e| vec![Diagnostic::error("posedb.skeleton", e.to_string())])?;
-        let mirror = clips
-            .iter()
-            .any(|c| c.mirrored)
-            .then(|| MirrorTable::from_names(&runtime));
-        match PoseIndex::build(self.asset(), &runtime, &clips, mirror.as_ref()) {
-            Ok(index) => {
-                let info = BuildInfo {
-                    builder_version: key.builder_version,
-                    hash: key.hash.clone(),
-                    entries: index.entries.len(),
-                    dims: index.dims,
-                    clips: clips.len(),
-                };
-                self.last_build = Some(info.clone());
-                self.build_diagnostics.clear();
-                self.index = Some((index, clips));
-                Ok(info)
-            }
-            Err(diagnostics) => {
-                self.last_build = None;
-                self.build_diagnostics = diagnostics.clone();
-                self.index = None;
-                Err(diagnostics)
-            }
-        }
-    }
-
     /// Take the result of a build that ran elsewhere (on a background thread).
     /// A cancelled build leaves the previous index and its state as they were.
     pub fn finish_build(
@@ -586,14 +531,6 @@ impl PoseDbModel {
     /// The payload to cache next to the project for the last build.
     pub fn index_payload(&self) -> Option<Vec<u8>> {
         self.index.as_ref().map(|(i, _)| i.to_payload())
-    }
-
-    /// Whether editing has invalidated the last build: any authored change
-    /// since it ran. A build must be rerun to be trusted.
-    pub fn build_is_current(&self, key: &IndexKey) -> bool {
-        self.last_build
-            .as_ref()
-            .is_some_and(|b| b.hash == key.hash && b.builder_version == key.builder_version)
     }
 
     /// Run a query through the real search: the frame features are the pose of
@@ -663,6 +600,71 @@ impl PoseDbModel {
         }
         out.extend(self.build_diagnostics.iter().cloned());
         out
+    }
+}
+
+#[cfg(test)]
+impl PoseDbModel {
+    pub fn add_curve_channel(
+        &mut self,
+        name: &str,
+        curve: &str,
+        weight: f32,
+    ) -> Result<usize, String> {
+        if curve.trim().is_empty() {
+            return Err("name a curve".into());
+        }
+        self.push_channel(
+            name,
+            weight,
+            ChannelKind::Curve {
+                curve: curve.trim().to_string(),
+            },
+        )
+    }
+
+    /// Run the real index builder over compiled source clips.
+    pub fn build_index(
+        &mut self,
+        skeleton: &Skeleton,
+        clips: Vec<SearchClip>,
+        key: &IndexKey,
+    ) -> Result<BuildInfo, Vec<Diagnostic>> {
+        let runtime = RuntimeSkeleton::new("posedb", skeleton)
+            .map_err(|e| vec![Diagnostic::error("posedb.skeleton", e.to_string())])?;
+        let mirror = clips
+            .iter()
+            .any(|c| c.mirrored)
+            .then(|| skeletal_assets::runtime::posesearch::MirrorTable::from_names(&runtime));
+        match PoseIndex::build(self.asset(), &runtime, &clips, mirror.as_ref()) {
+            Ok(index) => {
+                let info = BuildInfo {
+                    builder_version: key.builder_version,
+                    hash: key.hash.clone(),
+                    entries: index.entries.len(),
+                    dims: index.dims,
+                    clips: clips.len(),
+                };
+                self.last_build = Some(info.clone());
+                self.build_diagnostics.clear();
+                self.index = Some((index, clips));
+                Ok(info)
+            }
+            Err(diagnostics) => {
+                self.last_build = None;
+                self.build_diagnostics = diagnostics.clone();
+                self.index = None;
+                Err(diagnostics)
+            }
+        }
+    }
+
+    /// Whether editing has invalidated the last build: any authored change
+    /// since it ran. A build must be rerun to be trusted.
+    pub fn build_is_current(&self, key: &IndexKey) -> bool {
+        self.last_build
+            .as_ref()
+            .is_some_and(|b| b.hash == key.hash && b.builder_version == key.builder_version)
     }
 
     pub fn save(&mut self) -> anyhow::Result<super::document::SaveOutcome> {

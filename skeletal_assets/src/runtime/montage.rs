@@ -14,7 +14,9 @@
 
 use std::sync::Arc;
 
-use crate::montage::{AnimationMontageAsset, BlendCurve, BlendSettings, InterruptPolicy, MontageRootMotion};
+use crate::montage::{
+    AnimationMontageAsset, BlendCurve, BlendSettings, InterruptPolicy, MontageRootMotion,
+};
 
 use super::clip::CompiledClip;
 use super::pose::{Pose, RootMotion, RuntimeSkeleton};
@@ -86,12 +88,35 @@ impl CompiledMontage {
         for t in &asset.tracks {
             let mut segments = Vec::new();
             for s in &t.segments {
-                let seq = s.sequence.as_ref().ok_or_else(|| format!("segment {} has no sequence", s.id))?;
-                let clip = clip_of(seq.as_str()).ok_or_else(|| format!("segment {} uses sequence {} which could not be loaded", s.id, seq.as_str()))?;
+                let seq = s
+                    .sequence
+                    .as_ref()
+                    .ok_or_else(|| format!("segment {} has no sequence", s.id))?;
+                let clip = clip_of(seq.as_str()).ok_or_else(|| {
+                    format!(
+                        "segment {} uses sequence {} which could not be loaded",
+                        s.id,
+                        seq.as_str()
+                    )
+                })?;
                 let clip_end = s.clip_end.unwrap_or(clip.duration).min(clip.duration);
-                let rate = if s.play_rate.abs() > 1e-6 { s.play_rate.abs() } else { 1.0 };
+                let rate = if s.play_rate.abs() > 1e-6 {
+                    s.play_rate.abs()
+                } else {
+                    1.0
+                };
                 let length = s.timeline_length(clip.duration).max(0.0);
-                segments.push(CompiledSegment { id: s.id.clone(), start: s.start, clip, clip_start: s.clip_start.max(0.0), clip_end, rate, loop_count: s.loop_count.max(1), restart_states_on_loop: s.restart_states_on_loop, length });
+                segments.push(CompiledSegment {
+                    id: s.id.clone(),
+                    start: s.start,
+                    clip,
+                    clip_start: s.clip_start.max(0.0),
+                    clip_end,
+                    rate,
+                    loop_count: s.loop_count.max(1),
+                    restart_states_on_loop: s.restart_states_on_loop,
+                    length,
+                });
             }
             segments.sort_by(|a, b| a.start.total_cmp(&b.start));
             tracks.push(CompiledTrack {
@@ -100,18 +125,36 @@ impl CompiledMontage {
                 group: t.group.clone(),
                 segments,
                 mask: match t.mask.as_ref() {
-                    Some(m) => Some(m.weights_in(&skeleton_for_mask(skel), &skel.mask_library).map_err(|e| format!("slot `{}`: {e}", t.slot))?),
+                    Some(m) => Some(
+                        m.weights_in(&skeleton_for_mask(skel), &skel.mask_library)
+                            .map_err(|e| format!("slot `{}`: {e}", t.slot))?,
+                    ),
                     None => None,
                 },
             });
         }
-        let length = tracks.iter().flat_map(|t| &t.segments).map(|s| s.start + s.length).fold(0.0, f32::max);
+        let length = tracks
+            .iter()
+            .flat_map(|t| &t.segments)
+            .map(|s| s.start + s.length)
+            .fold(0.0, f32::max);
         let mut order: Vec<usize> = (0..asset.sections.len()).collect();
-        order.sort_by(|&a, &b| asset.sections[a].start.total_cmp(&asset.sections[b].start).then(a.cmp(&b)));
+        order.sort_by(|&a, &b| {
+            asset.sections[a]
+                .start
+                .total_cmp(&asset.sections[b].start)
+                .then(a.cmp(&b))
+        });
         let mut sections: Vec<CompiledSection> = asset
             .sections
             .iter()
-            .map(|s| CompiledSection { id: s.id.clone(), name: s.name.clone(), start: s.start, end: length, next: None })
+            .map(|s| CompiledSection {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                start: s.start,
+                end: length,
+                next: None,
+            })
             .collect();
         for (n, &i) in order.iter().enumerate() {
             if let Some(&after) = order.get(n + 1) {
@@ -119,7 +162,10 @@ impl CompiledMontage {
             }
         }
         for (i, s) in asset.sections.iter().enumerate() {
-            sections[i].next = s.next.as_ref().and_then(|n| asset.sections.iter().position(|o| &o.id == n));
+            sections[i].next = s
+                .next
+                .as_ref()
+                .and_then(|n| asset.sections.iter().position(|o| &o.id == n));
         }
         Ok(Self {
             id: asset.id.as_str().to_string(),
@@ -141,11 +187,15 @@ impl CompiledMontage {
     }
 
     pub fn section_index(&self, name_or_id: &str) -> Option<usize> {
-        self.sections.iter().position(|s| s.name == name_or_id || s.id == name_or_id)
+        self.sections
+            .iter()
+            .position(|s| s.name == name_or_id || s.id == name_or_id)
     }
 
     pub fn has_slot(&self, slot: &str, group: &str) -> bool {
-        self.tracks.iter().any(|t| t.slot == slot && t.group == group)
+        self.tracks
+            .iter()
+            .any(|t| t.slot == slot && t.group == group)
     }
 }
 
@@ -183,7 +233,10 @@ pub enum MontageResult {
 #[derive(Clone, Debug, PartialEq)]
 pub enum MontageEventKind {
     Started,
-    SectionChanged { from: Option<String>, to: String },
+    SectionChanged {
+        from: Option<String>,
+        to: String,
+    },
     /// The blend-in finished: the Montage is at full weight.
     BlendedIn,
     BlendingOut,
@@ -201,9 +254,13 @@ pub struct MontageEvent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlayRefused {
     /// The group is busy and the montage's policy is `RejectIfBusy`.
-    GroupBusy { by: MontageHandle },
+    GroupBusy {
+        by: MontageHandle,
+    },
     /// `StartIfHigherPriority` and something of equal or higher priority plays.
-    LowerPriority { by: MontageHandle },
+    LowerPriority {
+        by: MontageHandle,
+    },
     UnknownSection(String),
     InvalidRate,
 }
@@ -249,7 +306,12 @@ impl MontageInstance {
     }
 
     fn next_of(&self, section: usize) -> Option<usize> {
-        self.overrides.iter().rev().find(|(s, _)| *s == section).map(|(_, n)| *n).or(self.montage.sections[section].next)
+        self.overrides
+            .iter()
+            .rev()
+            .find(|(s, _)| *s == section)
+            .map(|(_, n)| *n)
+            .or(self.montage.sections[section].next)
     }
 
     /// The section reverse playback continues into from the start of `section`:
@@ -317,20 +379,40 @@ impl MontageSet {
 
     /// Start a montage. `start_section` begins at that section. The group's
     /// interruption policy decides what happens to running instances.
-    pub fn play(&mut self, montage: Arc<CompiledMontage>, rate: f32, start_section: Option<&str>) -> Result<MontageHandle, PlayRefused> {
+    pub fn play(
+        &mut self,
+        montage: Arc<CompiledMontage>,
+        rate: f32,
+        start_section: Option<&str>,
+    ) -> Result<MontageHandle, PlayRefused> {
         if !rate.is_finite() || rate == 0.0 {
             return Err(PlayRefused::InvalidRate);
         }
         let section = match start_section {
-            Some(name) => Some(montage.section_index(name).ok_or_else(|| PlayRefused::UnknownSection(name.to_string()))?),
+            Some(name) => Some(
+                montage
+                    .section_index(name)
+                    .ok_or_else(|| PlayRefused::UnknownSection(name.to_string()))?,
+            ),
             None => (!montage.sections.is_empty()).then(|| {
                 // the earliest section is where a plain play begins
-                (0..montage.sections.len()).min_by(|&a, &b| montage.sections[a].start.total_cmp(&montage.sections[b].start).then(a.cmp(&b))).unwrap_or(0)
+                (0..montage.sections.len())
+                    .min_by(|&a, &b| {
+                        montage.sections[a]
+                            .start
+                            .total_cmp(&montage.sections[b].start)
+                            .then(a.cmp(&b))
+                    })
+                    .unwrap_or(0)
             }),
         };
         let handle = MontageHandle(self.next_handle);
-        let in_group: Vec<(MontageHandle, i32)> =
-            self.instances.iter().filter(|i| i.montage.group == montage.group).map(|i| (i.handle, i.priority)).collect();
+        let in_group: Vec<(MontageHandle, i32)> = self
+            .instances
+            .iter()
+            .filter(|i| i.montage.group == montage.group)
+            .map(|i| (i.handle, i.priority))
+            .collect();
         match montage.interrupt {
             InterruptPolicy::RejectIfBusy => {
                 if let Some(&(by, _)) = in_group.first() {
@@ -356,7 +438,11 @@ impl MontageSet {
             rate,
             paused: false,
             priority: montage.priority,
-            phase: if blend_in.duration > 0.0 { Phase::BlendingIn } else { Phase::Playing },
+            phase: if blend_in.duration > 0.0 {
+                Phase::BlendingIn
+            } else {
+                Phase::Playing
+            },
             weight: if blend_in.duration > 0.0 { 0.0 } else { 1.0 },
             blend_elapsed: 0.0,
             blend_from: 0.0,
@@ -370,15 +456,26 @@ impl MontageSet {
             pending_result: None,
             montage: montage.clone(),
         };
-        self.events.push(MontageEvent { handle, montage: montage.id.clone(), kind: MontageEventKind::Started });
+        self.events.push(MontageEvent {
+            handle,
+            montage: montage.id.clone(),
+            kind: MontageEventKind::Started,
+        });
         if blend_in.duration <= 0.0 {
-            self.events.push(MontageEvent { handle, montage: montage.id.clone(), kind: MontageEventKind::BlendedIn });
+            self.events.push(MontageEvent {
+                handle,
+                montage: montage.id.clone(),
+                kind: MontageEventKind::BlendedIn,
+            });
         }
         if let Some(s) = section {
             self.events.push(MontageEvent {
                 handle,
                 montage: montage.id.clone(),
-                kind: MontageEventKind::SectionChanged { from: None, to: montage.sections[s].name.clone() },
+                kind: MontageEventKind::SectionChanged {
+                    from: None,
+                    to: montage.sections[s].name.clone(),
+                },
             });
         }
         self.instances.push(instance);
@@ -391,10 +488,20 @@ impl MontageSet {
         }
     }
 
-    fn stop_with(&mut self, handle: MontageHandle, blend: Option<f32>, result: MontageResult) -> bool {
-        let Some(i) = self.instances.iter().position(|i| i.handle == handle) else { return false };
+    fn stop_with(
+        &mut self,
+        handle: MontageHandle,
+        blend: Option<f32>,
+        result: MontageResult,
+    ) -> bool {
+        let Some(i) = self.instances.iter().position(|i| i.handle == handle) else {
+            return false;
+        };
         let inst = &mut self.instances[i];
-        let settings = BlendSettings { duration: blend.unwrap_or(inst.montage.blend_out.duration), curve: inst.montage.blend_out.curve };
+        let settings = BlendSettings {
+            duration: blend.unwrap_or(inst.montage.blend_out.duration),
+            curve: inst.montage.blend_out.curve,
+        };
         if inst.phase == Phase::BlendingOut {
             // already ending: a harder stop may shorten it but never lengthen it
             if let Some(d) = blend {
@@ -410,7 +517,11 @@ impl MontageSet {
         }
         inst.begin_blend_out(settings, 1.0);
         inst.pending_result = Some(result);
-        self.events.push(MontageEvent { handle, montage: inst.montage.id.clone(), kind: MontageEventKind::BlendingOut });
+        self.events.push(MontageEvent {
+            handle,
+            montage: inst.montage.id.clone(),
+            kind: MontageEventKind::BlendingOut,
+        });
         true
     }
 
@@ -422,20 +533,33 @@ impl MontageSet {
 
     /// Stop everything in a group.
     pub fn stop_group(&mut self, group: &str, blend_out: Option<f32>) -> usize {
-        let hs: Vec<_> = self.instances.iter().filter(|i| i.montage.group == group).map(|i| i.handle).collect();
-        hs.iter().filter(|&&h| self.stop_with(h, blend_out, MontageResult::Stopped)).count()
+        let hs: Vec<_> = self
+            .instances
+            .iter()
+            .filter(|i| i.montage.group == group)
+            .map(|i| i.handle)
+            .collect();
+        hs.iter()
+            .filter(|&&h| self.stop_with(h, blend_out, MontageResult::Stopped))
+            .count()
     }
 
     /// Stop everything.
     pub fn stop_all(&mut self, blend_out: Option<f32>) -> usize {
         let hs: Vec<_> = self.instances.iter().map(|i| i.handle).collect();
-        hs.iter().filter(|&&h| self.stop_with(h, blend_out, MontageResult::Stopped)).count()
+        hs.iter()
+            .filter(|&&h| self.stop_with(h, blend_out, MontageResult::Stopped))
+            .count()
     }
 
     /// Remove every instance without blending. Each reports `Cancelled`.
     pub fn cancel_all(&mut self) {
         for inst in std::mem::take(&mut self.instances) {
-            self.events.push(MontageEvent { handle: inst.handle, montage: inst.montage.id.clone(), kind: MontageEventKind::Ended(MontageResult::Cancelled) });
+            self.events.push(MontageEvent {
+                handle: inst.handle,
+                montage: inst.montage.id.clone(),
+                kind: MontageEventKind::Ended(MontageResult::Cancelled),
+            });
         }
     }
 
@@ -447,40 +571,75 @@ impl MontageSet {
         if !rate.is_finite() || rate == 0.0 {
             return Err(PlayRefused::InvalidRate);
         }
-        self.get_mut(handle).map(|i| i.rate = rate).ok_or(PlayRefused::InvalidRate)
+        self.get_mut(handle)
+            .map(|i| i.rate = rate)
+            .ok_or(PlayRefused::InvalidRate)
     }
 
     pub fn set_priority(&mut self, handle: MontageHandle, priority: i32) -> bool {
-        self.get_mut(handle).map(|i| i.priority = priority).is_some()
+        self.get_mut(handle)
+            .map(|i| i.priority = priority)
+            .is_some()
     }
 
     /// Jump to the start of a section. Does not raise gameplay events for the
     /// skipped time.
-    pub fn jump_to_section(&mut self, handle: MontageHandle, section: &str) -> Result<(), PlayRefused> {
-        let inst = self.get_mut(handle).ok_or_else(|| PlayRefused::UnknownSection(section.to_string()))?;
-        let idx = inst.montage.section_index(section).ok_or_else(|| PlayRefused::UnknownSection(section.to_string()))?;
+    pub fn jump_to_section(
+        &mut self,
+        handle: MontageHandle,
+        section: &str,
+    ) -> Result<(), PlayRefused> {
+        let inst = self
+            .get_mut(handle)
+            .ok_or_else(|| PlayRefused::UnknownSection(section.to_string()))?;
+        let idx = inst
+            .montage
+            .section_index(section)
+            .ok_or_else(|| PlayRefused::UnknownSection(section.to_string()))?;
         let from = inst.section_name().map(str::to_string);
         inst.position = inst.montage.sections[idx].start as f64;
         inst.last_span = (inst.position, inst.position);
         inst.runs = vec![(inst.position, inst.position)];
         inst.section = Some(idx);
-        let (montage, to) = (inst.montage.id.clone(), inst.montage.sections[idx].name.clone());
-        self.events.push(MontageEvent { handle, montage, kind: MontageEventKind::SectionChanged { from, to } });
+        let (montage, to) = (
+            inst.montage.id.clone(),
+            inst.montage.sections[idx].name.clone(),
+        );
+        self.events.push(MontageEvent {
+            handle,
+            montage,
+            kind: MontageEventKind::SectionChanged { from, to },
+        });
         Ok(())
     }
 
     /// Change what follows `section` for this instance only.
-    pub fn set_next_section(&mut self, handle: MontageHandle, section: &str, next: &str) -> Result<(), PlayRefused> {
-        let inst = self.get_mut(handle).ok_or_else(|| PlayRefused::UnknownSection(section.to_string()))?;
-        let a = inst.montage.section_index(section).ok_or_else(|| PlayRefused::UnknownSection(section.to_string()))?;
-        let b = inst.montage.section_index(next).ok_or_else(|| PlayRefused::UnknownSection(next.to_string()))?;
+    pub fn set_next_section(
+        &mut self,
+        handle: MontageHandle,
+        section: &str,
+        next: &str,
+    ) -> Result<(), PlayRefused> {
+        let inst = self
+            .get_mut(handle)
+            .ok_or_else(|| PlayRefused::UnknownSection(section.to_string()))?;
+        let a = inst
+            .montage
+            .section_index(section)
+            .ok_or_else(|| PlayRefused::UnknownSection(section.to_string()))?;
+        let b = inst
+            .montage
+            .section_index(next)
+            .ok_or_else(|| PlayRefused::UnknownSection(next.to_string()))?;
         inst.overrides.push((a, b));
         Ok(())
     }
 
     /// Seek without raising anything: used by scrubbing.
     pub fn seek(&mut self, handle: MontageHandle, position: f64) -> bool {
-        let Some(inst) = self.get_mut(handle) else { return false };
+        let Some(inst) = self.get_mut(handle) else {
+            return false;
+        };
         inst.position = position.clamp(0.0, inst.montage.length as f64);
         inst.last_span = (inst.position, inst.position);
         inst.runs = vec![(inst.position, inst.position)];
@@ -500,7 +659,11 @@ impl MontageSet {
                     Phase::BlendingIn => {
                         inst.phase = Phase::Playing;
                         inst.weight = 1.0;
-                        self.events.push(MontageEvent { handle: inst.handle, montage: inst.montage.id.clone(), kind: MontageEventKind::BlendedIn });
+                        self.events.push(MontageEvent {
+                            handle: inst.handle,
+                            montage: inst.montage.id.clone(),
+                            kind: MontageEventKind::BlendedIn,
+                        });
                     }
                     Phase::BlendingOut => inst.weight = 0.0,
                     Phase::Playing => {}
@@ -514,13 +677,19 @@ impl MontageSet {
                     if t >= 1.0 {
                         inst.phase = Phase::Playing;
                         inst.weight = 1.0;
-                        self.events.push(MontageEvent { handle: inst.handle, montage: inst.montage.id.clone(), kind: MontageEventKind::BlendedIn });
+                        self.events.push(MontageEvent {
+                            handle: inst.handle,
+                            montage: inst.montage.id.clone(),
+                            kind: MontageEventKind::BlendedIn,
+                        });
                     }
                 } else {
                     inst.weight = inst.blend_from * (1.0 - shaped);
                 }
             }
-            if inst.phase == Phase::BlendingOut && (inst.weight <= 1e-6 || inst.blend_elapsed >= inst.blend_total) {
+            if inst.phase == Phase::BlendingOut
+                && (inst.weight <= 1e-6 || inst.blend_elapsed >= inst.blend_total)
+            {
                 inst.runs = vec![(inst.position, inst.position)];
                 ended.push(inst.handle);
                 continue;
@@ -536,7 +705,10 @@ impl MontageSet {
                     guard += 1;
                     let forward = remaining > 0.0;
                     let (lo, hi) = match inst.section {
-                        Some(s) => (inst.montage.sections[s].start as f64, inst.montage.sections[s].end as f64),
+                        Some(s) => (
+                            inst.montage.sections[s].start as f64,
+                            inst.montage.sections[s].end as f64,
+                        ),
                         None => (0.0, inst.montage.length as f64),
                     };
                     if forward {
@@ -555,9 +727,22 @@ impl MontageSet {
                                     inst.section = Some(next);
                                     inst.position = inst.montage.sections[next].start as f64;
                                     run_start = inst.position;
-                                    let (montage, to) = (inst.montage.id.clone(), inst.montage.sections[next].name.clone());
-                                    self.events.push(MontageEvent { handle: inst.handle, montage, kind: MontageEventKind::SectionChanged { from: from_name, to } });
-                                    if remaining <= 0.0 || inst.montage.sections[next].end <= inst.montage.sections[next].start {
+                                    let (montage, to) = (
+                                        inst.montage.id.clone(),
+                                        inst.montage.sections[next].name.clone(),
+                                    );
+                                    self.events.push(MontageEvent {
+                                        handle: inst.handle,
+                                        montage,
+                                        kind: MontageEventKind::SectionChanged {
+                                            from: from_name,
+                                            to,
+                                        },
+                                    });
+                                    if remaining <= 0.0
+                                        || inst.montage.sections[next].end
+                                            <= inst.montage.sections[next].start
+                                    {
                                         break;
                                     }
                                 }
@@ -568,7 +753,11 @@ impl MontageSet {
                                         let settings = inst.montage.blend_out;
                                         inst.begin_blend_out(settings, 1.0);
                                         inst.pending_result = Some(MontageResult::Completed);
-                                        self.events.push(MontageEvent { handle: inst.handle, montage: inst.montage.id.clone(), kind: MontageEventKind::BlendingOut });
+                                        self.events.push(MontageEvent {
+                                            handle: inst.handle,
+                                            montage: inst.montage.id.clone(),
+                                            kind: MontageEventKind::BlendingOut,
+                                        });
                                     }
                                 }
                             }
@@ -591,9 +780,22 @@ impl MontageSet {
                                     inst.section = Some(prev);
                                     inst.position = inst.montage.sections[prev].end as f64;
                                     run_start = inst.position;
-                                    let (montage, to) = (inst.montage.id.clone(), inst.montage.sections[prev].name.clone());
-                                    self.events.push(MontageEvent { handle: inst.handle, montage, kind: MontageEventKind::SectionChanged { from: from_name, to } });
-                                    if remaining >= 0.0 || inst.montage.sections[prev].end <= inst.montage.sections[prev].start {
+                                    let (montage, to) = (
+                                        inst.montage.id.clone(),
+                                        inst.montage.sections[prev].name.clone(),
+                                    );
+                                    self.events.push(MontageEvent {
+                                        handle: inst.handle,
+                                        montage,
+                                        kind: MontageEventKind::SectionChanged {
+                                            from: from_name,
+                                            to,
+                                        },
+                                    });
+                                    if remaining >= 0.0
+                                        || inst.montage.sections[prev].end
+                                            <= inst.montage.sections[prev].start
+                                    {
                                         break;
                                     }
                                 }
@@ -603,7 +805,11 @@ impl MontageSet {
                                         let settings = inst.montage.blend_out;
                                         inst.begin_blend_out(settings, 1.0);
                                         inst.pending_result = Some(MontageResult::Completed);
-                                        self.events.push(MontageEvent { handle: inst.handle, montage: inst.montage.id.clone(), kind: MontageEventKind::BlendingOut });
+                                        self.events.push(MontageEvent {
+                                            handle: inst.handle,
+                                            montage: inst.montage.id.clone(),
+                                            kind: MontageEventKind::BlendingOut,
+                                        });
                                     }
                                 }
                             }
@@ -611,13 +817,22 @@ impl MontageSet {
                     }
                 }
                 // blend out early when configured
-                if let (Some(lead), Phase::Playing | Phase::BlendingIn) = (inst.montage.blend_out_time, inst.phase) {
+                if let (Some(lead), Phase::Playing | Phase::BlendingIn) =
+                    (inst.montage.blend_out_time, inst.phase)
+                {
                     let at_last = inst.section.is_none_or(|s| inst.next_of(s).is_none());
-                    if at_last && inst.position >= (inst.montage.length - lead.max(0.0)) as f64 && inst.rate > 0.0 {
+                    if at_last
+                        && inst.position >= (inst.montage.length - lead.max(0.0)) as f64
+                        && inst.rate > 0.0
+                    {
                         let settings = inst.montage.blend_out;
                         inst.begin_blend_out(settings, 1.0);
                         inst.pending_result = Some(MontageResult::Completed);
-                        self.events.push(MontageEvent { handle: inst.handle, montage: inst.montage.id.clone(), kind: MontageEventKind::BlendingOut });
+                        self.events.push(MontageEvent {
+                            handle: inst.handle,
+                            montage: inst.montage.id.clone(),
+                            kind: MontageEventKind::BlendingOut,
+                        });
                     }
                 }
             }
@@ -639,7 +854,9 @@ impl MontageSet {
                 self.events.push(MontageEvent {
                     handle,
                     montage: inst.montage.id.clone(),
-                    kind: MontageEventKind::Ended(inst.pending_result.unwrap_or(MontageResult::Completed)),
+                    kind: MontageEventKind::Ended(
+                        inst.pending_result.unwrap_or(MontageResult::Completed),
+                    ),
                 });
             }
         }
@@ -648,31 +865,65 @@ impl MontageSet {
     /// Instances that have a track on `(slot, group)`, ordered so later entries
     /// are applied on top: ascending priority, then start order.
     pub fn for_slot(&self, slot: &str, group: &str) -> Vec<&MontageInstance> {
-        let mut v: Vec<&MontageInstance> = self.instances.iter().filter(|i| i.montage.has_slot(slot, group) && i.weight > 0.0).collect();
-        v.sort_by(|a, b| a.priority.cmp(&b.priority).then(a.started_serial.cmp(&b.started_serial)));
+        let mut v: Vec<&MontageInstance> = self
+            .instances
+            .iter()
+            .filter(|i| i.montage.has_slot(slot, group) && i.weight > 0.0)
+            .collect();
+        v.sort_by(|a, b| {
+            a.priority
+                .cmp(&b.priority)
+                .then(a.started_serial.cmp(&b.started_serial))
+        });
         v
     }
 
     /// Whether some instance drives the whole body on this slot at full weight,
     /// so the slot's source pose cannot show.
     pub fn covers_slot(&self, slot: &str, group: &str) -> bool {
-        self.for_slot(slot, group).iter().any(|i| i.weight >= 1.0 - 1e-6 && i.montage.tracks.iter().any(|t| t.slot == slot && t.group == group && t.mask.is_none() && segment_at(t, i.position).is_some()))
+        self.for_slot(slot, group).iter().any(|i| {
+            i.weight >= 1.0 - 1e-6
+                && i.montage.tracks.iter().any(|t| {
+                    t.slot == slot
+                        && t.group == group
+                        && t.mask.is_none()
+                        && segment_at(t, i.position).is_some()
+                })
+        })
     }
 
     /// Overlay every instance on `(slot, group)` onto `base`.
-    pub fn apply_to_slot(&self, skel: &RuntimeSkeleton, slot: &str, group: &str, base: Pose) -> Pose {
+    pub fn apply_to_slot(
+        &self,
+        skel: &RuntimeSkeleton,
+        slot: &str,
+        group: &str,
+        base: Pose,
+    ) -> Pose {
         let mut pose = base;
         for inst in self.for_slot(slot, group) {
-            for track in inst.montage.tracks.iter().filter(|t| t.slot == slot && t.group == group) {
-                let Some((seg, clip_time)) = segment_at(track, inst.position) else { continue };
+            for track in inst
+                .montage
+                .tracks
+                .iter()
+                .filter(|t| t.slot == slot && t.group == group)
+            {
+                let Some((seg, clip_time)) = segment_at(track, inst.position) else {
+                    continue;
+                };
                 let mut sample = seg.clip.sample(skel, clip_time);
-                let supplies_motion = inst.montage.root_motion == MontageRootMotion::Montage && !self.root_motion_in_pose;
+                let supplies_motion = inst.montage.root_motion == MontageRootMotion::Montage
+                    && !self.root_motion_in_pose;
                 if supplies_motion {
-                    seg.clip.remove_root_motion(skel, &mut sample.bones, clip_time);
+                    seg.clip
+                        .remove_root_motion(skel, &mut sample.bones, clip_time);
                 }
                 let w = inst.weight.clamp(0.0, 1.0);
                 for (b, bone) in pose.bones.iter_mut().enumerate() {
-                    let bw = w * track.mask.as_ref().map_or(1.0, |m| m.get(b).copied().unwrap_or(0.0));
+                    let bw = w * track
+                        .mask
+                        .as_ref()
+                        .map_or(1.0, |m| m.get(b).copied().unwrap_or(0.0));
                     if bw > 0.0 {
                         *bone = bone.blend(&sample.bones[b], bw);
                     }
@@ -690,7 +941,9 @@ impl MontageSet {
                         pose.montage_root_motion = pose.montage_root_motion.then(&delta.scaled(w));
                     }
                     MontageRootMotion::Graph => {}
-                    MontageRootMotion::Ignore => pose.root_motion = pose.root_motion.blend(&RootMotion::IDENTITY, w),
+                    MontageRootMotion::Ignore => {
+                        pose.root_motion = pose.root_motion.blend(&RootMotion::IDENTITY, w)
+                    }
                 }
             }
         }
@@ -699,10 +952,16 @@ impl MontageSet {
 }
 
 /// Root motion of a track over the instance's latest advance.
-fn montage_root_motion(inst: &MontageInstance, track: &CompiledTrack, skel: &RuntimeSkeleton) -> RootMotion {
+fn montage_root_motion(
+    inst: &MontageInstance,
+    track: &CompiledTrack,
+    skel: &RuntimeSkeleton,
+) -> RootMotion {
     // each continuous run on its own: the time skipped by a section link or a
     // jump contributes nothing
-    inst.runs.iter().fold(RootMotion::IDENTITY, |acc, &(a, b)| acc.then(&run_root_motion(track, skel, a, b)))
+    inst.runs.iter().fold(RootMotion::IDENTITY, |acc, &(a, b)| {
+        acc.then(&run_root_motion(track, skel, a, b))
+    })
 }
 
 fn run_root_motion(track: &CompiledTrack, skel: &RuntimeSkeleton, a: f64, b: f64) -> RootMotion {
@@ -731,7 +990,10 @@ fn run_root_motion(track: &CompiledTrack, skel: &RuntimeSkeleton, a: f64, b: f64
                 let cycle_end = ((cycle + 1.0) * clip_len).min(to);
                 let local_from = seg.clip_start as f64 + (cursor - cycle * clip_len);
                 let local_to = seg.clip_start as f64 + (cycle_end - cycle * clip_len);
-                acc = acc.then(&seg.clip.root_motion_between(skel, local_from, local_to, false));
+                acc = acc.then(
+                    &seg.clip
+                        .root_motion_between(skel, local_from, local_to, false),
+                );
                 cursor = cycle_end;
             }
             acc
@@ -739,7 +1001,11 @@ fn run_root_motion(track: &CompiledTrack, skel: &RuntimeSkeleton, a: f64, b: f64
         let seg_rm = rm(ps, pe);
         total = total.then(&seg_rm);
     }
-    if b < a { total.inverse() } else { total }
+    if b < a {
+        total.inverse()
+    } else {
+        total
+    }
 }
 
 fn section_at(montage: &CompiledMontage, position: f64) -> Option<usize> {
@@ -755,7 +1021,9 @@ fn section_at(montage: &CompiledMontage, position: f64) -> Option<usize> {
 /// The segment of `track` covering `position`, and the clip time inside it.
 /// Time inside a looping segment wraps; after the last frame the pose holds.
 fn segment_at(track: &CompiledTrack, position: f64) -> Option<(&CompiledSegment, f32)> {
-    let seg = track.segments.iter().rev().find(|s| position >= s.start as f64 - 1e-9 && position <= (s.start + s.length) as f64 + 1e-9)?;
+    let seg = track.segments.iter().rev().find(|s| {
+        position >= s.start as f64 - 1e-9 && position <= (s.start + s.length) as f64 + 1e-9
+    })?;
     let clip_len = (seg.clip_end - seg.clip_start).max(1e-6);
     let local = ((position - seg.start as f64) * seg.rate as f64).max(0.0);
     let t = if local >= (clip_len * seg.loop_count as f32) as f64 {
@@ -780,25 +1048,54 @@ pub(crate) mod tests {
     }
 
     /// A montage with one track on `slot`: a 2 s clip moving `bone` from x=0 to x=2.
-    pub(crate) fn montage(skel: &RuntimeSkeleton, name: &str, slot: &str, bone: &str, mask_from: Option<&str>) -> Arc<CompiledMontage> {
+    pub(crate) fn montage(
+        skel: &RuntimeSkeleton,
+        name: &str,
+        slot: &str,
+        bone: &str,
+        mask_from: Option<&str>,
+    ) -> Arc<CompiledMontage> {
         let mut asset = AnimationMontageAsset::default();
         asset.name = name.into();
         let seq: AssetRef<pulsar_reflection::AnimationSequenceAssetKind> = AssetRef::new();
         let mut track = SlotTrack::new(slot, "DefaultGroup");
-        track.segments.push(MontageSegment::new(Some(seq.clone()), 0.0));
+        track
+            .segments
+            .push(MontageSegment::new(Some(seq.clone()), 0.0));
         if let Some(b) = mask_from {
-            track.mask = Some(crate::bone_mask::BoneMaskSpec { branches: vec![crate::bone_mask::MaskBranch { bone: b.into(), depth: None, weight: 1.0 }], default_weight: 0.0, ..Default::default() });
+            track.mask = Some(crate::bone_mask::BoneMaskSpec {
+                branches: vec![crate::bone_mask::MaskBranch {
+                    bone: b.into(),
+                    depth: None,
+                    weight: 1.0,
+                }],
+                default_weight: 0.0,
+                ..Default::default()
+            });
         }
         asset.tracks.push(track);
-        asset.blend_in = BlendSettings { duration: 0.0, curve: BlendCurve::Linear };
-        asset.blend_out = BlendSettings { duration: 0.0, curve: BlendCurve::Linear };
-        let mut seqasset = clip_asset(name, 2.0, vec![translate_track(bone, [0.0, 1.0, 0.0], [2.0, 1.0, 0.0], 2.0)]);
+        asset.blend_in = BlendSettings {
+            duration: 0.0,
+            curve: BlendCurve::Linear,
+        };
+        asset.blend_out = BlendSettings {
+            duration: 0.0,
+            curve: BlendCurve::Linear,
+        };
+        let mut seqasset = clip_asset(
+            name,
+            2.0,
+            vec![translate_track(bone, [0.0, 1.0, 0.0], [2.0, 1.0, 0.0], 2.0)],
+        );
         seqasset.features.root_motion.enabled = false;
         let clip = Arc::new(CompiledClip::compile(&seqasset, skel));
         Arc::new(CompiledMontage::compile(&asset, skel, &mut |_| Some(clip.clone())).unwrap())
     }
 
-    fn with(m: &Arc<CompiledMontage>, f: impl FnOnce(&mut CompiledMontage)) -> Arc<CompiledMontage> {
+    fn with(
+        m: &Arc<CompiledMontage>,
+        f: impl FnOnce(&mut CompiledMontage),
+    ) -> Arc<CompiledMontage> {
         let mut c = (**m).clone();
         f(&mut c);
         Arc::new(c)
@@ -809,30 +1106,69 @@ pub(crate) mod tests {
         use crate::bone_mask::{BoneMaskSpec, MaskBranch, NamedBoneMask};
         let plain = skel();
         let inline = montage(&plain, "m", "DefaultSlot", "b2", Some("b2"));
-        let library = vec![NamedBoneMask { name: "Tip".into(), spec: BoneMaskSpec { branches: vec![MaskBranch { bone: "b2".into(), depth: None, weight: 1.0 }], ..Default::default() } }];
+        let library = vec![NamedBoneMask {
+            name: "Tip".into(),
+            spec: BoneMaskSpec {
+                branches: vec![MaskBranch {
+                    bone: "b2".into(),
+                    depth: None,
+                    weight: 1.0,
+                }],
+                ..Default::default()
+            },
+        }];
         let with_library = skel().with_mask_library(library);
         let mut asset = AnimationMontageAsset::default();
         let mut track = SlotTrack::new("DefaultSlot", "DefaultGroup");
-        track.segments.push(MontageSegment::new(Some(AssetRef::new()), 0.0));
+        track
+            .segments
+            .push(MontageSegment::new(Some(AssetRef::new()), 0.0));
         track.mask = Some(BoneMaskSpec::named("Tip"));
         asset.tracks.push(track);
-        let clip = Arc::new(CompiledClip::compile(&clip_asset("c", 2.0, vec![translate_track("b2", [0.0, 1.0, 0.0], [2.0, 1.0, 0.0], 2.0)]), &with_library));
-        let named = CompiledMontage::compile(&asset, &with_library, &mut |_| Some(clip.clone())).unwrap();
-        assert_eq!(named.tracks[0].mask, inline.tracks[0].mask, "the named mask resolves to the inline weights");
-        let err = CompiledMontage::compile(&asset, &plain, &mut |_| Some(clip.clone())).unwrap_err();
+        let clip = Arc::new(CompiledClip::compile(
+            &clip_asset(
+                "c",
+                2.0,
+                vec![translate_track("b2", [0.0, 1.0, 0.0], [2.0, 1.0, 0.0], 2.0)],
+            ),
+            &with_library,
+        ));
+        let named =
+            CompiledMontage::compile(&asset, &with_library, &mut |_| Some(clip.clone())).unwrap();
+        assert_eq!(
+            named.tracks[0].mask, inline.tracks[0].mask,
+            "the named mask resolves to the inline weights"
+        );
+        let err =
+            CompiledMontage::compile(&asset, &plain, &mut |_| Some(clip.clone())).unwrap_err();
         assert!(err.contains("Tip"), "{err}");
     }
 
     fn results(set: &mut MontageSet) -> Vec<(MontageHandle, MontageResult)> {
-        set.drain_events().into_iter().filter_map(|e| if let MontageEventKind::Ended(r) = e.kind { Some((e.handle, r)) } else { None }).collect()
+        set.drain_events()
+            .into_iter()
+            .filter_map(|e| {
+                if let MontageEventKind::Ended(r) = e.kind {
+                    Some((e.handle, r))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     #[test]
     fn plays_blends_and_completes_with_one_result() {
         let skel = skel();
         let m = with(&montage(&skel, "a", "DefaultSlot", "b2", None), |m| {
-            m.blend_in = BlendSettings { duration: 0.5, curve: BlendCurve::Linear };
-            m.blend_out = BlendSettings { duration: 0.5, curve: BlendCurve::Linear };
+            m.blend_in = BlendSettings {
+                duration: 0.5,
+                curve: BlendCurve::Linear,
+            };
+            m.blend_out = BlendSettings {
+                duration: 0.5,
+                curve: BlendCurve::Linear,
+            };
         });
         let mut set = MontageSet::default();
         let h = set.play(m, 1.0, None).unwrap();
@@ -858,14 +1194,23 @@ pub(crate) mod tests {
         let first = set.play(base.clone(), 1.0, None).unwrap();
         let second = set.play(base.clone(), 1.0, None).unwrap();
         set.update(0.0);
-        assert_eq!(results(&mut set), [(first, MontageResult::Interrupted { by: second })]);
+        assert_eq!(
+            results(&mut set),
+            [(first, MontageResult::Interrupted { by: second })]
+        );
         let reject = with(&base, |m| m.interrupt = InterruptPolicy::RejectIfBusy);
-        assert_eq!(set.play(reject, 1.0, None), Err(PlayRefused::GroupBusy { by: second }));
+        assert_eq!(
+            set.play(reject, 1.0, None),
+            Err(PlayRefused::GroupBusy { by: second })
+        );
         let low = with(&base, |m| {
             m.interrupt = InterruptPolicy::StartIfHigherPriority;
             m.priority = 0;
         });
-        assert!(matches!(set.play(low, 1.0, None), Err(PlayRefused::LowerPriority { .. })));
+        assert!(matches!(
+            set.play(low, 1.0, None),
+            Err(PlayRefused::LowerPriority { .. })
+        ));
         let high = with(&base, |m| {
             m.interrupt = InterruptPolicy::StartIfHigherPriority;
             m.priority = 5;
@@ -879,17 +1224,28 @@ pub(crate) mod tests {
         let other = with(&base, |m| m.group = "Other".into());
         set.play(other, 1.0, None).unwrap();
         assert!(set.get(h).is_some());
-        assert_eq!(set.play(base.clone(), 0.0, None), Err(PlayRefused::InvalidRate));
+        assert_eq!(
+            set.play(base.clone(), 0.0, None),
+            Err(PlayRefused::InvalidRate)
+        );
     }
 
     #[test]
     fn explicit_stop_blends_out_and_reports_stopped_pause_and_rate_work() {
         let skel = skel();
-        let m = with(&montage(&skel, "a", "DefaultSlot", "b2", None), |m| m.blend_out = BlendSettings { duration: 0.4, curve: BlendCurve::Linear });
+        let m = with(&montage(&skel, "a", "DefaultSlot", "b2", None), |m| {
+            m.blend_out = BlendSettings {
+                duration: 0.4,
+                curve: BlendCurve::Linear,
+            }
+        });
         let mut set = MontageSet::default();
         let h = set.play(m, 2.0, None).unwrap();
         set.update(0.25);
-        assert!((set.get(h).unwrap().position - 0.5).abs() < 1e-6, "rate scales time");
+        assert!(
+            (set.get(h).unwrap().position - 0.5).abs() < 1e-6,
+            "rate scales time"
+        );
         set.pause(h, true);
         set.update(1.0);
         assert!((set.get(h).unwrap().position - 0.5).abs() < 1e-6, "paused");
@@ -899,20 +1255,43 @@ pub(crate) mod tests {
         assert!((set.get(h).unwrap().weight - 0.5).abs() < 1e-5);
         set.update(0.2);
         assert_eq!(results(&mut set), [(h, MontageResult::Stopped)]);
-        assert!(!set.stop(h, None), "stopping an ended instance reports false");
+        assert!(
+            !set.stop(h, None),
+            "stopping an ended instance reports false"
+        );
     }
 
     fn sectioned(skel: &RuntimeSkeleton) -> Arc<CompiledMontage> {
         let mut asset = AnimationMontageAsset::default();
         let mut track = SlotTrack::new("DefaultSlot", "DefaultGroup");
-        track.segments.push(MontageSegment::new(Some(AssetRef::new()), 0.0));
+        track
+            .segments
+            .push(MontageSegment::new(Some(AssetRef::new()), 0.0));
         asset.tracks.push(track);
         asset.blend_in.duration = 0.0;
         asset.blend_out.duration = 0.0;
         asset.sections = vec![
-            MontageSection { id: "s1".into(), name: "Start".into(), start: 0.0, next: Some("s2".into()), extra: Default::default() },
-            MontageSection { id: "s2".into(), name: "Loop".into(), start: 0.5, next: Some("s2".into()), extra: Default::default() },
-            MontageSection { id: "s3".into(), name: "End".into(), start: 1.5, next: None, extra: Default::default() },
+            MontageSection {
+                id: "s1".into(),
+                name: "Start".into(),
+                start: 0.0,
+                next: Some("s2".into()),
+                extra: Default::default(),
+            },
+            MontageSection {
+                id: "s2".into(),
+                name: "Loop".into(),
+                start: 0.5,
+                next: Some("s2".into()),
+                extra: Default::default(),
+            },
+            MontageSection {
+                id: "s3".into(),
+                name: "End".into(),
+                start: 1.5,
+                next: None,
+                extra: Default::default(),
+            },
         ];
         let clip = Arc::new(CompiledClip::compile(&clip_asset("c", 2.0, vec![]), skel));
         Arc::new(CompiledMontage::compile(&asset, skel, &mut |_| Some(clip.clone())).unwrap())
@@ -934,15 +1313,27 @@ pub(crate) mod tests {
         set.update(1.0);
         assert_eq!(set.get(h).unwrap().section_name(), Some("End"));
         set.update(1.0);
-        assert!(set.get(h).is_none(), "End has no next: the montage completes");
-        assert_eq!(results(&mut set).last().map(|r| r.1), Some(MontageResult::Completed));
+        assert!(
+            set.get(h).is_none(),
+            "End has no next: the montage completes"
+        );
+        assert_eq!(
+            results(&mut set).last().map(|r| r.1),
+            Some(MontageResult::Completed)
+        );
 
         let h2 = set.play(m.clone(), 1.0, Some("End")).unwrap();
         assert!((set.get(h2).unwrap().position - 1.5).abs() < 1e-6);
         set.jump_to_section(h2, "Start").unwrap();
         assert_eq!(set.get(h2).unwrap().position, 0.0);
-        assert_eq!(set.jump_to_section(h2, "Nope"), Err(PlayRefused::UnknownSection("Nope".into())));
-        assert_eq!(set.play(m, 1.0, Some("Nope")), Err(PlayRefused::UnknownSection("Nope".into())));
+        assert_eq!(
+            set.jump_to_section(h2, "Nope"),
+            Err(PlayRefused::UnknownSection("Nope".into()))
+        );
+        assert_eq!(
+            set.play(m, 1.0, Some("Nope")),
+            Err(PlayRefused::UnknownSection("Nope".into()))
+        );
     }
 
     #[test]
@@ -958,11 +1349,21 @@ pub(crate) mod tests {
         set.play(m, 1.0, None).unwrap();
         set.update(1.0);
         let out = set.apply_to_slot(&skel, "UpperBody", "DefaultGroup", base.clone());
-        assert!((out.bones[1].translation.x - 5.0).abs() < 1e-5, "outside the mask the locomotion stays");
-        assert!((out.bones[2].translation.x - 1.0).abs() < 1e-4, "inside the mask the montage plays: {}", out.bones[2].translation.x);
+        assert!(
+            (out.bones[1].translation.x - 5.0).abs() < 1e-5,
+            "outside the mask the locomotion stays"
+        );
+        assert!(
+            (out.bones[2].translation.x - 1.0).abs() < 1e-4,
+            "inside the mask the montage plays: {}",
+            out.bones[2].translation.x
+        );
         let other = set.apply_to_slot(&skel, "FullBody", "DefaultGroup", base.clone());
         assert_eq!(other.bones, base.bones);
-        assert!(!set.covers_slot("UpperBody", "DefaultGroup"), "masked tracks never cover the source");
+        assert!(
+            !set.covers_slot("UpperBody", "DefaultGroup"),
+            "masked tracks never cover the source"
+        );
     }
 
     #[test]
@@ -981,14 +1382,26 @@ pub(crate) mod tests {
         set.update(0.5);
         let hl = set.play(low, 1.0, None).unwrap();
         set.update(0.5);
-        let order: Vec<_> = set.for_slot("S", "DefaultGroup").iter().map(|i| i.handle).collect();
-        assert_eq!(order, [hl, hh], "priority, not start order, decides the top");
+        let order: Vec<_> = set
+            .for_slot("S", "DefaultGroup")
+            .iter()
+            .map(|i| i.handle)
+            .collect();
+        assert_eq!(
+            order,
+            [hl, hh],
+            "priority, not start order, decides the top"
+        );
         let out = set.apply_to_slot(&skel, "S", "DefaultGroup", skel.bind_pose());
         assert!((out.bones[2].translation.x - 1.0).abs() < 1e-4);
         assert!(set.covers_slot("S", "DefaultGroup"));
 
         let mut moving = (*montage(&skel, "rm", "R", "b0", None)).clone();
-        let mut asset = clip_asset("rm", 2.0, vec![translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 2.0)]);
+        let mut asset = clip_asset(
+            "rm",
+            2.0,
+            vec![translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 2.0)],
+        );
         asset.features.root_motion.enabled = true;
         for t in &mut moving.tracks {
             for s in &mut t.segments {
@@ -997,14 +1410,22 @@ pub(crate) mod tests {
         }
         let mut base = skel.bind_pose();
         base.root_motion.translation = Vec3::new(1.0, 0.0, 0.0);
-        for (mode, expect) in [(MontageRootMotion::Montage, Vec3::new(0.0, 0.0, 2.0)), (MontageRootMotion::Graph, Vec3::new(1.0, 0.0, 0.0)), (MontageRootMotion::Ignore, Vec3::ZERO)] {
+        for (mode, expect) in [
+            (MontageRootMotion::Montage, Vec3::new(0.0, 0.0, 2.0)),
+            (MontageRootMotion::Graph, Vec3::new(1.0, 0.0, 0.0)),
+            (MontageRootMotion::Ignore, Vec3::ZERO),
+        ] {
             let mut m = moving.clone();
             m.root_motion = mode;
             let mut set = MontageSet::default();
             set.play(Arc::new(m), 1.0, None).unwrap();
             set.update(1.0);
             let out = set.apply_to_slot(&skel, "R", "DefaultGroup", base.clone());
-            assert!((out.root_motion.translation - expect).length() < 1e-3, "{mode:?}: {:?}", out.root_motion.translation);
+            assert!(
+                (out.root_motion.translation - expect).length() < 1e-3,
+                "{mode:?}: {:?}",
+                out.root_motion.translation
+            );
         }
     }
 
@@ -1026,10 +1447,20 @@ pub(crate) mod tests {
     #[test]
     fn blend_in_completion_is_reported_once() {
         let skel = skel();
-        let m = with(&montage(&skel, "a", "DefaultSlot", "b2", None), |m| m.blend_in = BlendSettings { duration: 0.5, curve: BlendCurve::Linear });
+        let m = with(&montage(&skel, "a", "DefaultSlot", "b2", None), |m| {
+            m.blend_in = BlendSettings {
+                duration: 0.5,
+                curve: BlendCurve::Linear,
+            }
+        });
         let mut set = MontageSet::default();
         let h = set.play(m, 1.0, None).unwrap();
-        let kinds = |set: &mut MontageSet| set.drain_events().into_iter().map(|e| e.kind).collect::<Vec<_>>();
+        let kinds = |set: &mut MontageSet| {
+            set.drain_events()
+                .into_iter()
+                .map(|e| e.kind)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(kinds(&mut set), [MontageEventKind::Started]);
         set.update(0.25);
         assert!(kinds(&mut set).is_empty());
@@ -1037,9 +1468,15 @@ pub(crate) mod tests {
         assert_eq!(kinds(&mut set), [MontageEventKind::BlendedIn]);
         set.update(0.25);
         assert!(kinds(&mut set).is_empty());
-        let instant = with(&montage(&skel, "b", "DefaultSlot", "b2", None), |m| m.group = "Other".into());
+        let instant = with(&montage(&skel, "b", "DefaultSlot", "b2", None), |m| {
+            m.group = "Other".into()
+        });
         set.play(instant, 1.0, None).unwrap();
-        assert_eq!(kinds(&mut set), [MontageEventKind::Started, MontageEventKind::BlendedIn], "no blend: full weight at once");
+        assert_eq!(
+            kinds(&mut set),
+            [MontageEventKind::Started, MontageEventKind::BlendedIn],
+            "no blend: full weight at once"
+        );
         assert!(set.get(h).is_none() || set.get(h).is_some());
     }
 
@@ -1053,12 +1490,21 @@ pub(crate) mod tests {
         let runs = set.get(h).unwrap().runs.clone();
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0], (0.0, 0.5));
-        assert!((runs[1].0 - 0.5).abs() < 1e-9 && (runs[1].1 - 0.6).abs() < 1e-6, "{runs:?}");
+        assert!(
+            (runs[1].0 - 0.5).abs() < 1e-9 && (runs[1].1 - 0.6).abs() < 1e-6,
+            "{runs:?}"
+        );
         set.update(2.0);
         let runs = &set.get(h).unwrap().runs;
-        assert!(runs.len() > 1, "the loop link restarts the playhead: {runs:?}");
+        assert!(
+            runs.len() > 1,
+            "the loop link restarts the playhead: {runs:?}"
+        );
         let covered: f64 = runs.iter().map(|(a, b)| b - a).sum();
-        assert!((covered - 2.0).abs() < 1e-6, "every run together plays exactly the elapsed time: {covered}");
+        assert!(
+            (covered - 2.0).abs() < 1e-6,
+            "every run together plays exactly the elapsed time: {covered}"
+        );
     }
 
     #[test]
@@ -1075,22 +1521,41 @@ pub(crate) mod tests {
         let h = set.play(m, -1.0, Some("End")).unwrap();
         set.set_next_section(h, "Loop", "End").unwrap();
         set.update(0.25);
-        assert_eq!(set.get(h).unwrap().section_name(), Some("Loop"), "End is entered from Loop");
+        assert_eq!(
+            set.get(h).unwrap().section_name(),
+            Some("Loop"),
+            "End is entered from Loop"
+        );
         assert!((set.get(h).unwrap().position - 1.25).abs() < 1e-6);
         set.update(1.0);
-        assert_eq!(set.get(h).unwrap().section_name(), Some("Start"), "Start links to Loop");
-        assert!((set.get(h).unwrap().position - 0.25).abs() < 1e-6, "{}", set.get(h).unwrap().position);
+        assert_eq!(
+            set.get(h).unwrap().section_name(),
+            Some("Start"),
+            "Start links to Loop"
+        );
+        assert!(
+            (set.get(h).unwrap().position - 0.25).abs() < 1e-6,
+            "{}",
+            set.get(h).unwrap().position
+        );
         assert_eq!(set.get(h).unwrap().runs.len(), 2);
         set.update(1.0);
         assert!(set.get(h).is_none() || set.get(h).unwrap().phase == Phase::BlendingOut);
-        assert_eq!(results(&mut set).last().map(|r| r.1), Some(MontageResult::Completed));
+        assert_eq!(
+            results(&mut set).last().map(|r| r.1),
+            Some(MontageResult::Completed)
+        );
     }
 
     #[test]
     fn a_jump_leaves_the_skipped_time_out_of_root_motion_and_spans() {
         let skel = skel();
         let mut moving = (*sectioned(&skel)).clone();
-        let mut asset = clip_asset("rm", 2.0, vec![translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 2.0)]);
+        let mut asset = clip_asset(
+            "rm",
+            2.0,
+            vec![translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 2.0)],
+        );
         asset.features.root_motion.enabled = true;
         let clip = Arc::new(CompiledClip::compile(&asset, &skel));
         for t in &mut moving.tracks {
@@ -1106,7 +1571,11 @@ pub(crate) mod tests {
         set.jump_to_section(h, "Start").unwrap();
         set.update(0.5);
         let out = set.apply_to_slot(&skel, "R", "DefaultGroup", skel.bind_pose());
-        assert!((out.root_motion.translation.z - 1.0).abs() < 1e-3, "only the half second played: {:?}", out.root_motion.translation);
+        assert!(
+            (out.root_motion.translation.z - 1.0).abs() < 1e-3,
+            "only the half second played: {:?}",
+            out.root_motion.translation
+        );
         assert!((out.montage_root_motion.translation.z - 1.0).abs() < 1e-3);
         // extraction off: the motion stays in the pose and nothing is extracted
         set.root_motion_in_pose = true;

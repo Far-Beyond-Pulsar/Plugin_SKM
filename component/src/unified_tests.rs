@@ -31,7 +31,6 @@ struct Disk {
     root: std::path::PathBuf,
     walk_path: std::path::PathBuf,
     graph_path: std::path::PathBuf,
-    graph_id: String,
     montage_id: String,
 }
 
@@ -301,7 +300,6 @@ fn write_disk(rig: &mut Rig) -> Disk {
         root,
         walk_path,
         graph_path,
-        graph_id,
         montage_id,
     }
 }
@@ -607,10 +605,12 @@ fn the_whole_character_flow_runs_over_one_project_on_disk() {
             .filter(|(name, _)| *name == state_descriptor.name)
             .collect();
         assert!(!authored.is_empty());
-        assert!(authored
-            .iter()
-            .all(|(_, fields)| fields[0] == DynValue::U64(owner_a.bits())
-                && fields.last() == Some(&DynValue::I64(7))));
+        assert!(
+            authored
+                .iter()
+                .all(|(_, fields)| fields[0] == DynValue::U64(owner_a.bits())
+                    && fields.last() == Some(&DynValue::I64(7)))
+        );
     }
     {
         let sink = sink_b.lock().unwrap();
@@ -641,10 +641,12 @@ fn the_whole_character_flow_runs_over_one_project_on_disk() {
         })
         .collect();
     let clock_before = bone(&world, a, 1).translation;
-    assert!(world
-        .get_mut::<AnimationComponent>(a)
-        .unwrap()
-        .apply_physics_pose(rig_pose.clone()));
+    assert!(
+        world
+            .get_mut::<AnimationComponent>(a)
+            .unwrap()
+            .apply_physics_pose(rig_pose.clone())
+    );
     for _ in 0..2 {
         frame(&mut world, &hub, 0.25, &mut state);
     }

@@ -56,11 +56,19 @@ pub fn validate_library(library: &[NamedBoneMask], skeleton: &Skeleton) -> Resul
             return Err(format!("Skeleton mask `{}` is defined twice", mask.name));
         }
         if mask.spec.profile.is_some() {
-            return Err(format!("Skeleton mask `{}` cannot refer to another mask", mask.name));
+            return Err(format!(
+                "Skeleton mask `{}` cannot refer to another mask",
+                mask.name
+            ));
         }
-        mask.spec.validate().map_err(|e| format!("Skeleton mask `{}`: {e}", mask.name))?;
+        mask.spec
+            .validate()
+            .map_err(|e| format!("Skeleton mask `{}`: {e}", mask.name))?;
         if let Some(bone) = mask.spec.missing_bones(skeleton).first() {
-            return Err(format!("Skeleton mask `{}` names bone `{bone}`, which the skeleton does not have", mask.name));
+            return Err(format!(
+                "Skeleton mask `{}` names bone `{bone}`, which the skeleton does not have",
+                mask.name
+            ));
         }
     }
     Ok(())
@@ -69,7 +77,10 @@ pub fn validate_library(library: &[NamedBoneMask], skeleton: &Skeleton) -> Resul
 impl BoneMaskSpec {
     /// A mask that follows the library mask `name`.
     pub fn named(name: impl Into<String>) -> Self {
-        Self { profile: Some(name.into()), ..Self::default() }
+        Self {
+            profile: Some(name.into()),
+            ..Self::default()
+        }
     }
 
     /// The inline rule this mask stands for: itself, or the library mask it names.
@@ -85,19 +96,31 @@ impl BoneMaskSpec {
     }
 
     /// [`Self::weights`] after resolving a named profile against `library`.
-    pub fn weights_in(&self, skeleton: &Skeleton, library: &[NamedBoneMask]) -> Result<Vec<f32>, String> {
+    pub fn weights_in(
+        &self,
+        skeleton: &Skeleton,
+        library: &[NamedBoneMask],
+    ) -> Result<Vec<f32>, String> {
         Ok(self.resolve(library)?.weights(skeleton))
     }
 
     /// [`Self::missing_bones`] of the resolved rule; an unknown profile name is an error.
-    pub fn missing_bones_in(&self, skeleton: &Skeleton, library: &[NamedBoneMask]) -> Result<Vec<String>, String> {
+    pub fn missing_bones_in(
+        &self,
+        skeleton: &Skeleton,
+        library: &[NamedBoneMask],
+    ) -> Result<Vec<String>, String> {
         Ok(self.resolve(library)?.missing_bones(skeleton))
     }
 
     /// Local rules, independent of any skeleton.
     pub fn validate(&self) -> Result<(), String> {
         if let Some(name) = &self.profile {
-            return if name.trim().is_empty() { Err("Mask profile name cannot be empty".into()) } else { Ok(()) };
+            return if name.trim().is_empty() {
+                Err("Mask profile name cannot be empty".into())
+            } else {
+                Ok(())
+            };
         }
         if !self.default_weight.is_finite() || !(0.0..=1.0).contains(&self.default_weight) {
             return Err("Mask default weight must be in [0, 1]".into());
@@ -107,7 +130,10 @@ impl BoneMaskSpec {
                 return Err("Mask branch needs a bone".into());
             }
             if !branch.weight.is_finite() || !(0.0..=1.0).contains(&branch.weight) {
-                return Err(format!("Mask weight of `{}` must be in [0, 1]", branch.bone));
+                return Err(format!(
+                    "Mask weight of `{}` must be in [0, 1]",
+                    branch.bone
+                ));
             }
         }
         Ok(())
@@ -186,40 +212,113 @@ mod tests {
     fn depth_limits_and_later_branches_override() {
         let mask = BoneMaskSpec {
             branches: vec![
-                MaskBranch { bone: "spine".into(), depth: None, weight: 1.0 },
-                MaskBranch { bone: "chest".into(), depth: Some(0), weight: 0.5 },
+                MaskBranch {
+                    bone: "spine".into(),
+                    depth: None,
+                    weight: 1.0,
+                },
+                MaskBranch {
+                    bone: "chest".into(),
+                    depth: Some(0),
+                    weight: 0.5,
+                },
             ],
-            default_weight: 0.0, ..Default::default()
+            default_weight: 0.0,
+            ..Default::default()
         };
         assert_eq!(mask.weights(&chain()), vec![0.0, 1.0, 0.5, 1.0, 0.0]);
         let shallow = BoneMaskSpec {
-            branches: vec![MaskBranch { bone: "spine".into(), depth: Some(1), weight: 1.0 }],
-            default_weight: 0.0, ..Default::default()
+            branches: vec![MaskBranch {
+                bone: "spine".into(),
+                depth: Some(1),
+                weight: 1.0,
+            }],
+            default_weight: 0.0,
+            ..Default::default()
         };
         assert_eq!(shallow.weights(&chain()), vec![0.0, 1.0, 1.0, 0.0, 0.0]);
-        assert!(BoneMaskSpec { branches: vec![MaskBranch { bone: "x".into(), depth: None, weight: 2.0 }], default_weight: 0.0, ..Default::default() }.validate().is_err());
+        assert!(BoneMaskSpec {
+            branches: vec![MaskBranch {
+                bone: "x".into(),
+                depth: None,
+                weight: 2.0
+            }],
+            default_weight: 0.0,
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]
     fn a_named_mask_resolves_against_the_library_and_follows_edits() {
-        let upper = BoneMaskSpec { branches: vec![MaskBranch { bone: "spine".into(), depth: None, weight: 1.0 }], ..Default::default() };
-        let mut library = vec![NamedBoneMask { name: "UpperBody".into(), spec: upper }];
+        let upper = BoneMaskSpec {
+            branches: vec![MaskBranch {
+                bone: "spine".into(),
+                depth: None,
+                weight: 1.0,
+            }],
+            ..Default::default()
+        };
+        let mut library = vec![NamedBoneMask {
+            name: "UpperBody".into(),
+            spec: upper,
+        }];
         let by_name = BoneMaskSpec::named("UpperBody");
-        assert_eq!(by_name.weights_in(&chain(), &library).unwrap(), vec![0.0, 1.0, 1.0, 1.0, 0.0]);
+        assert_eq!(
+            by_name.weights_in(&chain(), &library).unwrap(),
+            vec![0.0, 1.0, 1.0, 1.0, 0.0]
+        );
         library[0].spec.branches[0].bone = "chest".into();
-        assert_eq!(by_name.weights_in(&chain(), &library).unwrap(), vec![0.0, 0.0, 1.0, 1.0, 0.0]);
-        assert!(BoneMaskSpec::named("Nope").weights_in(&chain(), &library).is_err());
+        assert_eq!(
+            by_name.weights_in(&chain(), &library).unwrap(),
+            vec![0.0, 0.0, 1.0, 1.0, 0.0]
+        );
+        assert!(BoneMaskSpec::named("Nope")
+            .weights_in(&chain(), &library)
+            .is_err());
         assert!(by_name.validate().is_ok());
     }
 
     #[test]
     fn a_library_rejects_duplicates_nesting_and_unknown_bones() {
-        let ok = NamedBoneMask { name: "A".into(), spec: BoneMaskSpec::default() };
+        let ok = NamedBoneMask {
+            name: "A".into(),
+            spec: BoneMaskSpec::default(),
+        };
         assert!(validate_library(&[ok.clone()], &chain()).is_ok());
         assert!(validate_library(&[ok.clone(), ok.clone()], &chain()).is_err());
-        assert!(validate_library(&[NamedBoneMask { name: "B".into(), spec: BoneMaskSpec::named("A") }], &chain()).is_err());
-        let ghost = BoneMaskSpec { branches: vec![MaskBranch { bone: "tail".into(), depth: None, weight: 1.0 }], ..Default::default() };
-        assert!(validate_library(&[NamedBoneMask { name: "C".into(), spec: ghost }], &chain()).is_err());
-        assert!(validate_library(&[NamedBoneMask { name: " ".into(), spec: BoneMaskSpec::default() }], &chain()).is_err());
+        assert!(validate_library(
+            &[NamedBoneMask {
+                name: "B".into(),
+                spec: BoneMaskSpec::named("A")
+            }],
+            &chain()
+        )
+        .is_err());
+        let ghost = BoneMaskSpec {
+            branches: vec![MaskBranch {
+                bone: "tail".into(),
+                depth: None,
+                weight: 1.0,
+            }],
+            ..Default::default()
+        };
+        assert!(validate_library(
+            &[NamedBoneMask {
+                name: "C".into(),
+                spec: ghost
+            }],
+            &chain()
+        )
+        .is_err());
+        assert!(validate_library(
+            &[NamedBoneMask {
+                name: " ".into(),
+                spec: BoneMaskSpec::default()
+            }],
+            &chain()
+        )
+        .is_err());
     }
 }

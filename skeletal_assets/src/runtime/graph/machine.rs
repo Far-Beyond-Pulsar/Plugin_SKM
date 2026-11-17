@@ -89,7 +89,15 @@ pub struct MachineState {
     entry_reported: bool,
 }
 
-fn emit(env: &mut Env, machine: &Machine, kind: StateEventKind, state: usize, from: usize, to: usize, transition: &str) {
+fn emit(
+    env: &mut Env,
+    machine: &Machine,
+    kind: StateEventKind,
+    state: usize,
+    from: usize,
+    to: usize,
+    transition: &str,
+) {
     if env.quiet {
         return;
     }
@@ -121,7 +129,11 @@ impl MachineState {
                 return d;
             }
         }
-        StateInst { state, graph: GraphInstance::new(machine.states[state].program.clone(), env.next_uid), time: 0.0 }
+        StateInst {
+            state,
+            graph: GraphInstance::new(machine.states[state].program.clone(), env.next_uid),
+            time: 0.0,
+        }
     }
 
     fn reset(&mut self, machine: &Machine, env: &mut Env) {
@@ -140,9 +152,17 @@ impl MachineState {
 
     /// The weight of every live instance right now.
     fn current_weights(&self) -> Vec<(usize, f32)> {
-        let Some(current) = self.current else { return Vec::new() };
-        let Some(b) = &self.blend else { return vec![(current, 1.0)] };
-        let p = if b.duration <= 0.0 { 1.0 } else { (b.elapsed / b.duration).clamp(0.0, 1.0) };
+        let Some(current) = self.current else {
+            return Vec::new();
+        };
+        let Some(b) = &self.blend else {
+            return vec![(current, 1.0)];
+        };
+        let p = if b.duration <= 0.0 {
+            1.0
+        } else {
+            (b.elapsed / b.duration).clamp(0.0, 1.0)
+        };
         let s = b.curve.evaluate(p);
         let mut acc: Vec<(usize, f32)> = Vec::new();
         let mut add = |slot: usize, w: f32| {
@@ -180,9 +200,25 @@ impl MachineState {
             }
         }
         for state in exited {
-            emit(env, machine, StateEventKind::Exited, state, from, b.to_state, &id);
+            emit(
+                env,
+                machine,
+                StateEventKind::Exited,
+                state,
+                from,
+                b.to_state,
+                &id,
+            );
         }
-        emit(env, machine, StateEventKind::TransitionCompleted, from, from, b.to_state, &id);
+        emit(
+            env,
+            machine,
+            StateEventKind::TransitionCompleted,
+            from,
+            from,
+            b.to_state,
+            &id,
+        );
         self.current = Some(b.target);
     }
 
@@ -192,8 +228,20 @@ impl MachineState {
         }
         if !self.entry_reported && !env.quiet {
             self.entry_reported = true;
-            if let Some(state) = self.current.and_then(|slot| self.insts[slot].as_ref()).map(|i| i.state) {
-                emit(env, machine, StateEventKind::Entered, state, state, state, "");
+            if let Some(state) = self
+                .current
+                .and_then(|slot| self.insts[slot].as_ref())
+                .map(|i| i.state)
+            {
+                emit(
+                    env,
+                    machine,
+                    StateEventKind::Entered,
+                    state,
+                    state,
+                    state,
+                    "",
+                );
             }
         }
         self.last_tick = tick;
@@ -212,7 +260,9 @@ impl MachineState {
         let live = self.current_weights();
         let (allowed_from, current_state): (Vec<usize>, usize) = {
             let cur_slot = self.current.expect("started");
-            let cur_state = self.insts[cur_slot].as_ref().map_or(machine.default, |i| i.state);
+            let cur_state = self.insts[cur_slot]
+                .as_ref()
+                .map_or(machine.default, |i| i.state);
             match &self.blend {
                 None => (vec![cur_state], cur_state),
                 Some(b) => {
@@ -232,7 +282,9 @@ impl MachineState {
             }
         };
         let _ = current_state;
-        let mut candidates: Vec<usize> = (0..machine.transitions.len()).filter(|&t| allowed_from.contains(&machine.transitions[t].from)).collect();
+        let mut candidates: Vec<usize> = (0..machine.transitions.len())
+            .filter(|&t| allowed_from.contains(&machine.transitions[t].from))
+            .collect();
         candidates.sort_by(|&a, &b| {
             let (ta, tb) = (&machine.transitions[a], &machine.transitions[b]);
             ta.priority.cmp(&tb.priority).then(ta.id.cmp(&tb.id))
@@ -244,7 +296,11 @@ impl MachineState {
             // the instance of the rule's source state with the most weight
             let slot = live
                 .iter()
-                .filter(|(slot, _)| self.insts[*slot].as_ref().is_some_and(|i| i.state == def.from))
+                .filter(|(slot, _)| {
+                    self.insts[*slot]
+                        .as_ref()
+                        .is_some_and(|i| i.state == def.from)
+                })
                 .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
                 .map(|(slot, _)| *slot);
             let Some(slot) = slot else { continue };
@@ -256,7 +312,11 @@ impl MachineState {
             if self.rules[t].is_none() {
                 self.rules[t] = Some(GraphInstance::new(def.rule.clone(), env.next_uid));
             }
-            let saved = env.rule.replace(RuleContext { state_time: time, time_remaining: remaining, complete });
+            let saved = env.rule.replace(RuleContext {
+                state_time: time,
+                time_remaining: remaining,
+                complete,
+            });
             let fired = self.rules[t].as_mut().expect("created").rule(env);
             env.rule = saved;
             if fired {
@@ -283,7 +343,10 @@ impl MachineState {
         let reuse = if def.reentry && def.from == def.to {
             None
         } else {
-            snapshot.iter().map(|(s, _)| *s).find(|s| self.insts[*s].as_ref().is_some_and(|i| i.state == def.to))
+            snapshot
+                .iter()
+                .map(|(s, _)| *s)
+                .find(|s| self.insts[*s].as_ref().is_some_and(|i| i.state == def.to))
         };
         let target = match reuse {
             Some(slot) => slot,
@@ -293,21 +356,60 @@ impl MachineState {
             }
         };
         self.last_transition = Some(def.id.clone());
-        emit(env, machine, StateEventKind::TransitionStarted, def.from, def.from, def.to, &def.id);
-        emit(env, machine, StateEventKind::Entered, def.to, def.from, def.to, &def.id);
+        emit(
+            env,
+            machine,
+            StateEventKind::TransitionStarted,
+            def.from,
+            def.from,
+            def.to,
+            &def.id,
+        );
+        emit(
+            env,
+            machine,
+            StateEventKind::Entered,
+            def.to,
+            def.from,
+            def.to,
+            &def.id,
+        );
         if def.duration <= 0.0 {
             // immediate: everything but the target is dropped
-            self.blend = Some(ActiveBlend { sources: Vec::new(), target, elapsed: 0.0, duration: 0.0, curve: def.curve, interrupt: def.interrupt, to_state: def.to, trans: t });
+            self.blend = Some(ActiveBlend {
+                sources: Vec::new(),
+                target,
+                elapsed: 0.0,
+                duration: 0.0,
+                curve: def.curve,
+                interrupt: def.interrupt,
+                to_state: def.to,
+                trans: t,
+            });
             self.current = Some(target);
             self.finish_blend(machine, env);
             return;
         }
         // snapshot sources: when the target is already fading out it keeps that weight as a source
-        self.blend = Some(ActiveBlend { sources: snapshot, target, elapsed: 0.0, duration: def.duration, curve: def.curve, interrupt: def.interrupt, to_state: def.to, trans: t });
+        self.blend = Some(ActiveBlend {
+            sources: snapshot,
+            target,
+            elapsed: 0.0,
+            duration: def.duration,
+            curve: def.curve,
+            interrupt: def.interrupt,
+            to_state: def.to,
+            trans: t,
+        });
         self.current = Some(target);
     }
 
-    pub fn evaluate(&mut self, machine: &Machine, env: &mut Env, skel: &Arc<RuntimeSkeleton>) -> Pose {
+    pub fn evaluate(
+        &mut self,
+        machine: &Machine,
+        env: &mut Env,
+        skel: &Arc<RuntimeSkeleton>,
+    ) -> Pose {
         let mut poses: Vec<(Arc<Pose>, f32)> = Vec::new();
         for (slot, weight) in self.weights.clone() {
             if let Some(inst) = self.insts[slot].as_mut() {
@@ -319,7 +421,13 @@ impl MachineState {
         blend_weighted(&refs).unwrap_or_else(|| skel.bind_pose())
     }
 
-    pub fn apply_sync(&mut self, groups: &HashMap<String, GroupPhase>, dt: f32, spans: &mut Vec<PlaybackSpan>, quiet: bool) {
+    pub fn apply_sync(
+        &mut self,
+        groups: &HashMap<String, GroupPhase>,
+        dt: f32,
+        spans: &mut Vec<PlaybackSpan>,
+        quiet: bool,
+    ) {
         for inst in self.insts.iter_mut().flatten() {
             inst.graph.apply_sync(groups, dt, spans, quiet);
         }
@@ -338,9 +446,17 @@ impl MachineState {
         let parts: Vec<String> = self
             .weights
             .iter()
-            .filter_map(|(slot, w)| self.insts[*slot].as_ref().map(|i| format!("{} {:.2}", machine.states[i.state].name, w)))
+            .filter_map(|(slot, w)| {
+                self.insts[*slot]
+                    .as_ref()
+                    .map(|i| format!("{} {:.2}", machine.states[i.state].name, w))
+            })
             .collect();
-        let arrow = self.blend.as_ref().map(|b| format!(" via {}", machine.transitions[b.trans].id)).unwrap_or_default();
+        let arrow = self
+            .blend
+            .as_ref()
+            .map(|b| format!(" via {}", machine.transitions[b.trans].id))
+            .unwrap_or_default();
         out.push(format!("{}: {}{}", machine.name, parts.join(", "), arrow));
         for inst in self.insts.iter().flatten() {
             inst.graph.machine_trace(out);
@@ -350,7 +466,9 @@ impl MachineState {
     /// Name of the state the machine is in (the latest target).
     pub fn current_state<'a>(&self, machine: &'a Machine) -> Option<&'a str> {
         let slot = self.current?;
-        self.insts[slot].as_ref().map(|i| machine.states[i.state].name.as_str())
+        self.insts[slot]
+            .as_ref()
+            .map(|i| machine.states[i.state].name.as_str())
     }
 
     /// Whether a transition blend is in flight.

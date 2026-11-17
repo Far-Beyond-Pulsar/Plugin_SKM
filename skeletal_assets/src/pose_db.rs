@@ -10,24 +10,38 @@
 
 use std::path::{Path, PathBuf};
 
-use pulsar_reflection::{AnimationSequenceAssetKind, AssetRef, BlendSpaceAssetKind, PoseDatabaseAssetKind, SkeletonAssetKind};
+use pulsar_reflection::{
+    AnimationSequenceAssetKind, AssetRef, BlendSpaceAssetKind, PoseDatabaseAssetKind,
+    SkeletonAssetKind,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::codec::{self, ensure_finite, ensure_unique, from_value, read_envelope, sha256_hex, CodecError, Extra, VersionPolicy};
+use crate::codec::{
+    self, ensure_finite, ensure_unique, from_value, read_envelope, sha256_hex, CodecError, Extra,
+    VersionPolicy,
+};
 use crate::diagnostics::Diagnostic;
 use crate::skeleton::Skeleton;
 
 pub const POSE_DB_EXTENSION: &str = "posedb";
 pub const POSE_DB_VERSION: u32 = 1;
-const POLICY: VersionPolicy = VersionPolicy { oldest: 1, current: POSE_DB_VERSION, unversioned_as: None };
+const POLICY: VersionPolicy = VersionPolicy {
+    oldest: 1,
+    current: POSE_DB_VERSION,
+    unversioned_as: None,
+};
 
 /// Which animation a source entry indexes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PoseSource {
-    Sequence { sequence: AssetRef<AnimationSequenceAssetKind> },
+    Sequence {
+        sequence: AssetRef<AnimationSequenceAssetKind>,
+    },
     /// Every sample sequence of the blend space is indexed as its own clip.
-    BlendSpace { blend_space: AssetRef<BlendSpaceAssetKind> },
+    BlendSpace {
+        blend_space: AssetRef<BlendSpaceAssetKind>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -73,9 +87,15 @@ pub enum Normalization {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChannelKind {
-    BonePosition { bone: String },
-    BoneRotation { bone: String },
-    BoneVelocity { bone: String },
+    BonePosition {
+        bone: String,
+    },
+    BoneRotation {
+        bone: String,
+    },
+    BoneVelocity {
+        bone: String,
+    },
     /// Root trajectory sampled at `offsets` seconds (negative = past).
     Trajectory {
         offsets: Vec<f32>,
@@ -86,7 +106,9 @@ pub enum ChannelKind {
         #[serde(default)]
         velocity: bool,
     },
-    Curve { curve: String },
+    Curve {
+        curve: String,
+    },
     /// The clip's normalised gait phase, when its sequence has sync markers.
     Phase,
 }
@@ -114,7 +136,10 @@ pub struct Sampling {
 
 impl Default for Sampling {
     fn default() -> Self {
-        Self { interval: 1.0 / 30.0, end_margin: 0.1 }
+        Self {
+            interval: 1.0 / 30.0,
+            end_margin: 0.1,
+        }
     }
 }
 
@@ -144,7 +169,12 @@ fn default_history() -> u32 {
 
 impl Default for SearchSettings {
     fn default() -> Self {
-        Self { candidate_count: 1, continuing_pose_bias: 0.0, blend_time: 0.2, query_history: 64 }
+        Self {
+            candidate_count: 1,
+            continuing_pose_bias: 0.0,
+            blend_time: 0.2,
+            query_history: 64,
+        }
     }
 }
 
@@ -168,7 +198,10 @@ pub struct PoseDbAsset {
 }
 
 impl PoseDbAsset {
-    pub fn new(name: impl Into<String>, skeleton: impl Into<Option<AssetRef<SkeletonAssetKind>>>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        skeleton: impl Into<Option<AssetRef<SkeletonAssetKind>>>,
+    ) -> Self {
         Self {
             version: POSE_DB_VERSION,
             id: AssetRef::new(),
@@ -206,8 +239,13 @@ impl PoseDbAsset {
     pub fn validate_structure(&self) -> Result<(), String> {
         ensure_unique("source", self.sources.iter().map(|s| s.id.as_str()))?;
         ensure_unique("channel", self.channels.iter().map(|c| c.id.as_str()))?;
-        ensure_unique("channel name", self.channels.iter().map(|c| c.name.as_str()))?;
-        if !self.sampling.interval.is_finite() || !(1.0 / 240.0..=1.0).contains(&self.sampling.interval) {
+        ensure_unique(
+            "channel name",
+            self.channels.iter().map(|c| c.name.as_str()),
+        )?;
+        if !self.sampling.interval.is_finite()
+            || !(1.0 / 240.0..=1.0).contains(&self.sampling.interval)
+        {
             return Err("Sampling interval must be between 1/240 s and 1 s".into());
         }
         if !self.sampling.end_margin.is_finite() || self.sampling.end_margin < 0.0 {
@@ -228,20 +266,38 @@ impl PoseDbAsset {
             if !c.weight.is_finite() || c.weight < 0.0 {
                 return Err(format!("Channel `{}` weight must be >= 0", c.name));
             }
-            if let ChannelKind::Trajectory { offsets, position, facing, velocity } = &c.kind {
+            if let ChannelKind::Trajectory {
+                offsets,
+                position,
+                facing,
+                velocity,
+            } = &c.kind
+            {
                 if offsets.is_empty() {
-                    return Err(format!("Trajectory channel `{}` needs sample offsets", c.name));
+                    return Err(format!(
+                        "Trajectory channel `{}` needs sample offsets",
+                        c.name
+                    ));
                 }
-                if offsets.iter().any(|o| !o.is_finite() || *o == 0.0) || offsets.windows(2).any(|w| w[0] >= w[1]) {
+                if offsets.iter().any(|o| !o.is_finite() || *o == 0.0)
+                    || offsets.windows(2).any(|w| w[0] >= w[1])
+                {
                     return Err(format!("Trajectory channel `{}` offsets must be finite, nonzero and strictly increasing", c.name));
                 }
                 if !(*position || *facing || *velocity) {
-                    return Err(format!("Trajectory channel `{}` selects no feature", c.name));
+                    return Err(format!(
+                        "Trajectory channel `{}` selects no feature",
+                        c.name
+                    ));
                 }
             }
         }
         let s = &self.search;
-        if s.candidate_count == 0 || !s.blend_time.is_finite() || s.blend_time < 0.0 || !s.continuing_pose_bias.is_finite() {
+        if s.candidate_count == 0
+            || !s.blend_time.is_finite()
+            || s.blend_time < 0.0
+            || !s.continuing_pose_bias.is_finite()
+        {
             return Err("Search settings are out of range".into());
         }
         Ok(())
@@ -251,7 +307,10 @@ impl PoseDbAsset {
     pub fn reference_diagnostics(&self) -> Vec<Diagnostic> {
         let mut out = Vec::new();
         if self.skeleton.is_none() {
-            out.push(Diagnostic::error("posedb.no_skeleton", "The database has no skeleton").repair("Pick a skeleton for the database"));
+            out.push(
+                Diagnostic::error("posedb.no_skeleton", "The database has no skeleton")
+                    .repair("Pick a skeleton for the database"),
+            );
         }
         out
     }
@@ -260,22 +319,46 @@ impl PoseDbAsset {
     pub fn diagnostics(&self, skeleton: &Skeleton) -> Vec<Diagnostic> {
         let mut out = Vec::new();
         if self.channels.is_empty() {
-            out.push(Diagnostic::error("posedb.no_channels", "The schema has no feature channels, so there is nothing to match").repair("Add a pose or trajectory channel"));
+            out.push(
+                Diagnostic::error(
+                    "posedb.no_channels",
+                    "The schema has no feature channels, so there is nothing to match",
+                )
+                .repair("Add a pose or trajectory channel"),
+            );
         } else if self.channels.iter().all(|c| c.weight == 0.0) {
-            out.push(Diagnostic::error("posedb.zero_weights", "Every channel has weight 0, so every pose costs the same"));
+            out.push(Diagnostic::error(
+                "posedb.zero_weights",
+                "Every channel has weight 0, so every pose costs the same",
+            ));
         }
         let enabled = self.sources.iter().filter(|s| s.enabled).count();
         if enabled == 0 {
-            out.push(Diagnostic::error("posedb.no_sources", "No enabled source clips").repair("Add a sequence or enable one"));
+            out.push(
+                Diagnostic::error("posedb.no_sources", "No enabled source clips")
+                    .repair("Add a sequence or enable one"),
+            );
         }
         for c in &self.channels {
             let bone = match &c.kind {
-                ChannelKind::BonePosition { bone } | ChannelKind::BoneRotation { bone } | ChannelKind::BoneVelocity { bone } => Some(bone),
+                ChannelKind::BonePosition { bone }
+                | ChannelKind::BoneRotation { bone }
+                | ChannelKind::BoneVelocity { bone } => Some(bone),
                 _ => None,
             };
             if let Some(bone) = bone {
                 if skeleton.bone(bone).is_none() {
-                    out.push(Diagnostic::error("posedb.unknown_bone", format!("Channel `{}` names bone `{bone}` which the skeleton does not have", c.name)).at(&c.id).repair("Pick a bone of the database's skeleton"));
+                    out.push(
+                        Diagnostic::error(
+                            "posedb.unknown_bone",
+                            format!(
+                                "Channel `{}` names bone `{bone}` which the skeleton does not have",
+                                c.name
+                            ),
+                        )
+                        .at(&c.id)
+                        .repair("Pick a bone of the database's skeleton"),
+                    );
                 }
             }
         }
@@ -302,7 +385,12 @@ impl PoseDbAsset {
         }
         let mut sources: Vec<&PoseDbSource> = self.sources.iter().filter(|s| s.enabled).collect();
         sources.sort_by(|a, b| a.id.cmp(&b.id));
-        let canonical = Canonical { skeleton: self.skeleton.as_ref().map(|s| s.as_str()), sources, channels: &self.channels, sampling: &self.sampling };
+        let canonical = Canonical {
+            skeleton: self.skeleton.as_ref().map(|s| s.as_str()),
+            sources,
+            channels: &self.channels,
+            sampling: &self.sampling,
+        };
         sha256_hex(&serde_json::to_vec(&canonical).unwrap_or_default())
     }
 
@@ -318,7 +406,10 @@ impl PoseDbAsset {
             material.push(':');
             material.push_str(hash);
         }
-        IndexKey { builder_version: INDEX_BUILDER_VERSION, hash: sha256_hex(material.as_bytes()) }
+        IndexKey {
+            builder_version: INDEX_BUILDER_VERSION,
+            hash: sha256_hex(material.as_bytes()),
+        }
     }
 }
 
@@ -334,7 +425,11 @@ pub struct IndexKey {
 }
 
 /// Where the derived index for `asset` with `key` lives, under the project root.
-pub fn derived_index_path(project_root: &Path, asset: &AssetRef<PoseDatabaseAssetKind>, key: &IndexKey) -> PathBuf {
+pub fn derived_index_path(
+    project_root: &Path,
+    asset: &AssetRef<PoseDatabaseAssetKind>,
+    key: &IndexKey,
+) -> PathBuf {
     project_root
         .join(".pulsar")
         .join("cache")
@@ -371,12 +466,17 @@ pub fn check_index(bytes: &[u8], key: &IndexKey) -> IndexState {
         return IndexState::Corrupt;
     }
     let builder_version = u32::from_le_bytes(bytes[4..8].try_into().expect("4 bytes"));
-    let Ok(hash) = std::str::from_utf8(&bytes[8..8 + hash_len]) else { return IndexState::Corrupt };
+    let Ok(hash) = std::str::from_utf8(&bytes[8..8 + hash_len]) else {
+        return IndexState::Corrupt;
+    };
     let len = u64::from_le_bytes(bytes[8 + hash_len..header].try_into().expect("8 bytes")) as usize;
     if bytes.len() != header + len {
         return IndexState::Corrupt;
     }
-    let found = IndexKey { builder_version, hash: hash.to_string() };
+    let found = IndexKey {
+        builder_version,
+        hash: hash.to_string(),
+    };
     if &found == key {
         IndexState::Current(bytes[header..].to_vec())
     } else {

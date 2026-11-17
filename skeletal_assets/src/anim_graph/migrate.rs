@@ -22,18 +22,27 @@ pub fn from_v1(value: Value) -> Result<(AnimationGraphAsset, Migration), CodecEr
     let Value::Object(object) = value else {
         return Err(CodecError::Malformed("expected a JSON object".into()));
     };
-    let mut migration = Migration { from_version: 1, ..Default::default() };
+    let mut migration = Migration {
+        from_version: 1,
+        ..Default::default()
+    };
 
     let id = match object.get("id").and_then(Value::as_str) {
         Some(text) => AssetRef::<AnimationGraphAssetKind>::parse(text)
             .ok_or_else(|| CodecError::Invalid("asset id is not a UUID".into()))?,
         None => {
             migration.id_assigned = true;
-            migration.notes.push("File had no id; one was assigned and must be saved".into());
+            migration
+                .notes
+                .push("File had no id; one was assigned and must be saved".into());
             AssetRef::new()
         }
     };
-    let name = object.get("name").and_then(Value::as_str).unwrap_or("Animation Graph").to_string();
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("Animation Graph")
+        .to_string();
     let skeleton = match object.get("skeleton") {
         None | Some(Value::Null) => None,
         Some(v) => Some(
@@ -43,15 +52,29 @@ pub fn from_v1(value: Value) -> Result<(AnimationGraphAsset, Migration), CodecEr
         ),
     };
 
-    let old_nodes = object.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
-    let old_edges = object.get("connections").and_then(Value::as_array).cloned().unwrap_or_default();
+    let old_nodes = object
+        .get("nodes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let old_edges = object
+        .get("connections")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
 
     // Layout: depth from the output along incoming edges, so the chain reads
     // left to right.
     let mut incoming: HashMap<String, Vec<String>> = HashMap::new();
     for edge in &old_edges {
-        if let (Some(from), Some(to)) = (edge.get("from").and_then(Value::as_str), edge.get("to").and_then(Value::as_str)) {
-            incoming.entry(to.to_string()).or_default().push(from.to_string());
+        if let (Some(from), Some(to)) = (
+            edge.get("from").and_then(Value::as_str),
+            edge.get("to").and_then(Value::as_str),
+        ) {
+            incoming
+                .entry(to.to_string())
+                .or_default()
+                .push(from.to_string());
         }
     }
     let mut depth: HashMap<String, usize> = HashMap::new();
@@ -80,24 +103,37 @@ pub fn from_v1(value: Value) -> Result<(AnimationGraphAsset, Migration), CodecEr
     let mut seen_ids = std::collections::HashSet::new();
 
     for node in &old_nodes {
-        let node_id = node.get("id").and_then(Value::as_str).ok_or_else(|| CodecError::Invalid("a node has no id".into()))?;
+        let node_id = node
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| CodecError::Invalid("a node has no id".into()))?;
         if !seen_ids.insert(node_id.to_string()) {
-            return Err(CodecError::Invalid(format!("duplicate node id `{node_id}`")));
+            return Err(CodecError::Invalid(format!(
+                "duplicate node id `{node_id}`"
+            )));
         }
         let kind = node.get("type").and_then(Value::as_str).unwrap_or_default();
         let type_id = match kind {
             "sequence" => "anim.sequence_player",
             "blend_space" => "anim.blend_space_player",
             "output" => "anim.output_pose",
-            other => return Err(CodecError::Invalid(format!("unknown v1 node type `{other}`"))),
+            other => {
+                return Err(CodecError::Invalid(format!(
+                    "unknown v1 node type `{other}`"
+                )))
+            }
         };
         // Unreached nodes go in a column left of the chain.
         let column = depth.get(node_id).map_or(max_depth + 1, |d| *d);
         let row = rows.entry(column).or_insert(0);
-        let position = ((max_depth + 1 - column.min(max_depth + 1)) as f32 * 280.0, *row as f32 * 150.0);
+        let position = (
+            (max_depth + 1 - column.min(max_depth + 1)) as f32 * 280.0,
+            *row as f32 * 150.0,
+        );
         *row += 1;
 
-        let mut instance = instantiate_node(node_id, type_id, position, &|_| None).expect("catalogue node");
+        let mut instance =
+            instantiate_node(node_id, type_id, position, &|_| None).expect("catalogue node");
         if let Some(title) = node.get("name").and_then(Value::as_str) {
             instance.properties.insert("title".into(), json!(title));
         }
@@ -109,7 +145,9 @@ pub fn from_v1(value: Value) -> Result<(AnimationGraphAsset, Migration), CodecEr
         if let Some(field) = field {
             if let Some(reference) = node.get(field).and_then(Value::as_str) {
                 if AssetRef::<AnimationGraphAssetKind>::parse(reference).is_none() {
-                    return Err(CodecError::Invalid(format!("node `{node_id}` {field} is not a UUID")));
+                    return Err(CodecError::Invalid(format!(
+                        "node `{node_id}` {field} is not a UUID"
+                    )));
                 }
                 instance.properties.insert(prop.into(), json!(reference));
             }
@@ -121,9 +159,14 @@ pub fn from_v1(value: Value) -> Result<(AnimationGraphAsset, Migration), CodecEr
     let mut dropped = Vec::new();
     let mut output_fed = std::collections::HashSet::new();
     for edge in &old_edges {
-        let (Some(from), Some(to)) = (edge.get("from").and_then(Value::as_str), edge.get("to").and_then(Value::as_str)) else {
+        let (Some(from), Some(to)) = (
+            edge.get("from").and_then(Value::as_str),
+            edge.get("to").and_then(Value::as_str),
+        ) else {
             dropped.push(edge.clone());
-            migration.notes.push("A connection without from/to was dropped".into());
+            migration
+                .notes
+                .push("A connection without from/to was dropped".into());
             continue;
         };
         let reason = match (kinds.get(from), kinds.get(to)) {
@@ -140,7 +183,9 @@ pub fn from_v1(value: Value) -> Result<(AnimationGraphAsset, Migration), CodecEr
                 .add_connection(data_connection(from, "pose", to, "pose"))
                 .map_err(CodecError::Invalid)?,
             Some(reason) => {
-                migration.notes.push(format!("Connection {from} -> {to} dropped: {reason}"));
+                migration
+                    .notes
+                    .push(format!("Connection {from} -> {to} dropped: {reason}"));
                 dropped.push(edge.clone());
             }
         }
@@ -149,7 +194,10 @@ pub fn from_v1(value: Value) -> Result<(AnimationGraphAsset, Migration), CodecEr
     let mut extra = Extra::new();
     // Keep what we did not understand, except the fields we consumed.
     for (key, value) in object {
-        if !matches!(key.as_str(), "version" | "id" | "name" | "skeleton" | "nodes" | "connections") {
+        if !matches!(
+            key.as_str(),
+            "version" | "id" | "name" | "skeleton" | "nodes" | "connections"
+        ) {
             extra.insert(key, value);
         }
     }

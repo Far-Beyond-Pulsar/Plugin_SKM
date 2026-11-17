@@ -72,7 +72,9 @@ asset_id! {
     AnimSequenceId
 }
 
-use pulsar_reflection::{AnimationSequenceAssetKind, AssetRef, SkeletalMeshAssetKind, SkeletonAssetKind};
+use pulsar_reflection::{
+    AnimationSequenceAssetKind, AssetRef, SkeletalMeshAssetKind, SkeletonAssetKind,
+};
 
 impl SkeletonId {
     /// The same id as a typed project asset reference.

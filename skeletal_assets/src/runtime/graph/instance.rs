@@ -25,7 +25,9 @@ use crate::montage::BlendCurve;
 use super::super::blendspace::SampleWeight;
 use super::super::clip::wrap_position;
 use super::super::ik::{solve_fabrik, solve_two_bone, Effector, FabrikParams, JointLimits};
-use super::super::pose::{apply_additive, blend_weighted, make_additive, BoneTransform, Pose, RootMotion, RuntimeSkeleton};
+use super::super::pose::{
+    apply_additive, blend_weighted, make_additive, BoneTransform, Pose, RootMotion, RuntimeSkeleton,
+};
 use super::super::posesearch::{DesiredTrajectory, FrameFeatures};
 use super::machine::MachineState;
 use super::*;
@@ -87,11 +89,24 @@ impl SyncRegistry {
         groups.sort_unstable();
         groups.dedup();
         for g in groups {
-            let members: Vec<&SyncMember> = self.members.iter().filter(|m| m.group == g && m.weight > 0.0).collect();
+            let members: Vec<&SyncMember> = self
+                .members
+                .iter()
+                .filter(|m| m.group == g && m.weight > 0.0)
+                .collect();
             let pick = |role: SyncRole| -> Option<&SyncMember> {
-                members.iter().copied().filter(|m| m.role == role).max_by(|a, b| a.weight.total_cmp(&b.weight).then(b.key.cmp(&a.key)))
+                members
+                    .iter()
+                    .copied()
+                    .filter(|m| m.role == role)
+                    .max_by(|a, b| a.weight.total_cmp(&b.weight).then(b.key.cmp(&a.key)))
             };
-            let Some(leader) = pick(SyncRole::Leader).or_else(|| pick(SyncRole::Auto)).or_else(|| pick(SyncRole::Follower)) else { continue };
+            let Some(leader) = pick(SyncRole::Leader)
+                .or_else(|| pick(SyncRole::Auto))
+                .or_else(|| pick(SyncRole::Follower))
+            else {
+                continue;
+            };
             let mut pos = leader.position + dt as f64 * leader.rate as f64;
             let dur = leader.duration.max(1e-6) as f64;
             let phase = if leader.looping {
@@ -100,7 +115,14 @@ impl SyncRegistry {
                 pos = pos.clamp(0.0, dur);
                 pos / dur
             };
-            out.insert(g.to_string(), GroupPhase { leader: leader.key, phase, leader_position: pos });
+            out.insert(
+                g.to_string(),
+                GroupPhase {
+                    leader: leader.key,
+                    phase,
+                    leader_position: pos,
+                },
+            );
         }
         out
     }
@@ -149,7 +171,15 @@ pub struct FadeState {
 }
 
 impl FadeState {
-    fn select(&mut self, selected: usize, n: usize, duration: f32, curve: BlendCurve, dt: f32, tick: u64) {
+    fn select(
+        &mut self,
+        selected: usize,
+        n: usize,
+        duration: f32,
+        curve: BlendCurve,
+        dt: f32,
+        tick: u64,
+    ) {
         if !self.init || self.weights.len() != n || self.last_tick + 1 != tick {
             // first use, or relevant again after a gap: no fade from a stale choice
             self.weights = (0..n).map(|i| (i == selected) as u8 as f32).collect();
@@ -168,7 +198,11 @@ impl FadeState {
         if self.elapsed < self.duration {
             self.elapsed = (self.elapsed + dt).min(self.duration);
         }
-        let t = if self.duration <= 0.0 { 1.0 } else { (self.elapsed / self.duration).clamp(0.0, 1.0) };
+        let t = if self.duration <= 0.0 {
+            1.0
+        } else {
+            (self.elapsed / self.duration).clamp(0.0, 1.0)
+        };
         let s = curve.evaluate(t);
         for i in 0..n {
             let target = (i == selected) as u8 as f32;
@@ -245,7 +279,13 @@ pub struct GraphInstance {
 fn eff_from_euler(location: Vec3, rotation: Vec3) -> Effector {
     Effector {
         translation: location,
-        rotation: Quat::from_euler(EulerRot::XYZ, rotation.x.to_radians(), rotation.y.to_radians(), rotation.z.to_radians()).normalize(),
+        rotation: Quat::from_euler(
+            EulerRot::XYZ,
+            rotation.x.to_radians(),
+            rotation.y.to_radians(),
+            rotation.z.to_radians(),
+        )
+        .normalize(),
     }
 }
 
@@ -260,10 +300,16 @@ impl GraphInstance {
                 NodeKind::SequencePlayer(_) => NodeState::Seq(SeqState::default()),
                 NodeKind::BlendSpacePlayer(c) => {
                     let k = c.space.samples.len();
-                    NodeState::Space(Box::new(SpaceState { clocks: vec![0.0; k], prev_clocks: vec![0.0; k], ..Default::default() }))
+                    NodeState::Space(Box::new(SpaceState {
+                        clocks: vec![0.0; k],
+                        prev_clocks: vec![0.0; k],
+                        ..Default::default()
+                    }))
                 }
                 NodeKind::PoseSearch(_) => NodeState::Search(Box::default()),
-                NodeKind::BlendByBool { .. } | NodeKind::BlendByInt { .. } => NodeState::Fade(FadeState::default()),
+                NodeKind::BlendByBool { .. } | NodeKind::BlendByInt { .. } => {
+                    NodeState::Fade(FadeState::default())
+                }
                 NodeKind::Blend { .. }
                 | NodeKind::BlendMulti { .. }
                 | NodeKind::ApplyAdditive { .. }
@@ -274,10 +320,15 @@ impl GraphInstance {
                 | NodeKind::IkRig(_)
                 | NodeKind::Retarget { .. } => NodeState::Scalars(Vec::new()),
                 NodeKind::StateMachine(_) => NodeState::Machine(Box::default()),
-                NodeKind::Layer { program } => NodeState::Layer(Box::new(GraphInstance::new(program.clone(), next_uid))),
+                NodeKind::Layer { program } => {
+                    NodeState::Layer(Box::new(GraphInstance::new(program.clone(), next_uid)))
+                }
                 NodeKind::LinkedGraph(cfg) => {
                     let inst = GraphInstance::new(cfg.graph.main.clone(), next_uid);
-                    NodeState::Linked(Box::new(LinkedState { inst: Some(inst), params: ParamValues::from_defs(&cfg.graph.params) }))
+                    NodeState::Linked(Box::new(LinkedState {
+                        inst: Some(inst),
+                        params: ParamValues::from_defs(&cfg.graph.params),
+                    }))
                 }
                 _ => NodeState::None,
             });
@@ -349,7 +400,10 @@ impl GraphInstance {
         let program = self.program.clone();
         let node = &program.nodes[n];
         let contributes = w > 1e-6;
-        let always = matches!(node.kind, NodeKind::OutputPose | NodeKind::LayerOutput | NodeKind::StateResult);
+        let always = matches!(
+            node.kind,
+            NodeKind::OutputPose | NodeKind::LayerOutput | NodeKind::StateResult
+        );
         if !contributes && !always {
             return;
         }
@@ -364,7 +418,9 @@ impl GraphInstance {
                 let start = self.in_f32(env, n, 1, cfg.start).max(0.0);
                 let tick = self.tick;
                 let uid = self.uid;
-                let NodeState::Seq(st) = &mut self.states[n] else { return };
+                let NodeState::Seq(st) = &mut self.states[n] else {
+                    return;
+                };
                 if !st.started || st.last_tick + 1 != tick {
                     st.position = start as f64;
                     st.prev = st.position;
@@ -377,14 +433,34 @@ impl GraphInstance {
                 if let Some(sync) = cfg.sync.as_ref().filter(|_| rate >= 0.0) {
                     // a negative rate plays the clip backwards and leaves its sync group
                     st.synced = true;
-                    env.sync.register(SyncMember { key: (uid, n), group: sync.group.clone(), role: sync.role, weight: w, duration: dur / rate.max(1e-6), rate: rate, position: st.position, looping: cfg.looping });
+                    env.sync.register(SyncMember {
+                        key: (uid, n),
+                        group: sync.group.clone(),
+                        role: sync.role,
+                        weight: w,
+                        duration: dur / rate.max(1e-6),
+                        rate: rate,
+                        position: st.position,
+                        looping: cfg.looping,
+                    });
                 } else {
                     st.synced = false;
                     st.position += dt as f64 * rate as f64;
                     if !cfg.looping {
                         st.position = st.position.clamp(0.0, dur as f64);
                     }
-                    record_span(env, uid, cfg.clip.clone(), st.prev, st.position, cfg.looping, w, SpanOrigin::SequencePlayer { node: node.id.clone() });
+                    record_span(
+                        env,
+                        uid,
+                        cfg.clip.clone(),
+                        st.prev,
+                        st.position,
+                        cfg.looping,
+                        w,
+                        SpanOrigin::SequencePlayer {
+                            node: node.id.clone(),
+                        },
+                    );
                 }
             }
             NodeKind::BlendSpacePlayer(cfg) => {
@@ -392,7 +468,9 @@ impl GraphInstance {
                 let y_in = self.in_f32(env, n, 1, cfg.y);
                 let tick = self.tick;
                 let uid = self.uid;
-                let NodeState::Space(st) = &mut self.states[n] else { return };
+                let NodeState::Space(st) = &mut self.states[n] else {
+                    return;
+                };
                 let (tx, ty) = cfg.space.clamp_input(x_in, y_in);
                 if !st.started || st.last_tick + 1 != tick {
                     st.x = tx;
@@ -404,7 +482,12 @@ impl GraphInstance {
                     }
                 } else {
                     st.x = smooth(st.x, tx, dt, cfg.space.x_axis.smoothing_time);
-                    st.y = smooth(st.y, ty, dt, cfg.space.y_axis.as_ref().map_or(0.0, |a| a.smoothing_time));
+                    st.y = smooth(
+                        st.y,
+                        ty,
+                        dt,
+                        cfg.space.y_axis.as_ref().map_or(0.0, |a| a.smoothing_time),
+                    );
                 }
                 st.last_tick = tick;
                 st.weight = w;
@@ -419,14 +502,26 @@ impl GraphInstance {
                     crate::blend_space::SyncMode::Markers => sp.samples[i].sync_group.is_some(),
                 };
                 // the cycle length of the synced samples: weighted, or the leader's
-                let synced: Vec<&SampleWeight> = st.weights.iter().filter(|s| phase_sync(s.sample)).collect();
-                let leader = sp.leader.as_ref().and_then(|id| synced.iter().find(|s| &sp.samples[s.sample].id == id));
-                let cycle = |i: usize| (sp.samples[i].clip.duration / (sp.samples[i].rate.abs().max(1e-3) * rate.abs().max(1e-3))).max(1e-6);
+                let synced: Vec<&SampleWeight> =
+                    st.weights.iter().filter(|s| phase_sync(s.sample)).collect();
+                let leader = sp
+                    .leader
+                    .as_ref()
+                    .and_then(|id| synced.iter().find(|s| &sp.samples[s.sample].id == id));
+                let cycle = |i: usize| {
+                    (sp.samples[i].clip.duration
+                        / (sp.samples[i].rate.abs().max(1e-3) * rate.abs().max(1e-3)))
+                    .max(1e-6)
+                };
                 st.length = match leader {
                     Some(l) => cycle(l.sample),
                     None if !synced.is_empty() => {
                         let total: f32 = synced.iter().map(|s| s.weight).sum();
-                        synced.iter().map(|s| s.weight / total * cycle(s.sample)).sum::<f32>().max(1e-6)
+                        synced
+                            .iter()
+                            .map(|s| s.weight / total * cycle(s.sample))
+                            .sum::<f32>()
+                            .max(1e-6)
                     }
                     None => 1.0,
                 };
@@ -434,7 +529,8 @@ impl GraphInstance {
                 // free-running samples advance on their own clocks
                 for s in &st.weights {
                     if !phase_sync(s.sample) {
-                        st.clocks[s.sample] += dt as f64 * rate as f64 * sp.samples[s.sample].rate as f64;
+                        st.clocks[s.sample] +=
+                            dt as f64 * rate as f64 * sp.samples[s.sample].rate as f64;
                     }
                 }
                 if let (Some(sync), true, true) = (&cfg.sync, any_synced, rate >= 0.0) {
@@ -452,25 +548,50 @@ impl GraphInstance {
                 } else {
                     st.synced = false;
                     if any_synced {
-                        st.phase += dt as f64 / st.length as f64 * if rate < 0.0 { -1.0 } else { 1.0 };
+                        st.phase +=
+                            dt as f64 / st.length as f64 * if rate < 0.0 { -1.0 } else { 1.0 };
                     }
                 }
                 if !st.synced {
                     let weights = st.weights.clone();
-                    let (clocks, prev_clocks, phase, prev_phase) = (st.clocks.clone(), st.prev_clocks.clone(), st.phase, st.prev_phase);
+                    let (clocks, prev_clocks, phase, prev_phase) = (
+                        st.clocks.clone(),
+                        st.prev_clocks.clone(),
+                        st.phase,
+                        st.prev_phase,
+                    );
                     for s in &weights {
                         let sample = &sp.samples[s.sample];
                         let (from, to) = if phase_sync(s.sample) {
-                            ((prev_phase + sample.phase_offset as f64) * sample.clip.duration as f64, (phase + sample.phase_offset as f64) * sample.clip.duration as f64)
+                            (
+                                (prev_phase + sample.phase_offset as f64)
+                                    * sample.clip.duration as f64,
+                                (phase + sample.phase_offset as f64) * sample.clip.duration as f64,
+                            )
                         } else {
                             (prev_clocks[s.sample], clocks[s.sample])
                         };
-                        record_span(env, uid, sample.clip.clone(), from, to, sample_loops(cfg, sample), w * s.weight, SpanOrigin::BlendSpaceSample { node: node.id.clone(), sample: sample.id.clone() });
+                        record_span(
+                            env,
+                            uid,
+                            sample.clip.clone(),
+                            from,
+                            to,
+                            sample_loops(cfg, sample),
+                            w * s.weight,
+                            SpanOrigin::BlendSpaceSample {
+                                node: node.id.clone(),
+                                sample: sample.id.clone(),
+                            },
+                        );
                     }
                 }
             }
             NodeKind::PoseSearch(cfg) => self.update_search(env, n, node, cfg, w),
-            NodeKind::ReferencePose | NodeKind::LayerInput | NodeKind::ConstFloat(_) | NodeKind::ConstBool(_) => {}
+            NodeKind::ReferencePose
+            | NodeKind::LayerInput
+            | NodeKind::ConstFloat(_)
+            | NodeKind::ConstBool(_) => {}
             NodeKind::Blend { alpha, curve } => {
                 let a = self.in_f32(env, n, 2, *alpha).clamp(0.0, 1.0);
                 let shaped = curve.evaluate(a);
@@ -479,7 +600,15 @@ impl GraphInstance {
                 self.update_input(env, n, 1, w * shaped);
             }
             NodeKind::BlendMulti { count } => {
-                let raw: Vec<f32> = (0..*count).map(|i| if self.link(n, 2 * i + 1).is_some() { 0.0 } else { 0.0 }).collect();
+                let raw: Vec<f32> = (0..*count)
+                    .map(|i| {
+                        if self.link(n, 2 * i + 1).is_some() {
+                            0.0
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect();
                 let mut weights = raw;
                 for (i, slot) in weights.iter_mut().enumerate() {
                     *slot = self.in_f32(env, n, 2 * i + 1, 0.0).max(0.0);
@@ -496,20 +625,34 @@ impl GraphInstance {
                 }
                 self.states[n] = NodeState::Scalars(weights);
             }
-            NodeKind::BlendByBool { condition, blend_time, curve } => {
+            NodeKind::BlendByBool {
+                condition,
+                blend_time,
+                curve,
+            } => {
                 let c = self.in_bool(env, n, 2, *condition);
                 let tick = self.tick;
-                let NodeState::Fade(f) = &mut self.states[n] else { return };
+                let NodeState::Fade(f) = &mut self.states[n] else {
+                    return;
+                };
                 f.select(if c { 0 } else { 1 }, 2, *blend_time, *curve, dt, tick);
                 let ws = f.weights.clone();
                 for (i, wi) in ws.into_iter().enumerate() {
                     self.update_input(env, n, i, w * wi);
                 }
             }
-            NodeKind::BlendByInt { count, selector, blend_time } => {
-                let s = self.in_i32(env, n, 0, *selector).clamp(0, *count as i32 - 1) as usize;
+            NodeKind::BlendByInt {
+                count,
+                selector,
+                blend_time,
+            } => {
+                let s = self
+                    .in_i32(env, n, 0, *selector)
+                    .clamp(0, *count as i32 - 1) as usize;
                 let tick = self.tick;
-                let NodeState::Fade(f) = &mut self.states[n] else { return };
+                let NodeState::Fade(f) = &mut self.states[n] else {
+                    return;
+                };
                 f.select(s, *count, *blend_time, BlendCurve::EaseInOut, dt, tick);
                 let ws = f.weights.clone();
                 for (i, wi) in ws.into_iter().enumerate() {
@@ -538,7 +681,8 @@ impl GraphInstance {
                 self.states[n] = NodeState::Scalars(ws);
             }
             NodeKind::Slot(cfg) => {
-                let covered = !cfg.always_update_source && env.montages.covers_slot(&cfg.slot, &cfg.group);
+                let covered =
+                    !cfg.always_update_source && env.montages.covers_slot(&cfg.slot, &cfg.group);
                 self.states[n] = NodeState::Scalars(vec![covered as u8 as f32]);
                 if !covered {
                     self.update_input(env, n, 0, w);
@@ -617,7 +761,9 @@ impl GraphInstance {
                 }
                 self.states[n] = NodeState::Linked(st);
             }
-            NodeKind::OutputPose | NodeKind::LayerOutput | NodeKind::StateResult => self.update_input(env, n, 0, w),
+            NodeKind::OutputPose | NodeKind::LayerOutput | NodeKind::StateResult => {
+                self.update_input(env, n, 0, w)
+            }
             // pure values are pulled by their consumers
             _ => {}
         }
@@ -633,7 +779,9 @@ impl GraphInstance {
         let tick = self.tick;
         let skeleton = node.skeleton.clone();
         let fallback_linked = self.link(n, 0).is_some();
-        let NodeState::Search(st) = &mut self.states[n] else { return };
+        let NodeState::Search(st) = &mut self.states[n] else {
+            return;
+        };
         if st.last_tick + 1 != tick {
             st.current = None;
             st.previous = None;
@@ -654,30 +802,69 @@ impl GraphInstance {
         let due = st.current.is_none() || st.since_search >= cfg.interval;
         if due {
             st.since_search = 0.0;
-            let pose = st.last_pose.clone().map(|p| (*p).clone()).unwrap_or_else(|| skeleton.bind_pose());
+            let pose = st
+                .last_pose
+                .clone()
+                .map(|p| (*p).clone())
+                .unwrap_or_else(|| skeleton.bind_pose());
             let prev = st.prev_pose.clone();
-            let duration = st.current.map_or(0.0, |c| db.clips[c.clip as usize].clip.duration);
-            let phase = st.current.map_or(0.0, |c| if duration > 0.0 { c.time / duration } else { 0.0 });
-            let frame = FrameFeatures::from_pose(&skeleton, &pose, prev.as_deref(), dt.max(1e-3), phase);
+            let duration = st
+                .current
+                .map_or(0.0, |c| db.clips[c.clip as usize].clip.duration);
+            let phase = st.current.map_or(0.0, |c| {
+                if duration > 0.0 {
+                    c.time / duration
+                } else {
+                    0.0
+                }
+            });
+            let frame =
+                FrameFeatures::from_pose(&skeleton, &pose, prev.as_deref(), dt.max(1e-3), phase);
             let direction = dir_in.unwrap_or(Vec3::Z).normalize_or_zero();
-            let desired = DesiredTrajectory { velocity: direction * speed_in };
-            let query = db.index.query_vector(&db.asset, &skeleton, &frame, &desired);
+            let desired = DesiredTrajectory {
+                velocity: direction * speed_in,
+            };
+            let query = db
+                .index
+                .query_vector(&db.asset, &skeleton, &frame, &desired);
             let current = st.current.map(|c| (c.clip, c.time));
-            let result = db.index.search(&db.clips, &query, current, cfg.continuing_bias, &db.asset.search);
+            let result = db.index.search(
+                &db.clips,
+                &query,
+                current,
+                cfg.continuing_bias,
+                &db.asset.search,
+            );
             if cfg.debug || true {
                 let keep = db.asset.search.query_history.max(1) as usize;
-                st.history.push_back(SearchRecord { node: node.id.clone(), result: result.clone(), used_fallback: result.is_none() });
+                st.history.push_back(SearchRecord {
+                    node: node.id.clone(),
+                    result: result.clone(),
+                    used_fallback: result.is_none(),
+                });
                 while st.history.len() > keep {
                     st.history.pop_front();
                 }
             }
             if cfg.debug {
-                env.searches.push(SearchRecord { node: node.id.clone(), result: result.clone(), used_fallback: result.is_none() });
+                env.searches.push(SearchRecord {
+                    node: node.id.clone(),
+                    result: result.clone(),
+                    used_fallback: result.is_none(),
+                });
             }
             match result {
                 Some(r) => {
-                    let next = Cursor { clip: r.clip, time: r.clip_time, mirrored: r.mirrored };
-                    let same = st.current.is_some_and(|c| c.clip == next.clip && c.mirrored == next.mirrored && (c.time - next.time).abs() < db.asset.sampling.interval.max(1e-3));
+                    let next = Cursor {
+                        clip: r.clip,
+                        time: r.clip_time,
+                        mirrored: r.mirrored,
+                    };
+                    let same = st.current.is_some_and(|c| {
+                        c.clip == next.clip
+                            && c.mirrored == next.mirrored
+                            && (c.time - next.time).abs() < db.asset.sampling.interval.max(1e-3)
+                    });
                     if !same {
                         st.previous = st.current;
                         st.fade_elapsed = 0.0;
@@ -714,8 +901,23 @@ impl GraphInstance {
             if let Some(c) = st.current {
                 let clip = &db.clips[c.clip as usize];
                 let from = st.prev_time as f64;
-                let to = if c.time < st.prev_time && clip.looping { c.time as f64 + clip.clip.duration as f64 } else { c.time as f64 };
-                record_span(env, uid, clip.clip.clone(), from, to, clip.looping, w, SpanOrigin::PoseSearch { node: node.id.clone() });
+                let to = if c.time < st.prev_time && clip.looping {
+                    c.time as f64 + clip.clip.duration as f64
+                } else {
+                    c.time as f64
+                };
+                record_span(
+                    env,
+                    uid,
+                    clip.clip.clone(),
+                    from,
+                    to,
+                    clip.looping,
+                    w,
+                    SpanOrigin::PoseSearch {
+                        node: node.id.clone(),
+                    },
+                );
             }
         } else if fallback_linked {
             self.update_input(env, n, 0, w);
@@ -726,7 +928,13 @@ impl GraphInstance {
 
     /// Apply resolved sync group phases to every member of this graph and the
     /// graphs nested in it.
-    pub fn apply_sync(&mut self, groups: &HashMap<String, GroupPhase>, dt: f32, env_spans: &mut Vec<PlaybackSpan>, quiet: bool) {
+    pub fn apply_sync(
+        &mut self,
+        groups: &HashMap<String, GroupPhase>,
+        dt: f32,
+        env_spans: &mut Vec<PlaybackSpan>,
+        quiet: bool,
+    ) {
         let program = self.program.clone();
         let uid = self.uid;
         for (n, node) in program.nodes.iter().enumerate() {
@@ -749,7 +957,18 @@ impl GraphInstance {
                             (group.phase * dur).min(dur)
                         };
                         if !quiet {
-                            span_push(env_spans, uid, cfg.clip.clone(), st.prev, st.position, cfg.looping, st.weight, SpanOrigin::SequencePlayer { node: node.id.clone() });
+                            span_push(
+                                env_spans,
+                                uid,
+                                cfg.clip.clone(),
+                                st.prev,
+                                st.position,
+                                cfg.looping,
+                                st.weight,
+                                SpanOrigin::SequencePlayer {
+                                    node: node.id.clone(),
+                                },
+                            );
                         }
                     }
                     NodeState::Seq(st)
@@ -757,7 +976,11 @@ impl GraphInstance {
                 (NodeState::Space(mut st), NodeKind::BlendSpacePlayer(cfg)) if st.synced => {
                     if let Some(group) = cfg.sync.as_ref().and_then(|s| groups.get(&s.group)) {
                         let before = st.phase;
-                        let mut p = if group.leader == (uid, n) { group.leader_position / st.length.max(1e-6) as f64 } else { before.floor() + group.phase };
+                        let mut p = if group.leader == (uid, n) {
+                            group.leader_position / st.length.max(1e-6) as f64
+                        } else {
+                            before.floor() + group.phase
+                        };
                         if p < before - 1e-9 {
                             p += 1.0;
                         }
@@ -770,7 +993,19 @@ impl GraphInstance {
                                     continue;
                                 }
                                 let d = sample.clip.duration as f64;
-                                span_push(env_spans, uid, sample.clip.clone(), (st.prev_phase + sample.phase_offset as f64) * d, (st.phase + sample.phase_offset as f64) * d, sample_loops(cfg, sample), st.weight * s.weight, SpanOrigin::BlendSpaceSample { node: node.id.clone(), sample: sample.id.clone() });
+                                span_push(
+                                    env_spans,
+                                    uid,
+                                    sample.clip.clone(),
+                                    (st.prev_phase + sample.phase_offset as f64) * d,
+                                    (st.phase + sample.phase_offset as f64) * d,
+                                    sample_loops(cfg, sample),
+                                    st.weight * s.weight,
+                                    SpanOrigin::BlendSpaceSample {
+                                        node: node.id.clone(),
+                                        sample: sample.id.clone(),
+                                    },
+                                );
                             }
                         }
                     }
@@ -851,11 +1086,22 @@ impl GraphInstance {
         let skel = node.skeleton.clone();
         match &node.kind {
             NodeKind::SequencePlayer(cfg) => {
-                let NodeState::Seq(st) = &self.states[n] else { return skel.bind_pose() };
-                sample_clip(&skel, &cfg.clip, st.prev, st.position, cfg.looping, env.root_motion_in_pose)
+                let NodeState::Seq(st) = &self.states[n] else {
+                    return skel.bind_pose();
+                };
+                sample_clip(
+                    &skel,
+                    &cfg.clip,
+                    st.prev,
+                    st.position,
+                    cfg.looping,
+                    env.root_motion_in_pose,
+                )
             }
             NodeKind::BlendSpacePlayer(cfg) => {
-                let NodeState::Space(st) = &self.states[n] else { return skel.bind_pose() };
+                let NodeState::Space(st) = &self.states[n] else {
+                    return skel.bind_pose();
+                };
                 let sp = &cfg.space;
                 let in_pose = env.root_motion_in_pose;
                 let poses: Vec<(Pose, f32)> = st
@@ -870,11 +1116,27 @@ impl GraphInstance {
                             crate::blend_space::SyncMode::Markers => sample.sync_group.is_some(),
                         };
                         let (from, to) = if phase_synced {
-                            ((st.prev_phase + sample.phase_offset as f64) * d, (st.phase + sample.phase_offset as f64) * d)
+                            (
+                                (st.prev_phase + sample.phase_offset as f64) * d,
+                                (st.phase + sample.phase_offset as f64) * d,
+                            )
                         } else {
-                            (st.prev_clocks[s.sample] + sample.phase_offset as f64 * d, st.clocks[s.sample] + sample.phase_offset as f64 * d)
+                            (
+                                st.prev_clocks[s.sample] + sample.phase_offset as f64 * d,
+                                st.clocks[s.sample] + sample.phase_offset as f64 * d,
+                            )
                         };
-                        (sample_clip(&skel, &sample.clip, from, to, sample_loops(cfg, sample), in_pose), s.weight)
+                        (
+                            sample_clip(
+                                &skel,
+                                &sample.clip,
+                                from,
+                                to,
+                                sample_loops(cfg, sample),
+                                in_pose,
+                            ),
+                            s.weight,
+                        )
                     })
                     .collect();
                 let refs: Vec<(&Pose, f32)> = poses.iter().map(|(p, w)| (p, *w)).collect();
@@ -896,17 +1158,29 @@ impl GraphInstance {
             }
             NodeKind::BlendMulti { count } => {
                 let ws = self.scalars(n).to_vec();
-                let poses: Vec<(Arc<Pose>, f32)> = (0..*count).filter(|&i| ws.get(i).copied().unwrap_or(0.0) > 0.0).map(|i| (self.pose_input(env, n, 2 * i), ws[i])).collect();
+                let poses: Vec<(Arc<Pose>, f32)> = (0..*count)
+                    .filter(|&i| ws.get(i).copied().unwrap_or(0.0) > 0.0)
+                    .map(|i| (self.pose_input(env, n, 2 * i), ws[i]))
+                    .collect();
                 let refs: Vec<(&Pose, f32)> = poses.iter().map(|(p, w)| (&**p, *w)).collect();
                 blend_weighted(&refs).unwrap_or_else(|| skel.bind_pose())
             }
             NodeKind::BlendByBool { .. } | NodeKind::BlendByInt { .. } => {
-                let base = if matches!(node.kind, NodeKind::BlendByBool { .. }) { 0 } else { 1 };
+                let base = if matches!(node.kind, NodeKind::BlendByBool { .. }) {
+                    0
+                } else {
+                    1
+                };
                 let ws = match &self.states[n] {
                     NodeState::Fade(f) => f.weights.clone(),
                     _ => Vec::new(),
                 };
-                let poses: Vec<(Arc<Pose>, f32)> = ws.iter().enumerate().filter(|(_, w)| **w > 1e-6).map(|(i, w)| (self.pose_input(env, n, base + i), *w)).collect();
+                let poses: Vec<(Arc<Pose>, f32)> = ws
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, w)| **w > 1e-6)
+                    .map(|(i, w)| (self.pose_input(env, n, base + i), *w))
+                    .collect();
                 let refs: Vec<(&Pose, f32)> = poses.iter().map(|(p, w)| (&**p, *w)).collect();
                 blend_weighted(&refs).unwrap_or_else(|| skel.bind_pose())
             }
@@ -935,7 +1209,14 @@ impl GraphInstance {
                         continue;
                     }
                     let layer = self.pose_input(env, n, 1 + 2 * l);
-                    blend_layer(&skel, &mut acc, &layer, cfg.masks.get(l).and_then(Option::as_ref), wl, cfg.mesh_space_rotation);
+                    blend_layer(
+                        &skel,
+                        &mut acc,
+                        &layer,
+                        cfg.masks.get(l).and_then(Option::as_ref),
+                        wl,
+                        cfg.mesh_space_rotation,
+                    );
                     for (name, &v) in &layer.curves {
                         let e = acc.curves.get(name).copied();
                         let out = match cfg.curves {
@@ -963,8 +1244,13 @@ impl GraphInstance {
             }
             NodeKind::Slot(cfg) => {
                 let covered = self.scalars(n).first().copied().unwrap_or(0.0) > 0.5;
-                let base = if covered { skel.bind_pose() } else { (*self.pose_input(env, n, 0)).clone() };
-                env.montages.apply_to_slot(&skel, &cfg.slot, &cfg.group, base)
+                let base = if covered {
+                    skel.bind_pose()
+                } else {
+                    (*self.pose_input(env, n, 0)).clone()
+                };
+                env.montages
+                    .apply_to_slot(&skel, &cfg.slot, &cfg.group, base)
             }
             NodeKind::SaveCachedPose => (*self.pose_input(env, n, 0)).clone(),
             NodeKind::UseCachedPose { save } => (*self.pose(env, *save)).clone(),
@@ -982,25 +1268,60 @@ impl GraphInstance {
             NodeKind::TwoBoneIk(cfg) => {
                 let mut p = (*self.pose_input(env, n, 0)).clone();
                 let alpha = self.scalars(n).first().copied().unwrap_or(1.0);
-                let Some(mut eff) = self.link(n, 1).and_then(|u| self.value(env, u).as_effector()) else { return p };
+                let Some(mut eff) = self
+                    .link(n, 1)
+                    .and_then(|u| self.value(env, u).as_effector())
+                else {
+                    return p;
+                };
                 if cfg.space == EffectorSpace::Bone {
                     let end = skel.bone_mesh_space(&p.bones, cfg.end);
-                    let mesh = end * glam::Mat4::from_rotation_translation(eff.rotation, eff.translation);
+                    let mesh =
+                        end * glam::Mat4::from_rotation_translation(eff.rotation, eff.translation);
                     let (_, r, t) = mesh.to_scale_rotation_translation();
-                    eff = Effector { translation: t, rotation: r };
+                    eff = Effector {
+                        translation: t,
+                        rotation: r,
+                    };
                 }
                 let pole = self.link(n, 2).map(|u| self.value(env, u).as_vec3());
                 let mut params = cfg.params;
                 params.alpha = alpha;
-                solve_two_bone(&skel, &mut p.bones, cfg.end, &eff, pole, &params, &JointLimits::default());
+                solve_two_bone(
+                    &skel,
+                    &mut p.bones,
+                    cfg.end,
+                    &eff,
+                    pole,
+                    &params,
+                    &JointLimits::default(),
+                );
                 p
             }
             NodeKind::Fabrik(cfg) => {
                 let mut p = (*self.pose_input(env, n, 0)).clone();
                 let alpha = self.scalars(n).first().copied().unwrap_or(1.0);
-                let Some(eff) = self.link(n, 1).and_then(|u| self.value(env, u).as_effector()) else { return p };
-                let params = FabrikParams { alpha, precision: cfg.precision, max_iterations: cfg.max_iterations, take_rotation: false, respect_limits: false };
-                solve_fabrik(&skel, &mut p.bones, &cfg.chain, &eff, &params, &JointLimits::default());
+                let Some(eff) = self
+                    .link(n, 1)
+                    .and_then(|u| self.value(env, u).as_effector())
+                else {
+                    return p;
+                };
+                let params = FabrikParams {
+                    alpha,
+                    precision: cfg.precision,
+                    max_iterations: cfg.max_iterations,
+                    take_rotation: false,
+                    respect_limits: false,
+                };
+                solve_fabrik(
+                    &skel,
+                    &mut p.bones,
+                    &cfg.chain,
+                    &eff,
+                    &params,
+                    &JointLimits::default(),
+                );
                 p
             }
             NodeKind::IkRig(cfg) => {
@@ -1008,12 +1329,15 @@ impl GraphInstance {
                 let alpha = self.scalars(n).first().copied().unwrap_or(1.0);
                 let mut goals: Vec<Option<Effector>> = vec![None; cfg.rig.goals.len()];
                 for &(goal, input) in &cfg.goal_inputs {
-                    goals[goal] = self.link(n, input).and_then(|u| self.value(env, u).as_effector());
+                    goals[goal] = self
+                        .link(n, input)
+                        .and_then(|u| self.value(env, u).as_effector());
                 }
                 let outcomes = cfg.rig.execute(&skel, &mut p.bones, &goals, alpha);
                 if env.trace.len() < 256 {
                     for o in outcomes {
-                        env.trace.push(format!("{}: {} {}", node.id, o.solver, o.detail));
+                        env.trace
+                            .push(format!("{}: {} {}", node.id, o.solver, o.detail));
                     }
                 }
                 p
@@ -1071,7 +1395,7 @@ impl GraphInstance {
                             trace: &mut *env.trace,
                             next_uid: &mut *env.next_uid,
                             quiet: env.quiet,
-                        root_motion_in_pose: env.root_motion_in_pose,
+                            root_motion_in_pose: env.root_motion_in_pose,
                         };
                         let out = inst.evaluate(&mut child_env);
                         st.inst = Some(inst);
@@ -1082,7 +1406,9 @@ impl GraphInstance {
                 self.states[n] = NodeState::Linked(st);
                 out
             }
-            NodeKind::OutputPose | NodeKind::LayerOutput | NodeKind::StateResult => (*self.pose_input(env, n, 0)).clone(),
+            NodeKind::OutputPose | NodeKind::LayerOutput | NodeKind::StateResult => {
+                (*self.pose_input(env, n, 0)).clone()
+            }
             NodeKind::LayerInput => match &self.layer_input {
                 Some(p) if p.bones.len() == skel.len() => (**p).clone(),
                 _ => skel.bind_pose(),
@@ -1095,7 +1421,16 @@ impl GraphInstance {
     fn compute_search(&mut self, env: &mut Env, n: usize, node: &CNode, cfg: &SearchCfg) -> Pose {
         let skel = node.skeleton.clone();
         let (used_fallback, current, previous, fade) = match &self.states[n] {
-            NodeState::Search(s) => (s.used_fallback, s.current, s.previous, if s.fade_duration > 0.0 { (s.fade_elapsed / s.fade_duration).clamp(0.0, 1.0) } else { 1.0 }),
+            NodeState::Search(s) => (
+                s.used_fallback,
+                s.current,
+                s.previous,
+                if s.fade_duration > 0.0 {
+                    (s.fade_elapsed / s.fade_duration).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                },
+            ),
             _ => return skel.bind_pose(),
         };
         let pose = match (&cfg.db, current) {
@@ -1122,10 +1457,30 @@ impl GraphInstance {
                 if let NodeState::Search(s) = &self.states[n] {
                     let clip = &db.clips[cur.clip as usize].clip;
                     let from = s.prev_time as f64;
-                    let to = if cur.time < s.prev_time && db.clips[cur.clip as usize].looping { cur.time as f64 + clip.duration as f64 } else { cur.time as f64 };
-                    let rm = if in_pose { RootMotion::IDENTITY } else { clip.root_motion_between(&skel, from, to, false) };
+                    let to = if cur.time < s.prev_time && db.clips[cur.clip as usize].looping {
+                        cur.time as f64 + clip.duration as f64
+                    } else {
+                        cur.time as f64
+                    };
+                    let rm = if in_pose {
+                        RootMotion::IDENTITY
+                    } else {
+                        clip.root_motion_between(&skel, from, to, false)
+                    };
                     out.root_motion = if cur.mirrored {
-                        RootMotion { translation: Vec3::new(-rm.translation.x, rm.translation.y, rm.translation.z), rotation: Quat::from_xyzw(rm.rotation.x, -rm.rotation.y, -rm.rotation.z, rm.rotation.w) }
+                        RootMotion {
+                            translation: Vec3::new(
+                                -rm.translation.x,
+                                rm.translation.y,
+                                rm.translation.z,
+                            ),
+                            rotation: Quat::from_xyzw(
+                                rm.rotation.x,
+                                -rm.rotation.y,
+                                -rm.rotation.z,
+                                rm.rotation.w,
+                            ),
+                        }
                     } else {
                         rm
                     };
@@ -1176,11 +1531,20 @@ impl GraphInstance {
         let program = self.program.clone();
         let node = &program.nodes[n];
         match &node.kind {
-            NodeKind::GetParameter { index } => env.params.values.get(*index).cloned().unwrap_or(Value::Float(0.0)),
+            NodeKind::GetParameter { index } => env
+                .params
+                .values
+                .get(*index)
+                .cloned()
+                .unwrap_or(Value::Float(0.0)),
             NodeKind::ConstFloat(v) => Value::Float(*v),
             NodeKind::ConstBool(v) => Value::Bool(*v),
             NodeKind::ConstVector(v) => Value::Vector(*v),
-            NodeKind::MakeVector { x, y, z } => Value::Vector(Vec3::new(self.in_f32(env, n, 0, *x), self.in_f32(env, n, 1, *y), self.in_f32(env, n, 2, *z))),
+            NodeKind::MakeVector { x, y, z } => Value::Vector(Vec3::new(
+                self.in_f32(env, n, 0, *x),
+                self.in_f32(env, n, 1, *y),
+                self.in_f32(env, n, 2, *z),
+            )),
             NodeKind::MakeTransform { location, rotation } => {
                 let l = match self.link(n, 0) {
                     Some(u) => self.value(env, u).as_vec3(),
@@ -1196,10 +1560,18 @@ impl GraphInstance {
                 let skel = node.skeleton.clone();
                 let compute = |pose: &Pose| -> Value {
                     if *mesh_space {
-                        let (_, r, t) = skel.bone_mesh_space(&pose.bones, *bone).to_scale_rotation_translation();
-                        Value::Transform(Effector { translation: t, rotation: r })
+                        let (_, r, t) = skel
+                            .bone_mesh_space(&pose.bones, *bone)
+                            .to_scale_rotation_translation();
+                        Value::Transform(Effector {
+                            translation: t,
+                            rotation: r,
+                        })
                     } else {
-                        Value::Transform(Effector { translation: pose.bones[*bone].translation, rotation: pose.bones[*bone].rotation })
+                        Value::Transform(Effector {
+                            translation: pose.bones[*bone].translation,
+                            rotation: pose.bones[*bone].rotation,
+                        })
                     }
                 };
                 match self.pass {
@@ -1209,7 +1581,9 @@ impl GraphInstance {
                         self.held[n] = Some(v.clone());
                         v
                     }
-                    Pass::Update => self.held[n].clone().unwrap_or_else(|| compute(&skel.bind_pose())),
+                    Pass::Update => self.held[n]
+                        .clone()
+                        .unwrap_or_else(|| compute(&skel.bind_pose())),
                 }
             }
             NodeKind::GetCurve { curve } => match self.pass {
@@ -1228,17 +1602,27 @@ impl GraphInstance {
                     FloatOp::Sub => x - y,
                     FloatOp::Mul => x * y,
                     FloatOp::Div => {
-                        if y == 0.0 { 0.0 } else { x / y }
+                        if y == 0.0 {
+                            0.0
+                        } else {
+                            x / y
+                        }
                     }
                     FloatOp::Min => x.min(y),
                     FloatOp::Max => x.max(y),
                     FloatOp::AbsA => x.abs(),
                     FloatOp::Pow => {
-                        if x < 0.0 { 0.0 } else { x.powf(y) }
+                        if x < 0.0 {
+                            0.0
+                        } else {
+                            x.powf(y)
+                        }
                     }
                 })
             }
-            NodeKind::Clamp { min, max } => Value::Float(self.in_f32(env, n, 0, 0.0).clamp(*min, min.max(*max))),
+            NodeKind::Clamp { min, max } => {
+                Value::Float(self.in_f32(env, n, 0, 0.0).clamp(*min, min.max(*max)))
+            }
             NodeKind::IntToFloat => Value::Float(self.in_i32(env, n, 0, 0) as f32),
             NodeKind::Compare { op, b, tolerance } => {
                 let (x, y) = (self.in_f32(env, n, 0, 0.0), self.in_f32(env, n, 1, *b));
@@ -1252,11 +1636,17 @@ impl GraphInstance {
                 })
             }
             NodeKind::And => {
-                let (a, b) = (self.in_bool(env, n, 0, false), self.in_bool(env, n, 1, false));
+                let (a, b) = (
+                    self.in_bool(env, n, 0, false),
+                    self.in_bool(env, n, 1, false),
+                );
                 Value::Bool(a && b)
             }
             NodeKind::Or => {
-                let (a, b) = (self.in_bool(env, n, 0, false), self.in_bool(env, n, 1, false));
+                let (a, b) = (
+                    self.in_bool(env, n, 0, false),
+                    self.in_bool(env, n, 1, false),
+                );
                 Value::Bool(a || b)
             }
             NodeKind::Not => Value::Bool(!self.in_bool(env, n, 0, false)),
@@ -1278,14 +1668,19 @@ impl GraphInstance {
 
     /// `(seconds remaining, complete)` of the primary player.
     pub fn primary_remaining(&self) -> (f32, bool) {
-        let Some(n) = self.program.primary_player else { return (f32::INFINITY, false) };
+        let Some(n) = self.program.primary_player else {
+            return (f32::INFINITY, false);
+        };
         match (&self.program.nodes[n].kind, &self.states[n]) {
             (NodeKind::SequencePlayer(cfg), NodeState::Seq(st)) => {
                 if cfg.looping {
                     (f32::INFINITY, false)
                 } else {
                     let remaining = (cfg.clip.duration as f64 - st.position).max(0.0) as f32;
-                    (remaining / cfg.rate.max(1e-3), st.position >= cfg.clip.duration as f64 - 1e-6)
+                    (
+                        remaining / cfg.rate.max(1e-3),
+                        st.position >= cfg.clip.duration as f64 - 1e-6,
+                    )
                 }
             }
             (NodeKind::BlendSpacePlayer(cfg), NodeState::Space(st)) => {
@@ -1312,20 +1707,36 @@ impl GraphInstance {
             old_states.insert(node.id.clone(), (state, node.kind.clone()));
         }
         for (node, state) in self.program.nodes.iter().zip(self.states.iter_mut()) {
-            let Some((prev, prev_kind)) = old_states.remove(&node.id) else { continue };
+            let Some((prev, prev_kind)) = old_states.remove(&node.id) else {
+                continue;
+            };
             match (&node.kind, state, prev) {
                 (NodeKind::SequencePlayer(c), NodeState::Seq(new), NodeState::Seq(old)) => {
                     *new = old;
-                    new.position = new.position.min(if c.looping { f64::MAX } else { c.clip.duration as f64 });
+                    new.position = new.position.min(if c.looping {
+                        f64::MAX
+                    } else {
+                        c.clip.duration as f64
+                    });
                 }
-                (NodeKind::BlendByBool { .. }, NodeState::Fade(new), NodeState::Fade(old)) if old.weights.len() == 2 => *new = old,
-                (NodeKind::BlendByInt { count, .. }, NodeState::Fade(new), NodeState::Fade(old)) if old.weights.len() == *count => *new = old,
+                (NodeKind::BlendByBool { .. }, NodeState::Fade(new), NodeState::Fade(old))
+                    if old.weights.len() == 2 =>
+                {
+                    *new = old
+                }
+                (
+                    NodeKind::BlendByInt { count, .. },
+                    NodeState::Fade(new),
+                    NodeState::Fade(old),
+                ) if old.weights.len() == *count => *new = old,
                 (NodeKind::StateMachine(m), NodeState::Machine(new), NodeState::Machine(old)) => {
                     if let NodeKind::StateMachine(old_def) = &prev_kind {
                         new.adopt(m, old_def, *old)
                     }
                 }
-                (NodeKind::Layer { .. }, NodeState::Layer(new), NodeState::Layer(old)) => new.adopt(*old),
+                (NodeKind::Layer { .. }, NodeState::Layer(new), NodeState::Layer(old)) => {
+                    new.adopt(*old)
+                }
                 _ => {}
             }
         }
@@ -1381,7 +1792,16 @@ fn sample_loops(cfg: &SpaceCfg, sample: &super::super::blendspace::CompiledSampl
     }
 }
 
-fn record_span(env: &mut Env, scope: u64, clip: Arc<CompiledClip>, from: f64, to: f64, looping: bool, weight: f32, origin: SpanOrigin) {
+fn record_span(
+    env: &mut Env,
+    scope: u64,
+    clip: Arc<CompiledClip>,
+    from: f64,
+    to: f64,
+    looping: bool,
+    weight: f32,
+    origin: SpanOrigin,
+) {
     if env.quiet {
         return;
     }
@@ -1389,13 +1809,38 @@ fn record_span(env: &mut Env, scope: u64, clip: Arc<CompiledClip>, from: f64, to
 }
 
 /// An empty span (`from == to`) is kept: it says the playback is still live.
-fn span_push(spans: &mut Vec<PlaybackSpan>, scope: u64, clip: Arc<CompiledClip>, from: f64, to: f64, looping: bool, weight: f32, origin: SpanOrigin) {
-    spans.push(PlaybackSpan { scope, clip, from, to, looping, weight, origin, seam: None });
+fn span_push(
+    spans: &mut Vec<PlaybackSpan>,
+    scope: u64,
+    clip: Arc<CompiledClip>,
+    from: f64,
+    to: f64,
+    looping: bool,
+    weight: f32,
+    origin: SpanOrigin,
+) {
+    spans.push(PlaybackSpan {
+        scope,
+        clip,
+        from,
+        to,
+        looping,
+        weight,
+        origin,
+        seam: None,
+    });
 }
 
 /// A clip sampled at an unbounded position, with its root motion for the move
 /// from `prev` to `position` and that motion removed from the pose.
-fn sample_clip(skel: &RuntimeSkeleton, clip: &CompiledClip, prev: f64, position: f64, looping: bool, in_pose: bool) -> Pose {
+fn sample_clip(
+    skel: &RuntimeSkeleton,
+    clip: &CompiledClip,
+    prev: f64,
+    position: f64,
+    looping: bool,
+    in_pose: bool,
+) -> Pose {
     let (t, _) = wrap_position(position, clip.duration, looping);
     let mut pose = clip.sample(skel, t);
     if clip.root_motion.enabled && !in_pose {
@@ -1406,8 +1851,16 @@ fn sample_clip(skel: &RuntimeSkeleton, clip: &CompiledClip, prev: f64, position:
 }
 
 /// Blend `layer` over `acc` per bone: weight = mask weight * `w`.
-fn blend_layer(skel: &RuntimeSkeleton, acc: &mut Pose, layer: &Pose, mask: Option<&Vec<f32>>, w: f32, mesh_space_rotation: bool) {
-    let weight = |i: usize| (mask.map_or(1.0, |m| m.get(i).copied().unwrap_or(0.0)) * w).clamp(0.0, 1.0);
+fn blend_layer(
+    skel: &RuntimeSkeleton,
+    acc: &mut Pose,
+    layer: &Pose,
+    mask: Option<&Vec<f32>>,
+    w: f32,
+    mesh_space_rotation: bool,
+) {
+    let weight =
+        |i: usize| (mask.map_or(1.0, |m| m.get(i).copied().unwrap_or(0.0)) * w).clamp(0.0, 1.0);
     if !mesh_space_rotation {
         for i in 0..acc.bones.len() {
             let bw = weight(i);
@@ -1423,7 +1876,11 @@ fn blend_layer(skel: &RuntimeSkeleton, acc: &mut Pose, layer: &Pose, mask: Optio
     let mesh_rot = |m: &glam::Mat4| m.to_scale_rotation_translation().1;
     let mut new_rot: Vec<Quat> = Vec::with_capacity(acc.bones.len());
     for i in 0..acc.bones.len() {
-        new_rot.push(super::super::pose::slerp_short(mesh_rot(&acc_mesh[i]), mesh_rot(&layer_mesh[i]), weight(i)));
+        new_rot.push(super::super::pose::slerp_short(
+            mesh_rot(&acc_mesh[i]),
+            mesh_rot(&layer_mesh[i]),
+            weight(i),
+        ));
     }
     let mut parent_rot_new = vec![Quat::IDENTITY; acc.bones.len()];
     for &i in &skel.order {

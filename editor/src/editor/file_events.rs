@@ -13,7 +13,6 @@
 
 use std::path::{Path, PathBuf};
 
-use engine_fs::FsChangeKind;
 use gpui::*;
 
 use crate::core::assets::SKELETON_EXTENSION;

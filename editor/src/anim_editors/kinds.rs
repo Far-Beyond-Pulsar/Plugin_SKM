@@ -6,10 +6,6 @@ use std::sync::Arc;
 
 use gpui::*;
 use plugin_editor_api::{PluginError, UndoService};
-use pulsar_reflection::{
-    AnimationGraphAssetKind, AnimationMontageAssetKind, AssetKind, BlendSpaceAssetKind,
-    IkRetargeterAssetKind, IkRigAssetKind, PoseDatabaseAssetKind, RetargetProfileAssetKind,
-};
 use serde_json::Value;
 use skeletal_assets::anim_graph::AnimationGraphAsset;
 use skeletal_assets::blend_space::BlendSpaceAsset;
@@ -99,7 +95,13 @@ impl AnimationAssetEditorKind {
             Self::PoseDb => "Pose Search Database",
         }
     }
+    /// The Reflection asset kind this editor kind edits.
+    #[cfg(test)]
     pub fn asset_kind(self) -> &'static str {
+        use pulsar_reflection::{
+            AnimationGraphAssetKind, AnimationMontageAssetKind, AssetKind, BlendSpaceAssetKind,
+            IkRetargeterAssetKind, IkRigAssetKind, PoseDatabaseAssetKind, RetargetProfileAssetKind,
+        };
         match self {
             Self::BlendSpace => BlendSpaceAssetKind::KIND,
             Self::Montage => AnimationMontageAssetKind::KIND,

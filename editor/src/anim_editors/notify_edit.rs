@@ -580,6 +580,7 @@ pub fn lane_layout(entries: &[LaneEntry], metrics: &LaneMetrics) -> (Vec<LanePla
 
 /// Marker under a pixel position, nearest anchor first. `hit_px` is the
 /// half-width of the target; the row must match the pointer's row.
+#[cfg(test)]
 pub fn hit_marker<'a>(
     placements: &'a [LanePlacement],
     x: f32,

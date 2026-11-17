@@ -8,7 +8,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use pulsar_reflection::{AssetRef, IkRigAssetKind, SkeletonAssetKind};
+use pulsar_reflection::{AssetRef, IkRigAssetKind};
 use skeletal_assets::diagnostics::Diagnostic;
 use skeletal_assets::ik_retarget::{ChainRetarget, FkSettings, IkRetargetAsset, IkSettings};
 use skeletal_assets::ik_rig::IkRigAsset;
@@ -270,19 +270,6 @@ impl RetargetProfileModel {
         self.doc.value()
     }
 
-    pub fn set_skeletons(
-        &mut self,
-        source: Option<AssetRef<SkeletonAssetKind>>,
-        target: Option<AssetRef<SkeletonAssetKind>>,
-    ) -> bool {
-        self.doc.edit("Set skeletons", None, |a| {
-            let changed = a.source_skeleton != source || a.target_skeleton != target;
-            a.source_skeleton = source;
-            a.target_skeleton = target;
-            (changed, changed)
-        })
-    }
-
     /// Set both IK rigs, or neither. Switching to or from rig mapping clears the
     /// other mapping table, which the format forbids holding both of.
     pub fn set_rigs(
@@ -472,56 +459,6 @@ impl RetargetProfileModel {
 
     // bone mapping (no rigs) -----------------------------------------------------
 
-    pub fn map_bone(&mut self, source_bone: &str, target_bone: &str) -> Result<(), String> {
-        if self.asset().maps_by_chain() {
-            return Err("this profile maps by chain".into());
-        }
-        if self
-            .source_skeleton
-            .as_ref()
-            .is_some_and(|s| s.bone(source_bone).is_none())
-            || self
-                .target_skeleton
-                .as_ref()
-                .is_some_and(|s| s.bone(target_bone).is_none())
-        {
-            return Err("pick bones of the source and target skeletons".into());
-        }
-        let existing = self
-            .asset()
-            .bone_map
-            .iter()
-            .position(|m| m.target_bone == target_bone);
-        let (s, t) = (source_bone.to_string(), target_bone.to_string());
-        self.doc.apply("Map bone", |a| match existing {
-            Some(i) => a.bone_map[i].source_bone = s,
-            None => a.bone_map.push(BoneMapping {
-                id: uuid::Uuid::new_v4().to_string(),
-                source_bone: s,
-                target_bone: t,
-                rotation: RotationMode::default(),
-                translation: TranslationMode::default(),
-            }),
-        });
-        Ok(())
-    }
-
-    pub fn unmap_bone(&mut self, target_bone: &str) -> bool {
-        let before = self.asset().bone_map.len();
-        if !self
-            .asset()
-            .bone_map
-            .iter()
-            .any(|m| m.target_bone == target_bone)
-        {
-            return false;
-        }
-        self.doc.apply("Unmap bone", |a| {
-            a.bone_map.retain(|m| m.target_bone != target_bone)
-        });
-        before != self.asset().bone_map.len()
-    }
-
     /// Map target bones to same-named source bones. Returns how many were added.
     pub fn auto_map_bones(&mut self) -> usize {
         let (Some(source), Some(target)) = (&self.source_skeleton, &self.target_skeleton) else {
@@ -560,28 +497,6 @@ impl RetargetProfileModel {
     }
 
     // root + pose ---------------------------------------------------------------
-
-    pub fn set_roots(&mut self, source: Option<&str>, target: Option<&str>) -> Result<(), String> {
-        if source.is_some_and(|b| {
-            self.source_skeleton
-                .as_ref()
-                .is_some_and(|s| s.bone(b).is_none())
-        }) || target.is_some_and(|b| {
-            self.target_skeleton
-                .as_ref()
-                .is_some_and(|s| s.bone(b).is_none())
-        }) {
-            return Err("pick bones of the source and target skeletons".into());
-        }
-        let (s, t) = (source.map(str::to_string), target.map(str::to_string));
-        self.doc.edit("Set root bones", None, |a| {
-            let changed = a.root.source_root != s || a.root.target_root != t;
-            a.root.source_root = s;
-            a.root.target_root = t;
-            (changed, ())
-        });
-        Ok(())
-    }
 
     pub fn set_root_scale(&mut self, scale: RootScale) -> Result<(), String> {
         if let RootScale::Fixed { factor } = scale {
@@ -685,9 +600,80 @@ impl RetargetProfileModel {
         }
         out
     }
+}
 
-    pub fn save(&mut self) -> anyhow::Result<super::document::SaveOutcome> {
-        self.doc.save()
+#[cfg(test)]
+impl RetargetProfileModel {
+    pub fn map_bone(&mut self, source_bone: &str, target_bone: &str) -> Result<(), String> {
+        if self.asset().maps_by_chain() {
+            return Err("this profile maps by chain".into());
+        }
+        if self
+            .source_skeleton
+            .as_ref()
+            .is_some_and(|s| s.bone(source_bone).is_none())
+            || self
+                .target_skeleton
+                .as_ref()
+                .is_some_and(|s| s.bone(target_bone).is_none())
+        {
+            return Err("pick bones of the source and target skeletons".into());
+        }
+        let existing = self
+            .asset()
+            .bone_map
+            .iter()
+            .position(|m| m.target_bone == target_bone);
+        let (s, t) = (source_bone.to_string(), target_bone.to_string());
+        self.doc.apply("Map bone", |a| match existing {
+            Some(i) => a.bone_map[i].source_bone = s,
+            None => a.bone_map.push(BoneMapping {
+                id: uuid::Uuid::new_v4().to_string(),
+                source_bone: s,
+                target_bone: t,
+                rotation: RotationMode::default(),
+                translation: TranslationMode::default(),
+            }),
+        });
+        Ok(())
+    }
+
+    pub fn unmap_bone(&mut self, target_bone: &str) -> bool {
+        let before = self.asset().bone_map.len();
+        if !self
+            .asset()
+            .bone_map
+            .iter()
+            .any(|m| m.target_bone == target_bone)
+        {
+            return false;
+        }
+        self.doc.apply("Unmap bone", |a| {
+            a.bone_map.retain(|m| m.target_bone != target_bone)
+        });
+        before != self.asset().bone_map.len()
+    }
+
+    pub fn set_roots(&mut self, source: Option<&str>, target: Option<&str>) -> Result<(), String> {
+        if source.is_some_and(|b| {
+            self.source_skeleton
+                .as_ref()
+                .is_some_and(|s| s.bone(b).is_none())
+        }) || target.is_some_and(|b| {
+            self.target_skeleton
+                .as_ref()
+                .is_some_and(|s| s.bone(b).is_none())
+        }) {
+            return Err("pick bones of the source and target skeletons".into());
+        }
+        let (s, t) = (source.map(str::to_string), target.map(str::to_string));
+        self.doc.edit("Set root bones", None, |a| {
+            let changed = a.root.source_root != s || a.root.target_root != t;
+            a.root.source_root = s;
+            a.root.target_root = t;
+            (changed, ())
+        });
+        Ok(())
     }
 }
 
@@ -700,8 +686,6 @@ pub struct IkRetargetModel {
     pub target_rig: Option<IkRigAsset>,
     pub source_skeleton: Option<Skeleton>,
     pub target_skeleton: Option<Skeleton>,
-    /// Side-by-side or overlaid preview. Editor state.
-    pub overlay: bool,
 }
 
 impl IkRetargetModel {
@@ -714,7 +698,6 @@ impl IkRetargetModel {
             target_rig: None,
             source_skeleton: None,
             target_skeleton: None,
-            overlay: false,
         })
     }
 
@@ -830,16 +813,6 @@ impl IkRetargetModel {
             (changed, ())
         });
         Ok(())
-    }
-
-    pub fn delete_chain_setting(&mut self, target_chain: &str) -> bool {
-        let Some(i) = self.chain_index(target_chain) else {
-            return false;
-        };
-        self.doc.apply("Delete chain setting", |a| {
-            a.chains.remove(i);
-        });
-        true
     }
 
     pub fn set_fk(&mut self, target_chain: &str, fk: FkSettings) -> Result<(), String> {
@@ -975,6 +948,19 @@ impl IkRetargetModel {
             out.extend(self.asset().diagnostics(s, t));
         }
         out
+    }
+}
+
+#[cfg(test)]
+impl IkRetargetModel {
+    pub fn delete_chain_setting(&mut self, target_chain: &str) -> bool {
+        let Some(i) = self.chain_index(target_chain) else {
+            return false;
+        };
+        self.doc.apply("Delete chain setting", |a| {
+            a.chains.remove(i);
+        });
+        true
     }
 
     pub fn save(&mut self) -> anyhow::Result<super::document::SaveOutcome> {
@@ -1422,7 +1408,6 @@ mod tests {
         )
         .unwrap();
         m.set_root(|r| r.translation_alpha = 0.5).unwrap();
-        m.overlay = true;
         m.save().unwrap();
         let r = IkRetargetModel::open(Arc::new(store), Path::new("r.ikretarget"), "").unwrap();
         assert_eq!(
@@ -1440,6 +1425,5 @@ mod tests {
             (0.75, 1.1, [0.0, 0.1, 0.0], Some("Arm"))
         );
         assert_eq!(r.asset().root.translation_alpha, 0.5);
-        assert!(!r.overlay, "preview layout is not saved");
     }
 }

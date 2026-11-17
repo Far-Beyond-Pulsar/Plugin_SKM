@@ -16,7 +16,7 @@ use std::sync::Arc;
 use graphy_blueprint::GraphDescription;
 use serde_json::{json, Value};
 use skeletal_assets::anim_graph::catalogue::{
-    node_def, AnimPinType, GraphKind, NodeDef, ParamType, PropKind, CATALOGUE,
+    node_def, AnimPinType, GraphKind, NodeDef, ParamType, PropKind,
 };
 use skeletal_assets::anim_graph::validate::validate;
 use skeletal_assets::anim_graph::{
@@ -290,14 +290,6 @@ impl AnimGraphModel {
         Ok(def)
     }
 
-    /// The catalogue entries valid in the open graph.
-    pub fn palette(&self) -> Vec<&'static NodeDef> {
-        CATALOGUE
-            .iter()
-            .filter(|d| self.can_add(d.type_id).is_ok())
-            .collect()
-    }
-
     pub fn add_node(&mut self, ty: &str, position: (f32, f32)) -> Result<String, String> {
         self.can_add(ty)?;
         let id = self.unique_node_id(ty);
@@ -340,20 +332,6 @@ impl AnimGraphModel {
             self.selection = AnimSelection::None;
         }
         Ok(())
-    }
-
-    pub fn move_node(&mut self, id: &str, x: f32, y: f32) -> bool {
-        let id = id.to_string();
-        self.with_graph("Move node", Some(&format!("move:{id}")), |g, _| {
-            let n = g.nodes.get_mut(&id).ok_or("no such node")?;
-            if n.position.x == x && n.position.y == y {
-                return Err("unchanged".into());
-            }
-            n.position.x = x;
-            n.position.y = y;
-            Ok(())
-        })
-        .is_ok()
     }
 
     /// Wire `from`'s output to `to`'s input. Types must match exactly; an input
@@ -404,18 +382,6 @@ impl AnimGraphModel {
             }
             g.add_connection(data_connection(&sn, &sp, &tn, &tp))
         })
-    }
-
-    pub fn disconnect(&mut self, connection: &str) -> bool {
-        let id = connection.to_string();
-        self.with_graph("Disconnect", None, |g, _| {
-            if !g.connections.iter().any(|c| c.id == id) {
-                return Err("no such connection".into());
-            }
-            g.remove_connection(&id);
-            Ok(())
-        })
-        .is_ok()
     }
 
     // ---- properties -------------------------------------------------------------
@@ -550,10 +516,6 @@ impl AnimGraphModel {
                 Ok(())
             },
         )
-    }
-
-    pub fn property(&self, node: &str, prop: &str) -> Option<&Value> {
-        self.graph().nodes.get(node)?.properties.get(prop)
     }
 
     // ---- sub-graphs, states, transitions -------------------------------------------
@@ -948,6 +910,47 @@ impl AnimGraphModel {
 
     pub fn validation(&self) -> Vec<Diagnostic> {
         validate(self.asset())
+    }
+}
+
+#[cfg(test)]
+impl AnimGraphModel {
+    /// The catalogue entries valid in the open graph.
+    pub fn palette(&self) -> Vec<&'static NodeDef> {
+        skeletal_assets::anim_graph::catalogue::CATALOGUE
+            .iter()
+            .filter(|d| self.can_add(d.type_id).is_ok())
+            .collect()
+    }
+
+    pub fn move_node(&mut self, id: &str, x: f32, y: f32) -> bool {
+        let id = id.to_string();
+        self.with_graph("Move node", Some(&format!("move:{id}")), |g, _| {
+            let n = g.nodes.get_mut(&id).ok_or("no such node")?;
+            if n.position.x == x && n.position.y == y {
+                return Err("unchanged".into());
+            }
+            n.position.x = x;
+            n.position.y = y;
+            Ok(())
+        })
+        .is_ok()
+    }
+
+    pub fn disconnect(&mut self, connection: &str) -> bool {
+        let id = connection.to_string();
+        self.with_graph("Disconnect", None, |g, _| {
+            if !g.connections.iter().any(|c| c.id == id) {
+                return Err("no such connection".into());
+            }
+            g.remove_connection(&id);
+            Ok(())
+        })
+        .is_ok()
+    }
+
+    pub fn property(&self, node: &str, prop: &str) -> Option<&Value> {
+        self.graph().nodes.get(node)?.properties.get(prop)
     }
 
     pub fn save(&mut self) -> anyhow::Result<super::document::SaveOutcome> {

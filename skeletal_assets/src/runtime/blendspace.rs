@@ -102,7 +102,12 @@ impl CompiledBlendSpace {
     fn build(&mut self) {
         let mut order: Vec<usize> = (0..self.samples.len()).collect();
         let pts: Vec<[f32; 2]> = self.samples.iter().map(|s| self.normalised(s)).collect();
-        order.sort_by(|&a, &b| pts[a][0].total_cmp(&pts[b][0]).then(pts[a][1].total_cmp(&pts[b][1])).then(a.cmp(&b)));
+        order.sort_by(|&a, &b| {
+            pts[a][0]
+                .total_cmp(&pts[b][0])
+                .then(pts[a][1].total_cmp(&pts[b][1]))
+                .then(a.cmp(&b))
+        });
         if self.y_axis.is_none() {
             self.line = order;
             return;
@@ -124,7 +129,10 @@ impl CompiledBlendSpace {
 
     /// Apply the axis edge policy to a raw input.
     pub fn clamp_input(&self, x: f32, y: f32) -> (f32, f32) {
-        (apply_edge(x, &self.x_axis), self.y_axis.as_ref().map_or(0.0, |a| apply_edge(y, a)))
+        (
+            apply_edge(x, &self.x_axis),
+            self.y_axis.as_ref().map_or(0.0, |a| apply_edge(y, a)),
+        )
     }
 
     /// Contributing samples and normalised weights for an input, ordered by
@@ -139,7 +147,10 @@ impl CompiledBlendSpace {
         out.retain(|w| w.weight > 1e-6);
         let total: f32 = out.iter().map(|w| w.weight).sum();
         if out.is_empty() || total <= 0.0 {
-            return vec![SampleWeight { sample: self.line.first().copied().unwrap_or(0), weight: 1.0 }];
+            return vec![SampleWeight {
+                sample: self.line.first().copied().unwrap_or(0),
+                weight: 1.0,
+            }];
         }
         for w in &mut out {
             w.weight /= total;
@@ -149,7 +160,12 @@ impl CompiledBlendSpace {
     }
 
     fn solve_line(&self, x: f32, y: f32) -> Vec<SampleWeight> {
-        let one = |i: usize| vec![SampleWeight { sample: i, weight: 1.0 }];
+        let one = |i: usize| {
+            vec![SampleWeight {
+                sample: i,
+                weight: 1.0,
+            }]
+        };
         let line = &self.line;
         if line.len() == 1 {
             return one(line[0]);
@@ -168,7 +184,12 @@ impl CompiledBlendSpace {
                 norm(x, &self.x_axis),
                 self.y_axis.as_ref().map_or(0.0, |ya| norm(y, ya)),
             ];
-            (line.iter().map(|&i| proj(self.normalised(&self.samples[i]))).collect(), proj(p))
+            (
+                line.iter()
+                    .map(|&i| proj(self.normalised(&self.samples[i])))
+                    .collect(),
+                proj(p),
+            )
         };
         let wrap = self.y_axis.is_none() && self.x_axis.edge == EdgePolicy::Wrap;
         let n = line.len();
@@ -180,8 +201,21 @@ impl CompiledBlendSpace {
         }
         let pair = |lo: usize, hi: usize, lo_t: f32, hi_t: f32| {
             let span = hi_t - lo_t;
-            let w = if span.abs() < 1e-9 { 0.0 } else { ((t_in - lo_t) / span).clamp(0.0, 1.0) };
-            vec![SampleWeight { sample: line[lo], weight: 1.0 - w }, SampleWeight { sample: line[hi], weight: w }]
+            let w = if span.abs() < 1e-9 {
+                0.0
+            } else {
+                ((t_in - lo_t) / span).clamp(0.0, 1.0)
+            };
+            vec![
+                SampleWeight {
+                    sample: line[lo],
+                    weight: 1.0 - w,
+                },
+                SampleWeight {
+                    sample: line[hi],
+                    weight: w,
+                },
+            ]
         };
         if wrap && (t_in > t_of[n - 1] || t_in < t_of[0]) {
             let period = self.x_axis.span().max(1e-9);
@@ -189,8 +223,21 @@ impl CompiledBlendSpace {
             let (lo_t, hi_t) = (t_of[n - 1], t_of[0] + period);
             let t = if t_in < t_of[0] { t_in + period } else { t_in };
             let span = hi_t - lo_t;
-            let w = if span.abs() < 1e-9 { 0.0 } else { ((t - lo_t) / span).clamp(0.0, 1.0) };
-            return vec![SampleWeight { sample: line[n - 1], weight: 1.0 - w }, SampleWeight { sample: line[0], weight: w }];
+            let w = if span.abs() < 1e-9 {
+                0.0
+            } else {
+                ((t - lo_t) / span).clamp(0.0, 1.0)
+            };
+            return vec![
+                SampleWeight {
+                    sample: line[n - 1],
+                    weight: 1.0 - w,
+                },
+                SampleWeight {
+                    sample: line[0],
+                    weight: w,
+                },
+            ];
         }
         let hi = t_of.partition_point(|&t| t <= t_in).min(n - 1).max(1);
         pair(hi - 1, hi, t_of[hi - 1], t_of[hi])
@@ -206,7 +253,14 @@ impl CompiledBlendSpace {
             let bary = barycentric(p, pts[a], pts[b], pts[c]);
             let inside = bary.iter().all(|&w| w >= -1e-5);
             if inside {
-                let w: Vec<_> = tri.iter().zip(bary).map(|(&s, w)| SampleWeight { sample: s, weight: w.max(0.0) }).collect();
+                let w: Vec<_> = tri
+                    .iter()
+                    .zip(bary)
+                    .map(|(&s, w)| SampleWeight {
+                        sample: s,
+                        weight: w.max(0.0),
+                    })
+                    .collect();
                 return w;
             }
             // outside: remember the closest point on this triangle's boundary
@@ -219,7 +273,16 @@ impl CompiledBlendSpace {
                 if better {
                     best = Some((
                         d,
-                        vec![SampleWeight { sample: tri[i], weight: 1.0 - t }, SampleWeight { sample: tri[j], weight: t }],
+                        vec![
+                            SampleWeight {
+                                sample: tri[i],
+                                weight: 1.0 - t,
+                            },
+                            SampleWeight {
+                                sample: tri[j],
+                                weight: t,
+                            },
+                        ],
                     ));
                 }
             }
@@ -234,7 +297,11 @@ impl CompiledBlendSpace {
 
 fn norm(v: f32, axis: &BlendAxis) -> f32 {
     let span = axis.span();
-    if span.abs() < 1e-12 { 0.0 } else { (v - axis.min) / span }
+    if span.abs() < 1e-12 {
+        0.0
+    } else {
+        (v - axis.min) / span
+    }
 }
 
 fn apply_edge(v: f32, axis: &BlendAxis) -> f32 {
@@ -245,7 +312,11 @@ fn apply_edge(v: f32, axis: &BlendAxis) -> f32 {
         EdgePolicy::Clamp => v.clamp(axis.min, axis.max),
         EdgePolicy::Wrap => {
             let span = axis.span();
-            if span <= 0.0 { axis.min } else { axis.min + (v - axis.min).rem_euclid(span) }
+            if span <= 0.0 {
+                axis.min
+            } else {
+                axis.min + (v - axis.min).rem_euclid(span)
+            }
         }
     }
 }
@@ -280,11 +351,15 @@ fn delaunay(indices: &[usize], pts: &[[f32; 2]]) -> Vec<[usize; 3]> {
     }
     // points as f64 for the in-circle predicate
     let n = indices.len();
-    let mut p: Vec<[f64; 2]> = indices.iter().map(|&i| [pts[i][0] as f64, pts[i][1] as f64]).collect();
+    let mut p: Vec<[f64; 2]> = indices
+        .iter()
+        .map(|&i| [pts[i][0] as f64, pts[i][1] as f64])
+        .collect();
     // collinear check
     let collinear = {
         let (a, b) = (p[0], p[n - 1]);
-        p.iter().all(|c| ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs() < 1e-12)
+        p.iter()
+            .all(|c| ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs() < 1e-12)
     };
     if collinear {
         return Vec::new();
@@ -316,9 +391,13 @@ fn delaunay(indices: &[usize], pts: &[[f32; 2]]) -> Vec<[usize; 3]> {
                 let shared = bad.iter().any(|&o| {
                     o != t && {
                         let other = tris[o];
-                        [(other[0], other[1]), (other[1], other[2]), (other[2], other[0])]
-                            .iter()
-                            .any(|&(c, e)| (c == a && e == b) || (c == b && e == a))
+                        [
+                            (other[0], other[1]),
+                            (other[1], other[2]),
+                            (other[2], other[0]),
+                        ]
+                        .iter()
+                        .any(|&(c, e)| (c == a && e == b) || (c == b && e == a))
                     }
                 });
                 if !shared {
@@ -354,7 +433,11 @@ fn in_circumcircle(p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> bool {
     let det = (ax * ax + ay * ay) * (bx * cy - cx * by) - (bx * bx + by * by) * (ax * cy - cx * ay)
         + (cx * cx + cy * cy) * (ax * by - bx * ay);
     let orient = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-    if orient > 0.0 { det > 1e-12 } else { det < -1e-12 }
+    if orient > 0.0 {
+        det > 1e-12
+    } else {
+        det < -1e-12
+    }
 }
 
 #[cfg(test)]
@@ -369,21 +452,41 @@ mod tests {
         let skel = RuntimeSkeleton::new("s", &chain_skeleton(2)).unwrap();
         let clip = Arc::new(CompiledClip::compile(&clip_asset("c", 1.0, vec![]), &skel));
         let mut asset = BlendSpaceAsset::default();
-        asset.x_axis = BlendAxis { name: "X".into(), min: 0.0, max: 10.0, edge, ..BlendAxis::default() };
+        asset.x_axis = BlendAxis {
+            name: "X".into(),
+            min: 0.0,
+            max: 10.0,
+            edge,
+            ..BlendAxis::default()
+        };
         if two_d {
-            asset.y_axis = Some(BlendAxis { name: "Y".into(), min: 0.0, max: 10.0, ..BlendAxis::default() });
+            asset.y_axis = Some(BlendAxis {
+                name: "Y".into(),
+                min: 0.0,
+                max: 10.0,
+                ..BlendAxis::default()
+            });
         }
-        asset.samples = points.iter().map(|&(x, y)| BlendSample::new(None, x, y)).collect();
+        asset.samples = points
+            .iter()
+            .map(|&(x, y)| BlendSample::new(None, x, y))
+            .collect();
         CompiledBlendSpace::compile(&asset, points.iter().map(|_| clip.clone()).collect()).unwrap()
     }
 
     fn weights(w: &[SampleWeight]) -> Vec<(usize, f32)> {
-        w.iter().map(|w| (w.sample, (w.weight * 1000.0).round() / 1000.0)).collect()
+        w.iter()
+            .map(|w| (w.sample, (w.weight * 1000.0).round() / 1000.0))
+            .collect()
     }
 
     #[test]
     fn one_d_interpolates_clamps_and_wraps() {
-        let s = space(&[(0.0, None), (5.0, None), (10.0, None)], false, EdgePolicy::Clamp);
+        let s = space(
+            &[(0.0, None), (5.0, None), (10.0, None)],
+            false,
+            EdgePolicy::Clamp,
+        );
         assert_eq!(weights(&s.solve(2.5, 0.0)), [(0, 0.5), (1, 0.5)]);
         assert_eq!(weights(&s.solve(5.0, 0.0)), [(1, 1.0)]);
         assert_eq!(weights(&s.solve(-3.0, 0.0)), [(0, 1.0)]);
@@ -399,7 +502,13 @@ mod tests {
 
     #[test]
     fn two_d_weights_are_normalised_and_deterministic() {
-        let pts = [(0.0, Some(0.0)), (10.0, Some(0.0)), (0.0, Some(10.0)), (10.0, Some(10.0)), (5.0, Some(5.0))];
+        let pts = [
+            (0.0, Some(0.0)),
+            (10.0, Some(0.0)),
+            (0.0, Some(10.0)),
+            (10.0, Some(10.0)),
+            (5.0, Some(5.0)),
+        ];
         let s = space(&pts, true, EdgePolicy::Clamp);
         assert_eq!(s.triangles().len(), 4, "{:?}", s.triangles());
         let w = s.solve(5.0, 5.0);
@@ -412,7 +521,10 @@ mod tests {
             // reconstructing the input from the weights recovers it
             let rx: f32 = w.iter().map(|w| w.weight * pts[w.sample].0).sum();
             let ry: f32 = w.iter().map(|w| w.weight * pts[w.sample].1.unwrap()).sum();
-            assert!((rx - x).abs() < 1e-3 && (ry - y).abs() < 1e-3, "({x},{y}) -> ({rx},{ry})");
+            assert!(
+                (rx - x).abs() < 1e-3 && (ry - y).abs() < 1e-3,
+                "({x},{y}) -> ({rx},{ry})"
+            );
         }
         let again = space(&pts, true, EdgePolicy::Clamp);
         assert_eq!(s.triangles(), again.triangles());
@@ -421,7 +533,11 @@ mod tests {
 
     #[test]
     fn two_d_outside_the_hull_projects_to_the_boundary() {
-        let s = space(&[(2.0, Some(2.0)), (8.0, Some(2.0)), (5.0, Some(8.0))], true, EdgePolicy::Clamp);
+        let s = space(
+            &[(2.0, Some(2.0)), (8.0, Some(2.0)), (5.0, Some(8.0))],
+            true,
+            EdgePolicy::Clamp,
+        );
         let w = s.solve(5.0, 0.0);
         let total: f32 = w.iter().map(|w| w.weight).sum();
         assert!((total - 1.0).abs() < 1e-5);
@@ -430,7 +546,11 @@ mod tests {
 
     #[test]
     fn collinear_two_d_samples_fall_back_to_the_line() {
-        let s = space(&[(0.0, Some(0.0)), (5.0, Some(5.0)), (10.0, Some(10.0))], true, EdgePolicy::Clamp);
+        let s = space(
+            &[(0.0, Some(0.0)), (5.0, Some(5.0)), (10.0, Some(10.0))],
+            true,
+            EdgePolicy::Clamp,
+        );
         assert!(s.triangles().is_empty());
         let w = s.solve(2.5, 2.5);
         assert_eq!(weights(&w), [(0, 0.5), (1, 0.5)]);

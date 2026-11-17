@@ -78,7 +78,7 @@ impl BuildJob {
         let mut clips = Vec::new();
         let mut missing = Vec::new();
         for s in self.asset.sources.iter().filter(|s| s.enabled) {
-            let mut add = |source_id: String, asset: AnimSeqAsset, clips: &mut Vec<SearchClip>| {
+            let add = |source_id: String, asset: AnimSeqAsset, clips: &mut Vec<SearchClip>| {
                 clips.push(SearchClip {
                     source_id,
                     clip: Arc::new(CompiledClip::compile(&asset, &runtime)),
@@ -158,6 +158,7 @@ impl BuildHandle {
         self.cancel.store(true, Ordering::Relaxed);
     }
 
+    #[cfg(test)]
     pub fn is_cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
     }

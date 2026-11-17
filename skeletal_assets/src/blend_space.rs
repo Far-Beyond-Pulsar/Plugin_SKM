@@ -6,7 +6,9 @@
 //! their asset id kept. Playhead, preview input and selection are editor
 //! state and are not part of this file.
 
-use pulsar_reflection::{AnimationSequenceAssetKind, AssetRef, BlendSpaceAssetKind, SkeletonAssetKind};
+use pulsar_reflection::{
+    AnimationSequenceAssetKind, AssetRef, BlendSpaceAssetKind, SkeletonAssetKind,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -110,7 +112,11 @@ fn one() -> f32 {
 }
 
 impl BlendSample {
-    pub fn new(sequence: Option<AssetRef<AnimationSequenceAssetKind>>, x: f32, y: Option<f32>) -> Self {
+    pub fn new(
+        sequence: Option<AssetRef<AnimationSequenceAssetKind>>,
+        x: f32,
+        y: Option<f32>,
+    ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             sequence,
@@ -234,7 +240,9 @@ impl BlendSpaceAsset {
 
     /// Rules a file must satisfy to be read at all.
     pub fn validate_structure(&self) -> Result<(), String> {
-        for (label, axis) in std::iter::once(("X", Some(&self.x_axis))).chain(std::iter::once(("Y", self.y_axis.as_ref()))) {
+        for (label, axis) in std::iter::once(("X", Some(&self.x_axis)))
+            .chain(std::iter::once(("Y", self.y_axis.as_ref())))
+        {
             let Some(axis) = axis else { continue };
             if axis.name.trim().is_empty() {
                 return Err(format!("{label} axis needs a name"));
@@ -277,9 +285,16 @@ impl BlendSpaceAsset {
                 return Err(format!("Sample `{}` play rate must be positive", sample.id));
             }
             if !sample.phase_offset.is_finite() || !(0.0..1.0).contains(&sample.phase_offset) {
-                return Err(format!("Sample `{}` phase offset must be in [0, 1)", sample.id));
+                return Err(format!(
+                    "Sample `{}` phase offset must be in [0, 1)",
+                    sample.id
+                ));
             }
-            if sample.sync_group.as_deref().is_some_and(|g| g.trim().is_empty()) {
+            if sample
+                .sync_group
+                .as_deref()
+                .is_some_and(|g| g.trim().is_empty())
+            {
                 return Err(format!("Sample `{}` has an empty sync group", sample.id));
             }
         }
@@ -309,9 +324,12 @@ impl BlendSpaceAsset {
             };
             if !in_x || !in_y {
                 out.push(
-                    Diagnostic::error("blendspace.sample_out_of_range", "Sample lies outside the axes")
-                        .at(&sample.id)
-                        .repair("Move the sample inside the axis range or widen the axis"),
+                    Diagnostic::error(
+                        "blendspace.sample_out_of_range",
+                        "Sample lies outside the axes",
+                    )
+                    .at(&sample.id)
+                    .repair("Move the sample inside the axis range or widen the axis"),
                 );
             }
         }
@@ -332,13 +350,19 @@ impl BlendSpaceAsset {
         if self.samples.len() < need {
             out.push(Diagnostic::warning(
                 "blendspace.too_few_samples",
-                format!("A {} blend space needs at least {need} samples to blend", if self.is_2d() { "2D" } else { "1D" }),
+                format!(
+                    "A {} blend space needs at least {need} samples to blend",
+                    if self.is_2d() { "2D" } else { "1D" }
+                ),
             ));
         } else if self.is_2d() && collinear(&self.samples) {
-            out.push(Diagnostic::error(
-                "blendspace.collinear",
-                "All samples lie on one line, so no triangulation exists",
-            ).repair("Move one sample off the line"));
+            out.push(
+                Diagnostic::error(
+                    "blendspace.collinear",
+                    "All samples lie on one line, so no triangulation exists",
+                )
+                .repair("Move one sample off the line"),
+            );
         }
         if self.sync.mode != SyncMode::None
             && self.samples.iter().any(|s| s.sync_group.is_some())
@@ -367,12 +391,16 @@ fn collinear(samples: &[BlendSample]) -> bool {
 }
 
 fn migrate_v1(value: &mut Value, migration: &mut Migration) {
-    let Some(object) = value.as_object_mut() else { return };
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
     if !object.contains_key("id") {
         let id = uuid::Uuid::new_v4().to_string();
         object.insert("id".into(), Value::String(id));
         migration.id_assigned = true;
-        migration.notes.push("File had no id; one was assigned and must be saved".into());
+        migration
+            .notes
+            .push("File had no id; one was assigned and must be saved".into());
     }
     let namespace = object
         .get("id")
@@ -383,9 +411,9 @@ fn migrate_v1(value: &mut Value, migration: &mut Migration) {
         for (index, sample) in samples.iter_mut().enumerate() {
             if let Some(sample) = sample.as_object_mut() {
                 // Deterministic: migrating the same bytes twice mints the same ids.
-                sample
-                    .entry("id")
-                    .or_insert_with(|| Value::String(derived_uuid(&namespace, &format!("sample:{index}"))));
+                sample.entry("id").or_insert_with(|| {
+                    Value::String(derived_uuid(&namespace, &format!("sample:{index}")))
+                });
             }
         }
     }

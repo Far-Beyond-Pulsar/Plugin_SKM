@@ -21,10 +21,18 @@ pub struct BoneTransform {
 }
 
 impl BoneTransform {
-    pub const IDENTITY: Self = Self { translation: Vec3::ZERO, rotation: Quat::IDENTITY, scale: Vec3::ONE };
+    pub const IDENTITY: Self = Self {
+        translation: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
+        scale: Vec3::ONE,
+    };
 
     pub fn new(translation: Vec3, rotation: Quat, scale: Vec3) -> Self {
-        Self { translation, rotation, scale }
+        Self {
+            translation,
+            rotation,
+            scale,
+        }
     }
 
     /// From the asset format's Euler-angle transform, through its matrix so the
@@ -35,7 +43,11 @@ impl BoneTransform {
 
     pub fn from_mat4(matrix: Mat4) -> Self {
         let (scale, rotation, translation) = matrix.to_scale_rotation_translation();
-        Self { translation, rotation: rotation.normalize(), scale }
+        Self {
+            translation,
+            rotation: rotation.normalize(),
+            scale,
+        }
     }
 
     pub fn to_mat4(&self) -> Mat4 {
@@ -67,9 +79,17 @@ impl Default for BoneTransform {
 /// near-identical or opposite inputs.
 pub fn slerp_short(a: Quat, b: Quat, w: f32) -> Quat {
     let b = if a.dot(b) < 0.0 { -b } else { b };
-    let q = if a.dot(b) > 0.9995 { a.lerp(b, w) } else { a.slerp(b, w) };
+    let q = if a.dot(b) > 0.9995 {
+        a.lerp(b, w)
+    } else {
+        a.slerp(b, w)
+    };
     let q = q.normalize();
-    if q.is_finite() { q } else { a }
+    if q.is_finite() {
+        q
+    } else {
+        a
+    }
 }
 
 /// Root motion over one update: a rigid delta in the actor's space, composed on
@@ -81,7 +101,10 @@ pub struct RootMotion {
 }
 
 impl RootMotion {
-    pub const IDENTITY: Self = Self { translation: Vec3::ZERO, rotation: Quat::IDENTITY };
+    pub const IDENTITY: Self = Self {
+        translation: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
+    };
 
     pub fn is_identity(&self) -> bool {
         self.translation == Vec3::ZERO && self.rotation == Quat::IDENTITY
@@ -93,21 +116,33 @@ impl RootMotion {
 
     pub fn from_mat4(m: Mat4) -> Self {
         let (_, rotation, translation) = m.to_scale_rotation_translation();
-        Self { translation, rotation: rotation.normalize() }
+        Self {
+            translation,
+            rotation: rotation.normalize(),
+        }
     }
 
     /// `self` then `next`.
     pub fn then(&self, next: &Self) -> Self {
-        Self { translation: self.translation + self.rotation * next.translation, rotation: (self.rotation * next.rotation).normalize() }
+        Self {
+            translation: self.translation + self.rotation * next.translation,
+            rotation: (self.rotation * next.rotation).normalize(),
+        }
     }
 
     pub fn inverse(&self) -> Self {
         let r = self.rotation.inverse();
-        Self { translation: r * -self.translation, rotation: r }
+        Self {
+            translation: r * -self.translation,
+            rotation: r,
+        }
     }
 
     pub fn blend(&self, other: &Self, w: f32) -> Self {
-        Self { translation: self.translation.lerp(other.translation, w), rotation: slerp_short(self.rotation, other.rotation, w) }
+        Self {
+            translation: self.translation.lerp(other.translation, w),
+            rotation: slerp_short(self.rotation, other.rotation, w),
+        }
     }
 
     /// Scaled by `w` toward the identity.
@@ -129,7 +164,10 @@ pub type Curves = BTreeMap<String, f32>;
 pub fn blend_curves(a: &Curves, b: &Curves, w: f32) -> Curves {
     let mut out = Curves::new();
     for (name, &va) in a {
-        out.insert(name.clone(), va + (b.get(name).copied().unwrap_or(0.0) - va) * w);
+        out.insert(
+            name.clone(),
+            va + (b.get(name).copied().unwrap_or(0.0) - va) * w,
+        );
     }
     for (name, &vb) in b {
         out.entry(name.clone()).or_insert(vb * w);
@@ -160,16 +198,29 @@ pub struct Pose {
 
 impl Pose {
     pub fn from_bones(bones: Vec<BoneTransform>) -> Self {
-        Self { bones, curves: Curves::new(), root_motion: RootMotion::IDENTITY, montage_root_motion: RootMotion::IDENTITY, kind: PoseKind::Full }
+        Self {
+            bones,
+            curves: Curves::new(),
+            root_motion: RootMotion::IDENTITY,
+            montage_root_motion: RootMotion::IDENTITY,
+            kind: PoseKind::Full,
+        }
     }
 
     pub fn blend(&self, other: &Self, w: f32) -> Self {
         debug_assert_eq!(self.bones.len(), other.bones.len());
         Self {
-            bones: self.bones.iter().zip(&other.bones).map(|(a, b)| a.blend(b, w)).collect(),
+            bones: self
+                .bones
+                .iter()
+                .zip(&other.bones)
+                .map(|(a, b)| a.blend(b, w))
+                .collect(),
             curves: blend_curves(&self.curves, &other.curves, w),
             root_motion: self.root_motion.blend(&other.root_motion, w),
-            montage_root_motion: self.montage_root_motion.blend(&other.montage_root_motion, w),
+            montage_root_motion: self
+                .montage_root_motion
+                .blend(&other.montage_root_motion, w),
             kind: self.kind,
         }
     }
@@ -220,11 +271,21 @@ pub struct RuntimeSkeleton {
 
 impl RuntimeSkeleton {
     pub fn new(id: impl Into<String>, skeleton: &Skeleton) -> Result<Self, String> {
-        skeleton.validate().map_err(|e| format!("skeleton hierarchy is invalid: {e}"))?;
+        skeleton
+            .validate()
+            .map_err(|e| format!("skeleton hierarchy is invalid: {e}"))?;
         let ids: Vec<String> = skeleton.bones.iter().map(|b| b.id.clone()).collect();
-        let index: std::collections::HashMap<String, usize> = ids.iter().cloned().enumerate().map(|(i, id)| (id, i)).collect();
-        let parents: Vec<Option<usize>> =
-            skeleton.bones.iter().map(|b| b.parent.as_ref().and_then(|p| index.get(p).copied())).collect();
+        let index: std::collections::HashMap<String, usize> = ids
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, id)| (id, i))
+            .collect();
+        let parents: Vec<Option<usize>> = skeleton
+            .bones
+            .iter()
+            .map(|b| b.parent.as_ref().and_then(|p| index.get(p).copied()))
+            .collect();
         let mut order = Vec::with_capacity(ids.len());
         let mut placed = vec![false; ids.len()];
         while order.len() < ids.len() {
@@ -240,11 +301,20 @@ impl RuntimeSkeleton {
             }
         }
         let names: Vec<String> = skeleton.bones.iter().map(|b| b.name.clone()).collect();
-        let name_index = names.iter().cloned().enumerate().map(|(i, n)| (n, i)).collect();
+        let name_index = names
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, n)| (n, i))
+            .collect();
         Ok(Self {
             id: id.into(),
             names,
-            bind: skeleton.bones.iter().map(|b| BoneTransform::from_asset(&b.bind_transform)).collect(),
+            bind: skeleton
+                .bones
+                .iter()
+                .map(|b| BoneTransform::from_asset(&b.bind_transform))
+                .collect(),
             ids,
             parents,
             order,
@@ -337,7 +407,11 @@ impl RuntimeSkeleton {
     /// physics body): an overridden bone takes its given mesh-space matrix and
     /// every other bone keeps its animated local transform, so descendants of an
     /// overridden bone follow it unless they are overridden themselves.
-    pub fn to_mesh_space_with_overrides(&self, local: &[BoneTransform], overrides: &[(usize, Mat4)]) -> Vec<Mat4> {
+    pub fn to_mesh_space_with_overrides(
+        &self,
+        local: &[BoneTransform],
+        overrides: &[(usize, Mat4)],
+    ) -> Vec<Mat4> {
         let mut owned: Vec<Option<Mat4>> = vec![None; self.len()];
         for &(bone, matrix) in overrides {
             if let Some(slot) = owned.get_mut(bone) {
@@ -376,21 +450,35 @@ impl RuntimeSkeleton {
             chain.push(p);
             at = p;
         }
-        chain.iter().rev().fold(Mat4::IDENTITY, |acc, &b| acc * local[b].to_mat4())
+        chain
+            .iter()
+            .rev()
+            .fold(Mat4::IDENTITY, |acc, &b| acc * local[b].to_mat4())
     }
 
     /// Skinning-ready bone transforms: `mesh_space * inverse_bind`, using the
     /// skeleton's bind pose as the reference.
     pub fn inverse_bind(&self) -> Vec<Mat4> {
-        self.to_mesh_space(&self.bind).into_iter().map(|m| m.inverse()).collect()
+        self.to_mesh_space(&self.bind)
+            .into_iter()
+            .map(|m| m.inverse())
+            .collect()
     }
 }
 
 /// Make an additive pose: `source` relative to `reference`.
-pub fn make_additive(skel: &RuntimeSkeleton, source: &Pose, reference: &Pose, mesh_space: bool) -> Pose {
+pub fn make_additive(
+    skel: &RuntimeSkeleton,
+    source: &Pose,
+    reference: &Pose,
+    mesh_space: bool,
+) -> Pose {
     let mut curves = Curves::new();
     for (name, &v) in &source.curves {
-        curves.insert(name.clone(), v - reference.curves.get(name).copied().unwrap_or(0.0));
+        curves.insert(
+            name.clone(),
+            v - reference.curves.get(name).copied().unwrap_or(0.0),
+        );
     }
     for (name, &v) in &reference.curves {
         curves.entry(name.clone()).or_insert(-v);
@@ -410,7 +498,13 @@ pub fn make_additive(skel: &RuntimeSkeleton, source: &Pose, reference: &Pose, me
             .bones
             .iter()
             .zip(&reference.bones)
-            .map(|(s, r)| BoneTransform::new(s.translation - r.translation, (r.rotation.inverse() * s.rotation).normalize(), safe_div(s.scale, r.scale)))
+            .map(|(s, r)| {
+                BoneTransform::new(
+                    s.translation - r.translation,
+                    (r.rotation.inverse() * s.rotation).normalize(),
+                    safe_div(s.scale, r.scale),
+                )
+            })
             .collect()
     };
     Pose {
@@ -418,7 +512,11 @@ pub fn make_additive(skel: &RuntimeSkeleton, source: &Pose, reference: &Pose, me
         curves,
         root_motion: RootMotion::IDENTITY,
         montage_root_motion: RootMotion::IDENTITY,
-        kind: if mesh_space { PoseKind::AdditiveMesh } else { PoseKind::AdditiveLocal },
+        kind: if mesh_space {
+            PoseKind::AdditiveMesh
+        } else {
+            PoseKind::AdditiveLocal
+        },
     }
 }
 
@@ -435,7 +533,11 @@ fn safe_div(a: Vec3, b: Vec3) -> Vec3 {
 pub fn apply_additive(skel: &RuntimeSkeleton, base: &Pose, additive: &Pose, alpha: f32) -> Pose {
     let alpha = alpha.clamp(0.0, 1.0);
     let scaled = |a: &BoneTransform| {
-        BoneTransform::new(a.translation * alpha, slerp_short(Quat::IDENTITY, a.rotation, alpha), Vec3::ONE.lerp(a.scale, alpha))
+        BoneTransform::new(
+            a.translation * alpha,
+            slerp_short(Quat::IDENTITY, a.rotation, alpha),
+            Vec3::ONE.lerp(a.scale, alpha),
+        )
     };
     let mut curves = base.curves.clone();
     for (name, &v) in &additive.curves {
@@ -447,7 +549,11 @@ pub fn apply_additive(skel: &RuntimeSkeleton, base: &Pose, additive: &Pose, alph
             for (i, m) in mesh.iter_mut().enumerate() {
                 let (s, r, t) = m.to_scale_rotation_translation();
                 let a = scaled(&additive.bones[i]);
-                *m = Mat4::from_scale_rotation_translation(s * a.scale, (a.rotation * r).normalize(), t + a.translation);
+                *m = Mat4::from_scale_rotation_translation(
+                    s * a.scale,
+                    (a.rotation * r).normalize(),
+                    t + a.translation,
+                );
             }
             skel.from_mesh_space(&mesh)
         }
@@ -457,11 +563,21 @@ pub fn apply_additive(skel: &RuntimeSkeleton, base: &Pose, additive: &Pose, alph
             .zip(&additive.bones)
             .map(|(b, a)| {
                 let a = scaled(a);
-                BoneTransform::new(b.translation + a.translation, (b.rotation * a.rotation).normalize(), b.scale * a.scale)
+                BoneTransform::new(
+                    b.translation + a.translation,
+                    (b.rotation * a.rotation).normalize(),
+                    b.scale * a.scale,
+                )
             })
             .collect(),
     };
-    Pose { bones, curves, root_motion: base.root_motion, montage_root_motion: base.montage_root_motion, kind: PoseKind::Full }
+    Pose {
+        bones,
+        curves,
+        root_motion: base.root_motion,
+        montage_root_motion: base.montage_root_motion,
+        kind: PoseKind::Full,
+    }
 }
 
 #[cfg(test)]
@@ -477,7 +593,10 @@ pub(crate) mod tests {
                     id: format!("b{i}"),
                     name: format!("bone_{i}"),
                     parent: (i > 0).then(|| format!("b{}", i - 1)),
-                    bind_transform: Transform { translation: AssetVec3::new(0.0, if i == 0 { 0.0 } else { 1.0 }, 0.0), ..Transform::IDENTITY },
+                    bind_transform: Transform {
+                        translation: AssetVec3::new(0.0, if i == 0 { 0.0 } else { 1.0 }, 0.0),
+                        ..Transform::IDENTITY
+                    },
                 })
                 .collect(),
         }
@@ -509,12 +628,17 @@ pub(crate) mod tests {
             let add = make_additive(&skel, &source, &reference, mesh);
             let out = apply_additive(&skel, &reference, &add, 1.0);
             for (a, b) in source.bones.iter().zip(&out.bones) {
-                assert!((a.translation - b.translation).length() < 1e-4, "mesh={mesh}");
+                assert!(
+                    (a.translation - b.translation).length() < 1e-4,
+                    "mesh={mesh}"
+                );
                 assert!(a.rotation.dot(b.rotation).abs() > 0.9999, "mesh={mesh}");
             }
             assert!((out.curves["a"] - 2.0).abs() < 1e-6);
             let half = apply_additive(&skel, &reference, &add, 0.5);
-            assert!(half.bones[2].translation.x > 0.04 && half.bones[2].translation.x < 0.06 || mesh);
+            assert!(
+                half.bones[2].translation.x > 0.04 && half.bones[2].translation.x < 0.06 || mesh
+            );
         }
     }
 
@@ -548,16 +672,35 @@ pub(crate) mod tests {
         let skel = RuntimeSkeleton::new("s", &chain_skeleton(4)).unwrap();
         let pose = skel.bind_pose();
         let plain = skel.to_mesh_space(&pose.bones);
-        assert_eq!(skel.to_mesh_space_with_overrides(&pose.bones, &[]), plain, "no overrides: the animated pose");
+        assert_eq!(
+            skel.to_mesh_space_with_overrides(&pose.bones, &[]),
+            plain,
+            "no overrides: the animated pose"
+        );
         // bone 1 is owned by a body that sits 5 up; bones 2 and 3 keep their local offsets under it
         let owned = Mat4::from_translation(Vec3::new(0.0, 5.0, 0.0));
         let out = skel.to_mesh_space_with_overrides(&pose.bones, &[(1, owned)]);
         assert_eq!(out[0], plain[0], "the parent is untouched");
         assert_eq!(out[1], owned);
-        assert!((out[2].w_axis.y - 6.0).abs() < 1e-5 && (out[3].w_axis.y - 7.0).abs() < 1e-5, "children follow: {:?} {:?}", out[2].w_axis, out[3].w_axis);
+        assert!(
+            (out[2].w_axis.y - 6.0).abs() < 1e-5 && (out[3].w_axis.y - 7.0).abs() < 1e-5,
+            "children follow: {:?} {:?}",
+            out[2].w_axis,
+            out[3].w_axis
+        );
         // a descendant that is itself owned does not follow
-        let both = skel.to_mesh_space_with_overrides(&pose.bones, &[(1, owned), (3, Mat4::from_translation(Vec3::new(9.0, 0.0, 0.0)))]);
+        let both = skel.to_mesh_space_with_overrides(
+            &pose.bones,
+            &[
+                (1, owned),
+                (3, Mat4::from_translation(Vec3::new(9.0, 0.0, 0.0))),
+            ],
+        );
         assert!((both[2].w_axis.y - 6.0).abs() < 1e-5 && both[3].w_axis.x == 9.0);
-        assert_eq!(skel.to_mesh_space_with_overrides(&pose.bones, &[(99, owned)]), plain, "unknown bones are ignored");
+        assert_eq!(
+            skel.to_mesh_space_with_overrides(&pose.bones, &[(99, owned)]),
+            plain,
+            "unknown bones are ignored"
+        );
     }
 }

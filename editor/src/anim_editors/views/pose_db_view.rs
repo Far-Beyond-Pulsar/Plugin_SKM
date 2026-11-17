@@ -14,14 +14,12 @@ use pulsar_reflection::{
     AnimationSequenceAssetKind, AssetKind, AssetRef, BlendSpaceAssetKind, SkeletonAssetKind,
 };
 use skeletal_assets::assets::AnimSeqAsset;
-use skeletal_assets::blend_space::BlendSpaceAsset;
 use skeletal_assets::pose_db::{
     derived_index_path, encode_index, ChannelKind, Normalization, PoseDbAsset, PoseSource,
     SearchSettings,
 };
 use skeletal_assets::runtime::clip::CompiledClip;
 use skeletal_assets::runtime::pose::RuntimeSkeleton;
-use skeletal_assets::runtime::posesearch::SearchClip;
 use ui::button::{Button, ButtonVariants};
 use ui::{h_flex, v_flex, ActiveTheme, Icon, IconName, Sizable, StyledExt};
 

@@ -44,7 +44,10 @@ impl RootMotionMode {
     }
 
     pub fn applies(self) -> bool {
-        matches!(self, Self::RootMotionFromEverything | Self::RootMotionFromMontagesOnly)
+        matches!(
+            self,
+            Self::RootMotionFromEverything | Self::RootMotionFromMontagesOnly
+        )
     }
 
     /// The delta this mode applies, from what one advance extracted.
@@ -78,7 +81,11 @@ pub struct RootMotionPolicy {
 
 impl Default for RootMotionPolicy {
     fn default() -> Self {
-        Self { mode: RootMotionMode::default(), translation: [true; 3], rotation: RootRotation::default() }
+        Self {
+            mode: RootMotionMode::default(),
+            translation: [true; 3],
+            rotation: RootRotation::default(),
+        }
     }
 }
 
@@ -97,7 +104,10 @@ impl RootMotionPolicy {
             RootRotation::Yaw => Quat::from_rotation_y(selected.rotation.to_euler(EulerRot::YXZ).0),
             RootRotation::Full => selected.rotation,
         };
-        RootMotion { translation, rotation: rotation.normalize() }
+        RootMotion {
+            translation,
+            rotation: rotation.normalize(),
+        }
     }
 }
 
@@ -116,7 +126,12 @@ pub fn euler_degrees_of(rotation: Quat) -> [f32; 3] {
 /// Move a transform by a root-motion delta: translation is rotated by the
 /// owner's orientation and scaled by its scale; the rotation composes after the
 /// owner's. Non-finite input leaves the transform alone.
-pub fn advance_transform(position: [f64; 3], rotation_degrees: [f32; 3], scale: [f32; 3], delta: &RootMotion) -> ([f64; 3], [f32; 3]) {
+pub fn advance_transform(
+    position: [f64; 3],
+    rotation_degrees: [f32; 3],
+    scale: [f32; 3],
+    delta: &RootMotion,
+) -> ([f64; 3], [f32; 3]) {
     if delta.is_identity() || !delta.translation.is_finite() || !delta.rotation.is_finite() {
         return (position, rotation_degrees);
     }
@@ -124,7 +139,14 @@ pub fn advance_transform(position: [f64; 3], rotation_degrees: [f32; 3], scale: 
     let local = delta.translation * Vec3::from_array(scale);
     let moved = DVec3::from_array(position) + (owner * local).as_dvec3();
     let turned = (owner * delta.rotation).normalize();
-    (moved.to_array(), if delta.rotation == Quat::IDENTITY { rotation_degrees } else { euler_degrees_of(turned) })
+    (
+        moved.to_array(),
+        if delta.rotation == Quat::IDENTITY {
+            rotation_degrees
+        } else {
+            euler_degrees_of(turned)
+        },
+    )
 }
 
 #[cfg(test)]
@@ -132,7 +154,10 @@ mod tests {
     use super::*;
 
     fn rm(t: [f32; 3], yaw_degrees: f32) -> RootMotion {
-        RootMotion { translation: Vec3::from_array(t), rotation: Quat::from_rotation_y(yaw_degrees.to_radians()) }
+        RootMotion {
+            translation: Vec3::from_array(t),
+            rotation: Quat::from_rotation_y(yaw_degrees.to_radians()),
+        }
     }
 
     #[test]
@@ -141,40 +166,96 @@ mod tests {
         let montages = rm([0.0, 0.0, 1.0], 0.0);
         assert!(!RootMotionMode::NoRootMotionExtraction.extracts());
         assert!(RootMotionMode::IgnoreRootMotion.extracts());
-        assert!(RootMotionMode::IgnoreRootMotion.select(&all, &montages).is_identity());
-        assert!(RootMotionMode::NoRootMotionExtraction.select(&all, &montages).is_identity());
-        assert_eq!(RootMotionMode::RootMotionFromEverything.select(&all, &montages), all);
-        assert_eq!(RootMotionMode::RootMotionFromMontagesOnly.select(&all, &montages), montages);
-        assert_eq!(RootMotionMode::default(), RootMotionMode::IgnoreRootMotion, "scenes saved before root motion applied keep standing still");
+        assert!(RootMotionMode::IgnoreRootMotion
+            .select(&all, &montages)
+            .is_identity());
+        assert!(RootMotionMode::NoRootMotionExtraction
+            .select(&all, &montages)
+            .is_identity());
+        assert_eq!(
+            RootMotionMode::RootMotionFromEverything.select(&all, &montages),
+            all
+        );
+        assert_eq!(
+            RootMotionMode::RootMotionFromMontagesOnly.select(&all, &montages),
+            montages
+        );
+        assert_eq!(
+            RootMotionMode::default(),
+            RootMotionMode::IgnoreRootMotion,
+            "scenes saved before root motion applied keep standing still"
+        );
     }
 
     #[test]
     fn a_policy_masks_axes_and_rotation() {
-        let delta = RootMotion { translation: Vec3::new(1.0, 2.0, 3.0), rotation: Quat::from_euler(EulerRot::YXZ, 0.5, 0.3, 0.2) };
-        let mut policy = RootMotionPolicy { mode: RootMotionMode::RootMotionFromEverything, translation: [true, false, true], rotation: RootRotation::Yaw };
+        let delta = RootMotion {
+            translation: Vec3::new(1.0, 2.0, 3.0),
+            rotation: Quat::from_euler(EulerRot::YXZ, 0.5, 0.3, 0.2),
+        };
+        let mut policy = RootMotionPolicy {
+            mode: RootMotionMode::RootMotionFromEverything,
+            translation: [true, false, true],
+            rotation: RootRotation::Yaw,
+        };
         let out = policy.delta(&delta, &RootMotion::IDENTITY);
         assert_eq!(out.translation, Vec3::new(1.0, 0.0, 3.0));
         assert!((out.rotation.to_euler(EulerRot::YXZ).0 - 0.5).abs() < 1e-5);
-        assert!(out.rotation.to_euler(EulerRot::YXZ).1.abs() < 1e-5, "pitch and roll are dropped");
+        assert!(
+            out.rotation.to_euler(EulerRot::YXZ).1.abs() < 1e-5,
+            "pitch and roll are dropped"
+        );
         policy.rotation = RootRotation::None;
-        assert_eq!(policy.delta(&delta, &RootMotion::IDENTITY).rotation, Quat::IDENTITY);
+        assert_eq!(
+            policy.delta(&delta, &RootMotion::IDENTITY).rotation,
+            Quat::IDENTITY
+        );
         policy.rotation = RootRotation::Full;
-        assert!(policy.delta(&delta, &RootMotion::IDENTITY).rotation.angle_between(delta.rotation) < 1e-5);
+        assert!(
+            policy
+                .delta(&delta, &RootMotion::IDENTITY)
+                .rotation
+                .angle_between(delta.rotation)
+                < 1e-5
+        );
     }
 
     #[test]
     fn the_delta_moves_the_owner_in_its_own_frame_with_its_scale() {
         // owner yawed 90 degrees: local +Z (forward) is world +X
-        let (p, r) = advance_transform([10.0, 0.0, 0.0], [0.0, 90.0, 0.0], [1.0; 3], &rm([0.0, 0.0, 2.0], 0.0));
-        assert!((p[0] - 12.0).abs() < 1e-5 && p[1].abs() < 1e-5 && p[2].abs() < 1e-5, "{p:?}");
-        assert_eq!(r, [0.0, 90.0, 0.0], "no turn leaves the rotation exactly as authored");
+        let (p, r) = advance_transform(
+            [10.0, 0.0, 0.0],
+            [0.0, 90.0, 0.0],
+            [1.0; 3],
+            &rm([0.0, 0.0, 2.0], 0.0),
+        );
+        assert!(
+            (p[0] - 12.0).abs() < 1e-5 && p[1].abs() < 1e-5 && p[2].abs() < 1e-5,
+            "{p:?}"
+        );
+        assert_eq!(
+            r,
+            [0.0, 90.0, 0.0],
+            "no turn leaves the rotation exactly as authored"
+        );
         // scale applies to the travel, rotation composes after the owner's
-        let (p, r) = advance_transform([0.0; 3], [0.0; 3], [2.0, 2.0, 2.0], &rm([0.0, 0.0, 1.0], 90.0));
+        let (p, r) = advance_transform(
+            [0.0; 3],
+            [0.0; 3],
+            [2.0, 2.0, 2.0],
+            &rm([0.0, 0.0, 1.0], 90.0),
+        );
         assert!((p[2] - 2.0).abs() < 1e-5);
         assert!((r[1] - 90.0).abs() < 1e-3, "{r:?}");
         // non-finite deltas are ignored
-        let bad = RootMotion { translation: Vec3::new(f32::NAN, 0.0, 0.0), rotation: Quat::IDENTITY };
-        assert_eq!(advance_transform([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [1.0; 3], &bad), ([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]));
+        let bad = RootMotion {
+            translation: Vec3::new(f32::NAN, 0.0, 0.0),
+            rotation: Quat::IDENTITY,
+        };
+        assert_eq!(
+            advance_transform([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [1.0; 3], &bad),
+            ([1.0, 2.0, 3.0], [4.0, 5.0, 6.0])
+        );
     }
 
     #[test]
@@ -182,17 +263,28 @@ mod tests {
         let run = |n: usize, travel: f32, yaw: f32| {
             let (mut p, mut r) = ([1.0, 0.0, 0.0], [0.0, 30.0, 0.0f32]);
             for _ in 0..n {
-                (p, r) = advance_transform(p, r, [1.0; 3], &rm([0.0, 0.0, travel / n as f32], yaw / n as f32));
+                (p, r) = advance_transform(
+                    p,
+                    r,
+                    [1.0; 3],
+                    &rm([0.0, 0.0, travel / n as f32], yaw / n as f32),
+                );
             }
             (p, r)
         };
         // a turn without travel: the same heading however it is sliced
         let (_, a) = run(3, 0.0, 90.0);
         let (_, b) = run(90, 0.0, 90.0);
-        assert!((a[1] - 120.0).abs() < 1e-2 && (b[1] - 120.0).abs() < 1e-2, "{a:?} {b:?}");
+        assert!(
+            (a[1] - 120.0).abs() < 1e-2 && (b[1] - 120.0).abs() < 1e-2,
+            "{a:?} {b:?}"
+        );
         // travel without a turn: the same distance along the owner heading
         let (p, _) = run(1, 6.0, 0.0);
         let (q, _) = run(48, 6.0, 0.0);
-        assert!((p[0] - q[0]).abs() < 1e-3 && (p[2] - q[2]).abs() < 1e-3, "{p:?} {q:?}");
+        assert!(
+            (p[0] - q[0]).abs() < 1e-3 && (p[2] - q[2]).abs() < 1e-3,
+            "{p:?} {q:?}"
+        );
     }
 }

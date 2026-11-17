@@ -26,7 +26,7 @@ use crate::anim_editors::store::FsStore;
 use crate::core::asset_index;
 
 use super::chrome::{
-    self, edit, empty_inspector, fmt_f32, frame, labelled, parse_f32, section, short_id, value_row,
+    edit, empty_inspector, fmt_f32, frame, labelled, parse_f32, section, short_id, value_row,
     Chrome, EditorBody, EditorHost, EditorModel, Widgets,
 };
 use super::paint::{dot, fill_polygon, pt, stroke_polyline};

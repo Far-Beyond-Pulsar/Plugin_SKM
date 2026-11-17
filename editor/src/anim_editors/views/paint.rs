@@ -36,21 +36,6 @@ pub fn fill_polygon(window: &mut Window, points: &[Point<Pixels>], color: Hsla) 
     }
 }
 
-pub fn dashed_line(
-    window: &mut Window,
-    a: Point<Pixels>,
-    b: Point<Pixels>,
-    width: f32,
-    color: Hsla,
-) {
-    let mut builder = PathBuilder::stroke(px(width)).dash_array(&[px(5.0), px(4.0)]);
-    builder.move_to(a);
-    builder.line_to(b);
-    if let Ok(path) = builder.build() {
-        window.paint_path(path, color);
-    }
-}
-
 pub fn dot(window: &mut Window, center: Point<Pixels>, radius: f32, color: Hsla) {
     let bounds = Bounds::new(
         point(center.x - px(radius), center.y - px(radius)),

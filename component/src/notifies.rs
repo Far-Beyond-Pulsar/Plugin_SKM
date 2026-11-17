@@ -16,9 +16,8 @@ use skeletal_assets::{
 
 use super::{AnimationComponent, RootMotionMove};
 use pulsar_events::{
-    entity_channel,
+    EventCategory, EventHub, entity_channel,
     gamma::{DynEvent, DynValue, EventDescriptor, FieldType},
-    EventCategory, EventHub,
 };
 use pulsar_scenedb::{Entity, World};
 use skeletal_assets::notifies::{AnimationNotify, NotifyField, NotifyTarget, NotifyValue};
@@ -232,7 +231,6 @@ pub struct AnimationNotifyDiagnostic {
 /// Failures are local to a file/directory or a conflicting canonical identity.
 /// No session handle or gameplay publication is kept on the process host bus.
 pub fn project_animation_notify_events(root: &std::path::Path) -> AnimationNotifyCatalog {
-    use std::collections::{BTreeMap, BTreeSet};
     let mut catalog = AnimationNotifyCatalog::default();
     let mut paths = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0)];
@@ -1603,8 +1601,8 @@ fn animation_notify_descriptor_id(
 mod tests {
     use super::*;
     use pulsar_events::{
-        gamma::{Channel, DynValue, SubscribeOptions},
         EventHub, FlushPoint,
+        gamma::{Channel, DynValue, SubscribeOptions},
     };
     use pulsar_scenedb::{Entity, World};
     use pulsar_world_registry::{ComponentContext, ComponentRuntimeState};
@@ -2082,7 +2080,7 @@ mod tests {
 
     #[test]
     fn authored_notifies_are_directed_once_and_foreign_subscriptions_drop_cleanly() {
-        use pulsar_events::gamma::{ffi::ForeignBus, SubscribeOptions};
+        use pulsar_events::gamma::{SubscribeOptions, ffi::ForeignBus};
         let hub = registered_hub();
         let mut world = World::new();
         let owner = world.spawn();
@@ -2254,9 +2252,11 @@ mod tests {
                 diagnostic.error.contains("a.animseq") && diagnostic.error.contains("b.animseq")
             );
         }
-        assert!(events
-            .iter()
-            .all(|(_, d)| d.id != original.id && d.id != conflicting.id));
+        assert!(
+            events
+                .iter()
+                .all(|(_, d)| d.id != original.id && d.id != conflicting.id)
+        );
         let hub = EventHub::new();
         for (_, descriptor) in events {
             hub.register(descriptor, EventCategory::Custom("Animation".into()))
@@ -2315,9 +2315,11 @@ mod tests {
         assert!(catalog.events.is_empty());
         assert_eq!(catalog.diagnostics.len(), 1);
         assert_eq!(catalog.diagnostics[0].path, idless);
-        assert!(catalog.diagnostics[0]
-            .error
-            .contains("stable sequence identity"));
+        assert!(
+            catalog.diagnostics[0]
+                .error
+                .contains("stable sequence identity")
+        );
         std::fs::remove_file(idless).unwrap();
 
         std::fs::remove_dir(dir).unwrap();
@@ -2381,9 +2383,10 @@ mod tests {
         }
         p.advance(0.5);
         let writer = pulsar_world_registry::ComponentEventWriter::new(owner, &hub);
-        assert!(p
-            .publish_directed_notifies(&writer, &hub, owner, &[Some(owner), Some(owner)])
-            .is_err());
+        assert!(
+            p.publish_directed_notifies(&writer, &hub, owner, &[Some(owner), Some(owner)])
+                .is_err()
+        );
         assert_eq!(p.notify_playback.pending.len(), 1);
         assert!(p.notify_playback.pending[0].generic_accepted);
         hub.flush(FlushPoint::AfterScripts);

@@ -1,6 +1,6 @@
 //! The typed selection every animation editor shares. Selecting anything an
-//! editor authors (a bone, key, notify, sample, graph node, segment, chain,
-//! goal, pose-search result) sets one of these, and the properties inspector
+//! editor authors (a bone, notify, sample, graph node, segment, chain, goal,
+//! pose-search result) sets one of these, and the properties inspector
 //! renders from it. Selection is editor state: it is never written to an
 //! asset file.
 
@@ -8,17 +8,8 @@
 pub enum AnimSelection {
     #[default]
     None,
-    /// The asset itself (its own properties).
-    Asset,
     Bone {
         id: String,
-    },
-    Key {
-        track: String,
-        index: usize,
-    },
-    Curve {
-        name: String,
     },
     Notify {
         id: String,
@@ -72,14 +63,10 @@ pub enum AnimSelection {
     PoseResult {
         index: usize,
     },
-    /// A referenced asset in a dependency list.
-    Reference {
-        kind: String,
-        id: String,
-    },
 }
 
 impl AnimSelection {
+    #[cfg(test)]
     pub fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
@@ -88,10 +75,7 @@ impl AnimSelection {
     pub fn title(&self) -> &'static str {
         match self {
             Self::None => "Nothing selected",
-            Self::Asset => "Asset",
             Self::Bone { .. } => "Bone",
-            Self::Key { .. } => "Key",
-            Self::Curve { .. } => "Curve",
             Self::Notify { .. } => "Notify",
             Self::NotifyState { .. } => "Notify State",
             Self::BlendSample { .. } => "Blend Sample",
@@ -109,7 +93,6 @@ impl AnimSelection {
             Self::PoseSource { .. } => "Source Clip",
             Self::PoseChannel { .. } => "Feature Channel",
             Self::PoseResult { .. } => "Match",
-            Self::Reference { .. } => "Reference",
         }
     }
 }

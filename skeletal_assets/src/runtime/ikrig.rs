@@ -30,8 +30,17 @@ pub struct RigGoal {
 
 #[derive(Clone, Debug)]
 pub enum RigSolverKind {
-    TwoBone { chain: usize, goal: usize, pole: Option<ResolvedPole>, params: TwoBoneParams },
-    Fabrik { chain: usize, goal: usize, params: FabrikParams },
+    TwoBone {
+        chain: usize,
+        goal: usize,
+        pole: Option<ResolvedPole>,
+        params: TwoBoneParams,
+    },
+    Fabrik {
+        chain: usize,
+        goal: usize,
+        params: FabrikParams,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -79,17 +88,47 @@ impl CompiledIkRig {
         let mut chains = Vec::new();
         for c in &asset.chains {
             let (Some(start), Some(end)) = (bone(&c.start_bone), bone(&c.end_bone)) else {
-                diagnostics.push(Diagnostic::error("ikrig.unknown_bone", format!("Chain `{}` uses a bone the skeleton does not have", c.name)).at(&c.id));
-                chains.push(RigChain { id: c.id.clone(), name: c.name.clone(), bones: Vec::new(), goal: None });
+                diagnostics.push(
+                    Diagnostic::error(
+                        "ikrig.unknown_bone",
+                        format!("Chain `{}` uses a bone the skeleton does not have", c.name),
+                    )
+                    .at(&c.id),
+                );
+                chains.push(RigChain {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    bones: Vec::new(),
+                    goal: None,
+                });
                 continue;
             };
             let Some(bones) = skel.chain(start, end) else {
-                diagnostics.push(Diagnostic::error("ikrig.chain_shape", format!("Chain `{}` end is not below its start", c.name)).at(&c.id));
-                chains.push(RigChain { id: c.id.clone(), name: c.name.clone(), bones: Vec::new(), goal: None });
+                diagnostics.push(
+                    Diagnostic::error(
+                        "ikrig.chain_shape",
+                        format!("Chain `{}` end is not below its start", c.name),
+                    )
+                    .at(&c.id),
+                );
+                chains.push(RigChain {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    bones: Vec::new(),
+                    goal: None,
+                });
                 continue;
             };
-            let goal = c.goal.as_ref().and_then(|g| asset.goals.iter().position(|x| &x.id == g));
-            chains.push(RigChain { id: c.id.clone(), name: c.name.clone(), bones, goal });
+            let goal = c
+                .goal
+                .as_ref()
+                .and_then(|g| asset.goals.iter().position(|x| &x.id == g));
+            chains.push(RigChain {
+                id: c.id.clone(),
+                name: c.name.clone(),
+                bones,
+                goal,
+            });
         }
         let goals: Vec<RigGoal> = asset
             .goals
@@ -105,7 +144,13 @@ impl CompiledIkRig {
             .collect();
         for (g, a) in goals.iter().zip(&asset.goals) {
             if bone(&a.bone).is_none() {
-                diagnostics.push(Diagnostic::error("ikrig.unknown_bone", format!("Goal `{}` uses a bone the skeleton does not have", g.name)).at(&g.id));
+                diagnostics.push(
+                    Diagnostic::error(
+                        "ikrig.unknown_bone",
+                        format!("Goal `{}` uses a bone the skeleton does not have", g.name),
+                    )
+                    .at(&g.id),
+                );
             }
         }
         let mut solvers = Vec::new();
@@ -113,33 +158,94 @@ impl CompiledIkRig {
             let chain = chains.iter().position(|c| c.id == s.kind.chain());
             let goal = goals.iter().position(|g| g.id == s.kind.goal());
             let (Some(chain), Some(goal)) = (chain, goal) else {
-                diagnostics.push(Diagnostic::error("ikrig.solver_refs", format!("Solver `{}` names a chain or goal that does not exist", s.name)).at(&s.id));
+                diagnostics.push(
+                    Diagnostic::error(
+                        "ikrig.solver_refs",
+                        format!(
+                            "Solver `{}` names a chain or goal that does not exist",
+                            s.name
+                        ),
+                    )
+                    .at(&s.id),
+                );
                 continue;
             };
             if chains[chain].bones.len() < 2 {
-                diagnostics.push(Diagnostic::error("ikrig.chain_unresolved", format!("Solver `{}` needs chain `{}`, which does not resolve to bones", s.name, chains[chain].name)).at(&s.id).repair("Fix the chain's start and end bones"));
+                diagnostics.push(
+                    Diagnostic::error(
+                        "ikrig.chain_unresolved",
+                        format!(
+                            "Solver `{}` needs chain `{}`, which does not resolve to bones",
+                            s.name, chains[chain].name
+                        ),
+                    )
+                    .at(&s.id)
+                    .repair("Fix the chain's start and end bones"),
+                );
                 continue;
             }
             let kind = match &s.kind {
-                SolverKind::TwoBone { pole, allow_stretch, max_stretch, take_goal_rotation, .. } => {
+                SolverKind::TwoBone {
+                    pole,
+                    allow_stretch,
+                    max_stretch,
+                    take_goal_rotation,
+                    ..
+                } => {
                     if chains[chain].bones.len() < 3 {
-                        diagnostics.push(Diagnostic::error("ikrig.two_bone_chain", format!("Two-bone solver `{}` needs a chain of at least three bones", s.name)).at(&s.id).repair("Extend the chain so it holds upper, middle and end bones"));
+                        diagnostics.push(
+                            Diagnostic::error(
+                                "ikrig.two_bone_chain",
+                                format!(
+                                    "Two-bone solver `{}` needs a chain of at least three bones",
+                                    s.name
+                                ),
+                            )
+                            .at(&s.id)
+                            .repair("Extend the chain so it holds upper, middle and end bones"),
+                        );
                         continue;
                     }
                     RigSolverKind::TwoBone {
                         chain,
                         goal,
-                        pole: pole.as_ref().map(|p: &PoleSettings| ResolvedPole { bone: p.bone.as_deref().and_then(bone), offset: Vec3::from_array(p.offset), space: p.space }),
-                        params: TwoBoneParams { alpha: 1.0, allow_stretch: *allow_stretch, max_stretch: *max_stretch, take_rotation: *take_goal_rotation },
+                        pole: pole.as_ref().map(|p: &PoleSettings| ResolvedPole {
+                            bone: p.bone.as_deref().and_then(bone),
+                            offset: Vec3::from_array(p.offset),
+                            space: p.space,
+                        }),
+                        params: TwoBoneParams {
+                            alpha: 1.0,
+                            allow_stretch: *allow_stretch,
+                            max_stretch: *max_stretch,
+                            take_rotation: *take_goal_rotation,
+                        },
                     }
                 }
-                SolverKind::Fabrik { precision, max_iterations, respect_joint_limits, take_goal_rotation, .. } => RigSolverKind::Fabrik {
+                SolverKind::Fabrik {
+                    precision,
+                    max_iterations,
+                    respect_joint_limits,
+                    take_goal_rotation,
+                    ..
+                } => RigSolverKind::Fabrik {
                     chain,
                     goal,
-                    params: FabrikParams { alpha: 1.0, precision: *precision, max_iterations: *max_iterations, take_rotation: *take_goal_rotation, respect_limits: *respect_joint_limits },
+                    params: FabrikParams {
+                        alpha: 1.0,
+                        precision: *precision,
+                        max_iterations: *max_iterations,
+                        take_rotation: *take_goal_rotation,
+                        respect_limits: *respect_joint_limits,
+                    },
                 },
             };
-            solvers.push(RigSolver { id: s.id.clone(), name: s.name.clone(), enabled: s.enabled, kind });
+            solvers.push(RigSolver {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                enabled: s.enabled,
+                kind,
+            });
         }
         let mut limits = JointLimits::default();
         for l in &asset.joint_limits {
@@ -147,11 +253,30 @@ impl CompiledIkRig {
                 Some(i) => {
                     limits.0.insert(i, (l.min_degrees, l.max_degrees));
                 }
-                None => diagnostics.push(Diagnostic::error("ikrig.unknown_bone", format!("Joint limit names bone `{}` which the skeleton does not have", l.bone)).at(&l.bone)),
+                None => diagnostics.push(
+                    Diagnostic::error(
+                        "ikrig.unknown_bone",
+                        format!(
+                            "Joint limit names bone `{}` which the skeleton does not have",
+                            l.bone
+                        ),
+                    )
+                    .at(&l.bone),
+                ),
             }
         }
         let retarget_root = asset.retarget_root.as_deref().and_then(bone);
-        (Self { id: asset.id.as_str().to_string(), chains, goals, solvers, limits, retarget_root }, diagnostics)
+        (
+            Self {
+                id: asset.id.as_str().to_string(),
+                chains,
+                goals,
+                solvers,
+                limits,
+                retarget_root,
+            },
+            diagnostics,
+        )
     }
 
     pub fn goal_index(&self, name: &str) -> Option<usize> {
@@ -165,22 +290,36 @@ impl CompiledIkRig {
     /// Run the solver stack in order. Goals not in `goals` keep their authored
     /// default (the goal bone's current mesh transform plus the default offset).
     /// `alpha` blends the whole result with the input.
-    pub fn execute(&self, skel: &RuntimeSkeleton, bones: &mut [BoneTransform], goals: &GoalSet, alpha: f32) -> Vec<SolverOutcome> {
+    pub fn execute(
+        &self,
+        skel: &RuntimeSkeleton,
+        bones: &mut [BoneTransform],
+        goals: &GoalSet,
+        alpha: f32,
+    ) -> Vec<SolverOutcome> {
         let input: Vec<BoneTransform> = bones.to_vec();
         let mut outcomes = Vec::new();
         for solver in &self.solvers {
             if !solver.enabled {
-                outcomes.push(SolverOutcome { solver: solver.name.clone(), ran: false, detail: "disabled".into() });
+                outcomes.push(SolverOutcome {
+                    solver: solver.name.clone(),
+                    ran: false,
+                    detail: "disabled".into(),
+                });
                 continue;
             }
             let (chain_idx, goal_idx) = match &solver.kind {
-                RigSolverKind::TwoBone { chain, goal, .. } | RigSolverKind::Fabrik { chain, goal, .. } => (*chain, *goal),
+                RigSolverKind::TwoBone { chain, goal, .. }
+                | RigSolverKind::Fabrik { chain, goal, .. } => (*chain, *goal),
             };
             let goal = &self.goals[goal_idx];
             let mesh = skel.bone_mesh_space(bones, goal.bone);
             let (_, cur_rot, cur_pos) = mesh.to_scale_rotation_translation();
             let supplied = goals.get(goal_idx).copied().flatten();
-            let target = supplied.unwrap_or(Effector { translation: cur_pos + goal.default_offset, rotation: cur_rot });
+            let target = supplied.unwrap_or(Effector {
+                translation: cur_pos + goal.default_offset,
+                rotation: cur_rot,
+            });
             let effector = Effector {
                 translation: cur_pos.lerp(target.translation, goal.position_alpha),
                 rotation: slerp_short(cur_rot, target.rotation, goal.rotation_alpha),
@@ -191,24 +330,54 @@ impl CompiledIkRig {
                     let end = *chain.bones.last().expect("chain checked at compile");
                     let pole_dir = pole.as_ref().and_then(|p| {
                         let upper = super::ik::two_bone_limb(skel, end)?.0;
-                        let upper_pos = skel.bone_mesh_space(bones, upper).to_scale_rotation_translation().2;
+                        let upper_pos = skel
+                            .bone_mesh_space(bones, upper)
+                            .to_scale_rotation_translation()
+                            .2;
                         Some(match p.bone {
-                            Some(b) => skel.bone_mesh_space(bones, b).to_scale_rotation_translation().2 + p.offset - upper_pos,
+                            Some(b) => {
+                                skel.bone_mesh_space(bones, b)
+                                    .to_scale_rotation_translation()
+                                    .2
+                                    + p.offset
+                                    - upper_pos
+                            }
                             None if p.space == PoleSpace::Goal => effector.rotation * p.offset,
                             None => p.offset,
                         })
                     });
-                    match solve_two_bone(skel, bones, end, &effector, pole_dir, params, &self.limits) {
-                        Some(r) => format!("two-bone stretch {:.3}{}", r.stretch, if r.out_of_reach { " out of reach" } else { "" }),
+                    match solve_two_bone(
+                        skel,
+                        bones,
+                        end,
+                        &effector,
+                        pole_dir,
+                        params,
+                        &self.limits,
+                    ) {
+                        Some(r) => format!(
+                            "two-bone stretch {:.3}{}",
+                            r.stretch,
+                            if r.out_of_reach { " out of reach" } else { "" }
+                        ),
                         None => "no limb".into(),
                     }
                 }
-                RigSolverKind::Fabrik { params, .. } => match solve_fabrik(skel, bones, &chain.bones, &effector, params, &self.limits) {
-                    Some(r) => format!("fabrik {} iterations, tip error {:.4}", r.iterations, r.tip_error),
-                    None => "chain too short".into(),
-                },
+                RigSolverKind::Fabrik { params, .. } => {
+                    match solve_fabrik(skel, bones, &chain.bones, &effector, params, &self.limits) {
+                        Some(r) => format!(
+                            "fabrik {} iterations, tip error {:.4}",
+                            r.iterations, r.tip_error
+                        ),
+                        None => "chain too short".into(),
+                    }
+                }
             };
-            outcomes.push(SolverOutcome { solver: solver.name.clone(), ran: true, detail });
+            outcomes.push(SolverOutcome {
+                solver: solver.name.clone(),
+                ran: true,
+                detail,
+            });
         }
         let alpha = alpha.clamp(0.0, 1.0);
         if alpha < 1.0 {
@@ -229,16 +398,47 @@ mod tests {
 
     pub(crate) fn rig(skel: &RuntimeSkeleton, fabrik: bool) -> CompiledIkRig {
         let mut asset = IkRigAsset::new("r", None);
-        asset.chains.push(IkChain { id: "c".into(), name: "arm".into(), start_bone: "b0".into(), end_bone: "b2".into(), goal: Some("g".into()) });
-        asset.goals.push(IkGoal { id: "g".into(), name: "hand".into(), bone: "b2".into(), position_alpha: 1.0, rotation_alpha: 1.0, default_offset: [0.0; 3] });
+        asset.chains.push(IkChain {
+            id: "c".into(),
+            name: "arm".into(),
+            start_bone: "b0".into(),
+            end_bone: "b2".into(),
+            goal: Some("g".into()),
+        });
+        asset.goals.push(IkGoal {
+            id: "g".into(),
+            name: "hand".into(),
+            bone: "b2".into(),
+            position_alpha: 1.0,
+            rotation_alpha: 1.0,
+            default_offset: [0.0; 3],
+        });
         asset.solvers.push(IkSolver {
             id: "s".into(),
             name: "solve".into(),
             enabled: true,
             kind: if fabrik {
-                SolverKind::Fabrik { chain: "c".into(), goal: "g".into(), precision: 1e-4, max_iterations: 30, respect_joint_limits: true, take_goal_rotation: false }
+                SolverKind::Fabrik {
+                    chain: "c".into(),
+                    goal: "g".into(),
+                    precision: 1e-4,
+                    max_iterations: 30,
+                    respect_joint_limits: true,
+                    take_goal_rotation: false,
+                }
             } else {
-                SolverKind::TwoBone { chain: "c".into(), goal: "g".into(), pole: Some(PoleSettings { bone: None, offset: [1.0, 0.0, 0.0], space: PoleSpace::Mesh }), allow_stretch: false, max_stretch: 1.25, take_goal_rotation: false }
+                SolverKind::TwoBone {
+                    chain: "c".into(),
+                    goal: "g".into(),
+                    pole: Some(PoleSettings {
+                        bone: None,
+                        offset: [1.0, 0.0, 0.0],
+                        space: PoleSpace::Mesh,
+                    }),
+                    allow_stretch: false,
+                    max_stretch: 1.25,
+                    take_goal_rotation: false,
+                }
             },
         });
         asset.validate_structure().unwrap();
@@ -256,13 +456,22 @@ mod tests {
             // unconnected goal: stays where it is
             let out = rig.execute(&skel, &mut bones, &vec![None], 1.0);
             assert!(out[0].ran);
-            let tip = skel.bone_mesh_space(&bones, 2).to_scale_rotation_translation().2;
-            assert!((tip - Vec3::new(0.0, 2.0, 0.0)).length() < 1e-2, "fabrik={fabrik} {tip}");
+            let tip = skel
+                .bone_mesh_space(&bones, 2)
+                .to_scale_rotation_translation()
+                .2;
+            assert!(
+                (tip - Vec3::new(0.0, 2.0, 0.0)).length() < 1e-2,
+                "fabrik={fabrik} {tip}"
+            );
             // supplied goal: reached
             let goal = Vec3::new(1.0, 1.0, 0.0);
             let mut bones = skel.bind.clone();
             rig.execute(&skel, &mut bones, &vec![Some(Effector::at(goal))], 1.0);
-            let tip = skel.bone_mesh_space(&bones, 2).to_scale_rotation_translation().2;
+            let tip = skel
+                .bone_mesh_space(&bones, 2)
+                .to_scale_rotation_translation()
+                .2;
             assert!((tip - goal).length() < 1e-2, "fabrik={fabrik} {tip}");
             // alpha 0: the input pose
             let mut none = skel.bind.clone();
@@ -275,13 +484,46 @@ mod tests {
     fn a_goal_alpha_of_half_stops_halfway() {
         let skel = limb(3, 1.0);
         let mut asset = IkRigAsset::new("r", None);
-        asset.chains.push(IkChain { id: "c".into(), name: "arm".into(), start_bone: "b0".into(), end_bone: "b2".into(), goal: Some("g".into()) });
-        asset.goals.push(IkGoal { id: "g".into(), name: "hand".into(), bone: "b2".into(), position_alpha: 0.5, rotation_alpha: 1.0, default_offset: [0.0; 3] });
-        asset.solvers.push(IkSolver { id: "s".into(), name: "s".into(), enabled: true, kind: SolverKind::Fabrik { chain: "c".into(), goal: "g".into(), precision: 1e-4, max_iterations: 30, respect_joint_limits: true, take_goal_rotation: false } });
+        asset.chains.push(IkChain {
+            id: "c".into(),
+            name: "arm".into(),
+            start_bone: "b0".into(),
+            end_bone: "b2".into(),
+            goal: Some("g".into()),
+        });
+        asset.goals.push(IkGoal {
+            id: "g".into(),
+            name: "hand".into(),
+            bone: "b2".into(),
+            position_alpha: 0.5,
+            rotation_alpha: 1.0,
+            default_offset: [0.0; 3],
+        });
+        asset.solvers.push(IkSolver {
+            id: "s".into(),
+            name: "s".into(),
+            enabled: true,
+            kind: SolverKind::Fabrik {
+                chain: "c".into(),
+                goal: "g".into(),
+                precision: 1e-4,
+                max_iterations: 30,
+                respect_joint_limits: true,
+                take_goal_rotation: false,
+            },
+        });
         let (rig, _) = CompiledIkRig::compile(&asset, &skel);
         let mut bones = skel.bind.clone();
-        rig.execute(&skel, &mut bones, &vec![Some(Effector::at(Vec3::new(1.0, 1.0, 0.0)))], 1.0);
-        let tip = skel.bone_mesh_space(&bones, 2).to_scale_rotation_translation().2;
+        rig.execute(
+            &skel,
+            &mut bones,
+            &vec![Some(Effector::at(Vec3::new(1.0, 1.0, 0.0)))],
+            1.0,
+        );
+        let tip = skel
+            .bone_mesh_space(&bones, 2)
+            .to_scale_rotation_translation()
+            .2;
         assert!((tip - Vec3::new(0.5, 1.5, 0.0)).length() < 2e-2, "{tip}");
     }
 
@@ -289,11 +531,40 @@ mod tests {
     fn unresolved_references_are_reported_and_the_solver_is_dropped() {
         let skel = limb(3, 1.0);
         let mut asset = IkRigAsset::new("r", None);
-        asset.chains.push(IkChain { id: "c".into(), name: "arm".into(), start_bone: "b0".into(), end_bone: "nope".into(), goal: Some("g".into()) });
-        asset.goals.push(IkGoal { id: "g".into(), name: "hand".into(), bone: "b2".into(), position_alpha: 1.0, rotation_alpha: 1.0, default_offset: [0.0; 3] });
-        asset.solvers.push(IkSolver { id: "s".into(), name: "s".into(), enabled: true, kind: SolverKind::Fabrik { chain: "c".into(), goal: "g".into(), precision: 1e-3, max_iterations: 10, respect_joint_limits: true, take_goal_rotation: false } });
+        asset.chains.push(IkChain {
+            id: "c".into(),
+            name: "arm".into(),
+            start_bone: "b0".into(),
+            end_bone: "nope".into(),
+            goal: Some("g".into()),
+        });
+        asset.goals.push(IkGoal {
+            id: "g".into(),
+            name: "hand".into(),
+            bone: "b2".into(),
+            position_alpha: 1.0,
+            rotation_alpha: 1.0,
+            default_offset: [0.0; 3],
+        });
+        asset.solvers.push(IkSolver {
+            id: "s".into(),
+            name: "s".into(),
+            enabled: true,
+            kind: SolverKind::Fabrik {
+                chain: "c".into(),
+                goal: "g".into(),
+                precision: 1e-3,
+                max_iterations: 10,
+                respect_joint_limits: true,
+                take_goal_rotation: false,
+            },
+        });
         let (rig, d) = CompiledIkRig::compile(&asset, &skel);
         assert!(rig.solvers.is_empty());
-        assert!(d.iter().any(|d| d.code == "ikrig.unknown_bone") && d.iter().any(|d| d.code == "ikrig.chain_unresolved"), "{d:?}");
+        assert!(
+            d.iter().any(|d| d.code == "ikrig.unknown_bone")
+                && d.iter().any(|d| d.code == "ikrig.chain_unresolved"),
+            "{d:?}"
+        );
     }
 }

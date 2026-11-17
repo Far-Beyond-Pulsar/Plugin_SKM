@@ -15,8 +15,9 @@ use crate::diagnostics::Diagnostic;
 
 use super::clip::CompiledClip;
 use super::graph::instance::{GraphInstance, SyncRegistry};
-use super::graph::{StateEvent, 
-    CNode, CompiledGraph, Env, NodeKind, ParamDef, ParamError, ParamValues, PlaybackSpan, Program, SearchRecord, SeqCfg, Value,
+use super::graph::{
+    CNode, CompiledGraph, Env, NodeKind, ParamDef, ParamError, ParamValues, PlaybackSpan, Program,
+    SearchRecord, SeqCfg, StateEvent, Value,
 };
 use super::montage::{CompiledMontage, MontageEvent, MontageHandle, MontageSet, PlayRefused};
 use super::pose::{Curves, Pose, RootMotion, RuntimeSkeleton};
@@ -96,7 +97,10 @@ pub struct AnimInstance {
 
 impl std::fmt::Debug for AnimInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AnimInstance").field("graph", &self.graph.as_ref().map(|g| &g.name)).field("bones", &self.skeleton.len()).finish()
+        f.debug_struct("AnimInstance")
+            .field("graph", &self.graph.as_ref().map(|g| &g.name))
+            .field("bones", &self.skeleton.len())
+            .finish()
     }
 }
 
@@ -143,10 +147,17 @@ impl AnimInstance {
     /// skeleton is refused.
     pub fn set_graph(&mut self, graph: Arc<CompiledGraph>) -> Result<(), String> {
         if graph.skeleton.id != self.skeleton.id {
-            return Err(format!("graph `{}` is for another skeleton than this instance poses", graph.name));
+            return Err(format!(
+                "graph `{}` is for another skeleton than this instance poses",
+                graph.name
+            ));
         }
-        let old_params: HashMap<String, (ParamType, Value)> =
-            self.param_defs.iter().zip(&self.params.values).map(|(d, v)| (d.name.clone(), (d.ty, v.clone()))).collect();
+        let old_params: HashMap<String, (ParamType, Value)> = self
+            .param_defs
+            .iter()
+            .zip(&self.params.values)
+            .map(|(d, v)| (d.name.clone(), (d.ty, v.clone())))
+            .collect();
         let mut params = ParamValues::from_defs(&graph.params);
         for (def, value) in graph.params.iter().zip(&mut params.values) {
             if let Some((ty, v)) = old_params.get(&def.name) {
@@ -182,7 +193,9 @@ impl AnimInstance {
     /// Cancel everything before the owner goes away. Each montage reports `Cancelled`.
     pub fn shutdown(&mut self) {
         self.montages.cancel_all();
-        self.report.montage_events.extend(self.montages.drain_events());
+        self.report
+            .montage_events
+            .extend(self.montages.drain_events());
         self.root = None;
         self.graph = None;
     }
@@ -190,7 +203,10 @@ impl AnimInstance {
     // ---- parameters ---------------------------------------------------------------
 
     pub fn parameters(&self) -> impl Iterator<Item = (&str, ParamType, &Value)> {
-        self.param_defs.iter().zip(&self.params.values).map(|(d, v)| (d.name.as_str(), d.ty, v))
+        self.param_defs
+            .iter()
+            .zip(&self.params.values)
+            .map(|(d, v)| (d.name.as_str(), d.ty, v))
     }
 
     pub fn parameter(&self, name: &str) -> Option<&Value> {
@@ -201,13 +217,22 @@ impl AnimInstance {
     /// Write a parameter. The type must match the declaration exactly and the
     /// value must be finite. The graph reads it on its next update.
     pub fn set_parameter(&mut self, name: &str, value: Value) -> Result<(), ParamError> {
-        let i = self.param_defs.iter().position(|d| d.name == name).ok_or_else(|| ParamError::Unknown(name.to_string()))?;
+        let i = self
+            .param_defs
+            .iter()
+            .position(|d| d.name == name)
+            .ok_or_else(|| ParamError::Unknown(name.to_string()))?;
         let ty = self.param_defs[i].ty;
         let ok = match (&value, ty) {
             (Value::Float(v), ParamType::Float) => v.is_finite(),
             (Value::Int(_), ParamType::Int) | (Value::Bool(_), ParamType::Bool) => true,
             (Value::Vector(v), ParamType::Vector) => v.is_finite(),
-            _ => return Err(ParamError::WrongType { name: name.to_string(), expected: ty }),
+            _ => {
+                return Err(ParamError::WrongType {
+                    name: name.to_string(),
+                    expected: ty,
+                })
+            }
         };
         if !ok {
             return Err(ParamError::NotFinite(name.to_string()));
@@ -231,7 +256,12 @@ impl AnimInstance {
 
     // ---- montages -----------------------------------------------------------------
 
-    pub fn play_montage(&mut self, montage: Arc<CompiledMontage>, rate: f32, section: Option<&str>) -> Result<MontageHandle, PlayRefused> {
+    pub fn play_montage(
+        &mut self,
+        montage: Arc<CompiledMontage>,
+        rate: f32,
+        section: Option<&str>,
+    ) -> Result<MontageHandle, PlayRefused> {
         self.montages.play(montage, rate, section)
     }
 
@@ -258,7 +288,8 @@ impl AnimInstance {
             TimeStep::Fixed { step, max_substeps } => {
                 let step = step.max(1e-4);
                 self.accumulator += dt;
-                while self.accumulator + 1e-5 >= step && (deltas.len() as u32) < max_substeps.max(1) {
+                while self.accumulator + 1e-5 >= step && (deltas.len() as u32) < max_substeps.max(1)
+                {
                     self.accumulator = (self.accumulator - step).max(0.0);
                     deltas.push(step);
                 }
@@ -312,7 +343,9 @@ impl AnimInstance {
         self.montages.root_motion_in_pose = !self.extract_root_motion;
         self.montages.update(dt);
         if !quiet {
-            self.report.montage_events.extend(self.montages.drain_events());
+            self.report
+                .montage_events
+                .extend(self.montages.drain_events());
         } else {
             self.montages.drain_events();
         }
@@ -355,16 +388,29 @@ impl AnimInstance {
             self.report.trace = trace;
         }
         if !quiet {
-            for inst in self.montages.instances().iter().chain(self.montages.finished()) {
-                montage_playback(inst, &mut self.report.spans, &mut self.report.montage_timelines);
+            for inst in self
+                .montages
+                .instances()
+                .iter()
+                .chain(self.montages.finished())
+            {
+                montage_playback(
+                    inst,
+                    &mut self.report.spans,
+                    &mut self.report.montage_timelines,
+                );
             }
-            self.report.finished_montages.extend(self.montages.finished().iter().map(|i| i.handle));
+            self.report
+                .finished_montages
+                .extend(self.montages.finished().iter().map(|i| i.handle));
         }
         // a pose with a non-finite bone (a degenerate clip or solver input) never
         // reaches the palette: the previous pose is kept and the problem is traced
         let new = match pose {
             Some(p) if !p.is_finite() => {
-                self.report.trace.push("non-finite pose rejected; holding the previous pose".into());
+                self.report
+                    .trace
+                    .push("non-finite pose rejected; holding the previous pose".into());
                 self.pose.clone()
             }
             Some(p) => p,
@@ -402,13 +448,20 @@ impl AnimInstance {
     /// Position of the single-sequence player's clock, in unbounded seconds.
     pub fn single_sequence_position(&self) -> Option<f64> {
         let root = self.root.as_ref()?;
-        self.graph.as_ref().filter(|g| g.name == SINGLE_SEQUENCE_NAME)?;
+        self.graph
+            .as_ref()
+            .filter(|g| g.name == SINGLE_SEQUENCE_NAME)?;
         root.sequence_position(0)
     }
 
     /// Move the single-sequence player's clock without raising anything.
     pub fn seek_single_sequence(&mut self, seconds: f64) -> bool {
-        match (self.root.as_mut(), self.graph.as_ref().filter(|g| g.name == SINGLE_SEQUENCE_NAME)) {
+        match (
+            self.root.as_mut(),
+            self.graph
+                .as_ref()
+                .filter(|g| g.name == SINGLE_SEQUENCE_NAME),
+        ) {
             (Some(root), Some(_)) => {
                 root.seek_sequence(0, seconds);
                 true
@@ -430,28 +483,55 @@ const MAX_SEGMENT_CYCLES: i64 = 4096;
 /// from the segment's `clip_start`; each cycle is reported as its own span (the
 /// restart is a discontinuity the notify tracker ends states on), so trimmed and
 /// looping segments follow their authored range exactly.
-fn montage_playback(inst: &super::montage::MontageInstance, spans: &mut Vec<PlaybackSpan>, timelines: &mut Vec<TimelineSpan>) {
+fn montage_playback(
+    inst: &super::montage::MontageInstance,
+    spans: &mut Vec<PlaybackSpan>,
+    timelines: &mut Vec<TimelineSpan>,
+) {
     use super::graph::SpanOrigin;
     for &(a, b) in &inst.runs {
-        timelines.push(TimelineSpan { handle: inst.handle, montage: inst.montage.clone(), from: a, to: b, weight: inst.weight });
+        timelines.push(TimelineSpan {
+            handle: inst.handle,
+            montage: inst.montage.clone(),
+            from: a,
+            to: b,
+            weight: inst.weight,
+        });
         let (lo, hi) = (a.min(b), a.max(b));
         for track in &inst.montage.tracks {
             let last = track.segments.len().saturating_sub(1);
             for (si, seg) in track.segments.iter().enumerate() {
                 let (seg_start, seg_end) = (seg.start as f64, (seg.start + seg.length) as f64);
-                let origin = || SpanOrigin::Montage { montage: inst.montage.id.clone(), segment: seg.id.clone() };
+                let origin = || SpanOrigin::Montage {
+                    montage: inst.montage.id.clone(),
+                    segment: seg.id.clone(),
+                };
                 let clip_len = (seg.clip_end - seg.clip_start).max(1e-6) as f64;
                 let total = clip_len * seg.loop_count as f64;
                 let rate = seg.rate as f64;
                 let push = |spans: &mut Vec<PlaybackSpan>, from: f64, to: f64| {
-                    spans.push(PlaybackSpan { scope: inst.handle.0, clip: seg.clip.clone(), from, to, looping: false, weight: inst.weight, origin: origin(), seam: (seg.loop_count > 1 && !seg.restart_states_on_loop).then_some((seg.clip_start as f64, seg.clip_end as f64)) });
+                    spans.push(PlaybackSpan {
+                        scope: inst.handle.0,
+                        clip: seg.clip.clone(),
+                        from,
+                        to,
+                        looping: false,
+                        weight: inst.weight,
+                        origin: origin(),
+                        seam: (seg.loop_count > 1 && !seg.restart_states_on_loop)
+                            .then_some((seg.clip_start as f64, seg.clip_end as f64)),
+                    });
                 };
                 if a == b {
                     // paused (or just jumped to): live at one point of this segment
                     let inside = a >= seg_start && (a < seg_end || (a == seg_end && si == last));
                     if inside {
                         let local = ((a - seg_start) * rate).max(0.0);
-                        let t = if local >= total { seg.clip_end as f64 } else { seg.clip_start as f64 + local % clip_len };
+                        let t = if local >= total {
+                            seg.clip_end as f64
+                        } else {
+                            seg.clip_start as f64 + local % clip_len
+                        };
                         push(spans, t, t);
                     }
                     continue;
@@ -460,7 +540,10 @@ fn montage_playback(inst: &super::montage::MontageInstance, spans: &mut Vec<Play
                 if e <= s {
                     continue;
                 }
-                let (ls, le) = (((s - seg_start) * rate).min(total), ((e - seg_start) * rate).min(total));
+                let (ls, le) = (
+                    ((s - seg_start) * rate).min(total),
+                    ((e - seg_start) * rate).min(total),
+                );
                 if le <= ls {
                     continue;
                 }
@@ -471,7 +554,10 @@ fn montage_playback(inst: &super::montage::MontageInstance, spans: &mut Vec<Play
                     .map(|c| {
                         let base = c as f64 * clip_len;
                         let (x0, x1) = (ls.max(base), le.min(base + clip_len));
-                        (seg.clip_start as f64 + (x0 - base), seg.clip_start as f64 + (x1 - base))
+                        (
+                            seg.clip_start as f64 + (x0 - base),
+                            seg.clip_start as f64 + (x1 - base),
+                        )
                     })
                     .collect();
                 if b < a {
@@ -493,17 +579,39 @@ pub const SINGLE_SEQUENCE_NAME: &str = "single sequence";
 /// The compiled form of "just play this sequence": a Sequence Player feeding an
 /// Output Pose. Components migrate a plain animation reference to this so there
 /// is one runtime, not a second player.
-pub fn single_sequence_graph(skeleton: Arc<RuntimeSkeleton>, clip: Arc<CompiledClip>, looping: bool, reverse: bool) -> Arc<CompiledGraph> {
+pub fn single_sequence_graph(
+    skeleton: Arc<RuntimeSkeleton>,
+    clip: Arc<CompiledClip>,
+    looping: bool,
+    reverse: bool,
+) -> Arc<CompiledGraph> {
     let nodes = vec![
         CNode {
             id: "player".into(),
-            kind: NodeKind::SequencePlayer(SeqCfg { clip: clip.clone(), rate: if reverse { -1.0 } else { 1.0 }, start: 0.0, looping, sync: None }),
+            kind: NodeKind::SequencePlayer(SeqCfg {
+                clip: clip.clone(),
+                rate: if reverse { -1.0 } else { 1.0 },
+                start: 0.0,
+                looping,
+                sync: None,
+            }),
             inputs: vec![None, None],
             skeleton: skeleton.clone(),
         },
-        CNode { id: "output".into(), kind: NodeKind::OutputPose, inputs: vec![Some(0)], skeleton: skeleton.clone() },
+        CNode {
+            id: "output".into(),
+            kind: NodeKind::OutputPose,
+            inputs: vec![Some(0)],
+            skeleton: skeleton.clone(),
+        },
     ];
-    let main = Arc::new(Program { kind: GraphKind::Main, label: "main".into(), nodes, terminal: 1, primary_player: Some(0) });
+    let main = Arc::new(Program {
+        kind: GraphKind::Main,
+        label: "main".into(),
+        nodes,
+        terminal: 1,
+        primary_player: Some(0),
+    });
     Arc::new(CompiledGraph {
         id: format!("single:{}", clip.id),
         name: SINGLE_SEQUENCE_NAME.into(),

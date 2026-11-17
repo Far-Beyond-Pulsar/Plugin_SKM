@@ -19,7 +19,7 @@ use skeletal_assets::montage::{
     AnimationMontageAsset, BlendCurve, InterruptPolicy, MontageRootMotion,
 };
 use ui::button::{Button, ButtonVariants};
-use ui::{h_flex, v_flex, ActiveTheme, Icon, IconName, Selectable, Sizable, StyledExt};
+use ui::{h_flex, v_flex, ActiveTheme, Icon, IconName, Sizable, StyledExt};
 
 use crate::anim_editors::graph_preview::ProjectAssets;
 use crate::anim_editors::montage_model::MontageModel;
@@ -31,10 +31,10 @@ use crate::anim_editors::store::FsStore;
 use crate::core::asset_index;
 
 use super::chrome::{
-    self, edit, empty_inspector, fmt_f32, frame, labelled, parse_f32, section, short_id, value_row,
+    edit, empty_inspector, fmt_f32, frame, labelled, parse_f32, section, short_id, value_row,
     Chrome, EditorBody, EditorHost, EditorModel, Widgets,
 };
-use super::notify_inspector::{self, NotifyDoc};
+use super::notify_inspector::{self};
 use super::paint::{arrow, pt};
 
 const RULER_H: f32 = 22.0;

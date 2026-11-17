@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::sample;
+use crate::core::{sample, Vec3};
 use skeletal_assets::blend_space::BlendSample;
 use skeletal_assets::montage::{MontageSegment, SlotTrack};
 
