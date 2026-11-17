@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use skeletal_assets::picker::{filter, Compat, PickerCandidate, PickerEntry, PickerFilter};
 
 use crate::core::asset_index::{self, ProjectAssetSource, Referrer};
-use skeletal_assets::dependencies::extension_of;
 
 /// Where an id resolves to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -315,15 +314,10 @@ pub fn breadcrumb(root: &Path, path: &Path) -> Vec<String> {
         .collect()
 }
 
-/// File extension an asset of `kind` uses, for opening a reference in its
-/// own editor tab.
-pub fn extension_for_kind(kind: &str) -> Option<&'static str> {
-    extension_of(kind)
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use skeletal_assets::dependencies::extension_of;
     use std::collections::HashMap;
 
     #[derive(Default)]

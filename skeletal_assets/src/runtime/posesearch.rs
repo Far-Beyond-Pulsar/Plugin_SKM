@@ -79,13 +79,18 @@ impl MirrorTable {
         let mut counterpart: Vec<usize> = (0..skel.len()).collect();
         let mut unpaired = Vec::new();
         for i in 0..skel.len() {
-            let Some(other) = flipped(&skel.names[i]) else { continue };
+            let Some(other) = flipped(&skel.names[i]) else {
+                continue;
+            };
             match skel.names.iter().position(|n| *n == other) {
                 Some(j) => counterpart[i] = j,
                 None => unpaired.push(skel.names[i].clone()),
             }
         }
-        Self { counterpart, unpaired }
+        Self {
+            counterpart,
+            unpaired,
+        }
     }
 
     /// Reflect a pose across the mesh-space YZ plane (x -> -x), swapping each
@@ -94,13 +99,34 @@ impl MirrorTable {
         let mesh = skel.to_mesh_space(&pose.bones);
         let reflect = |m: &Mat4| {
             let (s, r, t) = m.to_scale_rotation_translation();
-            Mat4::from_scale_rotation_translation(s, Quat::from_xyzw(r.x, -r.y, -r.z, r.w), Vec3::new(-t.x, t.y, t.z))
+            Mat4::from_scale_rotation_translation(
+                s,
+                Quat::from_xyzw(r.x, -r.y, -r.z, r.w),
+                Vec3::new(-t.x, t.y, t.z),
+            )
         };
-        let mirrored: Vec<Mat4> = (0..skel.len()).map(|i| reflect(&mesh[self.counterpart[i]])).collect();
-        let mut out = Pose { bones: skel.from_mesh_space(&mirrored), curves: pose.curves.clone(), root_motion: pose.root_motion, montage_root_motion: pose.montage_root_motion, kind: pose.kind };
+        let mirrored: Vec<Mat4> = (0..skel.len())
+            .map(|i| reflect(&mesh[self.counterpart[i]]))
+            .collect();
+        let mut out = Pose {
+            bones: skel.from_mesh_space(&mirrored),
+            curves: pose.curves.clone(),
+            root_motion: pose.root_motion,
+            montage_root_motion: pose.montage_root_motion,
+            kind: pose.kind,
+        };
         out.root_motion = RootMotion {
-            translation: Vec3::new(-pose.root_motion.translation.x, pose.root_motion.translation.y, pose.root_motion.translation.z),
-            rotation: Quat::from_xyzw(pose.root_motion.rotation.x, -pose.root_motion.rotation.y, -pose.root_motion.rotation.z, pose.root_motion.rotation.w),
+            translation: Vec3::new(
+                -pose.root_motion.translation.x,
+                pose.root_motion.translation.y,
+                pose.root_motion.translation.z,
+            ),
+            rotation: Quat::from_xyzw(
+                pose.root_motion.rotation.x,
+                -pose.root_motion.rotation.y,
+                -pose.root_motion.rotation.z,
+                pose.root_motion.rotation.w,
+            ),
         };
         out
     }
@@ -120,9 +146,12 @@ fn channel_len(kind: &ChannelKind) -> usize {
     match kind {
         ChannelKind::BonePosition { .. } | ChannelKind::BoneVelocity { .. } => 3,
         ChannelKind::BoneRotation { .. } => 4,
-        ChannelKind::Trajectory { offsets, position, facing, velocity } => {
-            offsets.len() * (3 * (*position as usize + *facing as usize + *velocity as usize))
-        }
+        ChannelKind::Trajectory {
+            offsets,
+            position,
+            facing,
+            velocity,
+        } => offsets.len() * (3 * (*position as usize + *facing as usize + *velocity as usize)),
         ChannelKind::Curve { .. } | ChannelKind::Phase => 1,
     }
 }
@@ -134,7 +163,13 @@ pub fn layout(asset: &PoseDbAsset) -> Vec<ChannelSpan> {
         .iter()
         .map(|c| {
             let len = channel_len(&c.kind);
-            let span = ChannelSpan { name: c.name.clone(), start, len, weight: c.weight, standardize: c.normalization == Normalization::Standardize };
+            let span = ChannelSpan {
+                name: c.name.clone(),
+                start,
+                len,
+                weight: c.weight,
+                standardize: c.normalization == Normalization::Standardize,
+            };
             start += len;
             span
         })
@@ -169,21 +204,39 @@ pub struct FrameFeatures {
 
 impl FrameFeatures {
     /// `previous`/`dt` supply bone velocities; without them velocity is zero.
-    pub fn from_pose(skel: &RuntimeSkeleton, pose: &Pose, previous: Option<&Pose>, dt: f32, phase: f32) -> Self {
+    pub fn from_pose(
+        skel: &RuntimeSkeleton,
+        pose: &Pose,
+        previous: Option<&Pose>,
+        dt: f32,
+        phase: f32,
+    ) -> Self {
         let (positions, rotations) = root_frame(skel, &pose.bones);
         let velocities = match previous {
             Some(prev) if dt > 1e-6 => {
                 let (pp, _) = root_frame(skel, &prev.bones);
-                positions.iter().zip(&pp).map(|(a, b)| (*a - *b) / dt).collect()
+                positions
+                    .iter()
+                    .zip(&pp)
+                    .map(|(a, b)| (*a - *b) / dt)
+                    .collect()
             }
             _ => vec![Vec3::ZERO; positions.len()],
         };
-        Self { positions, rotations, velocities, curves: pose.curves.clone(), phase }
+        Self {
+            positions,
+            rotations,
+            velocities,
+            curves: pose.curves.clone(),
+            phase,
+        }
     }
 }
 
 fn root_bone(skel: &RuntimeSkeleton) -> usize {
-    (0..skel.len()).find(|&i| skel.parents[i].is_none()).unwrap_or(0)
+    (0..skel.len())
+        .find(|&i| skel.parents[i].is_none())
+        .unwrap_or(0)
 }
 
 fn root_frame(skel: &RuntimeSkeleton, local: &[BoneTransform]) -> (Vec<Vec3>, Vec<Quat>) {
@@ -208,11 +261,21 @@ pub struct DesiredTrajectory {
 impl DesiredTrajectory {
     /// A constant desired velocity in the actor frame, from plain numbers.
     pub fn from_array(velocity: [f32; 3]) -> Self {
-        Self { velocity: Vec3::from_array(velocity) }
+        Self {
+            velocity: Vec3::from_array(velocity),
+        }
     }
 }
 
-fn push_trajectory(out: &mut Vec<f32>, position: bool, facing: bool, velocity: bool, p: Vec3, f: Vec3, v: Vec3) {
+fn push_trajectory(
+    out: &mut Vec<f32>,
+    position: bool,
+    facing: bool,
+    velocity: bool,
+    p: Vec3,
+    f: Vec3,
+    v: Vec3,
+) {
     if position {
         out.extend_from_slice(&p.to_array());
     }
@@ -253,21 +316,46 @@ impl PoseIndex {
     ) -> Result<Self, Vec<Diagnostic>> {
         let mut diagnostics = Vec::new();
         if asset.channels.is_empty() {
-            diagnostics.push(Diagnostic::error("posedb.no_channels", "The database has no feature channels").repair("Add at least one feature channel"));
+            diagnostics.push(
+                Diagnostic::error("posedb.no_channels", "The database has no feature channels")
+                    .repair("Add at least one feature channel"),
+            );
         }
         for c in &asset.channels {
             match &c.kind {
-                ChannelKind::BonePosition { bone } | ChannelKind::BoneRotation { bone } | ChannelKind::BoneVelocity { bone } if bone_for(skel, bone).is_none() => {
-                    diagnostics.push(Diagnostic::error("posedb.unknown_bone", format!("Channel `{}` names bone `{bone}` which the skeleton does not have", c.name)).at(&c.id));
+                ChannelKind::BonePosition { bone }
+                | ChannelKind::BoneRotation { bone }
+                | ChannelKind::BoneVelocity { bone }
+                    if bone_for(skel, bone).is_none() =>
+                {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            "posedb.unknown_bone",
+                            format!(
+                                "Channel `{}` names bone `{bone}` which the skeleton does not have",
+                                c.name
+                            ),
+                        )
+                        .at(&c.id),
+                    );
                 }
                 _ => {}
             }
         }
         if clips.is_empty() {
-            diagnostics.push(Diagnostic::error("posedb.no_sources", "The database has no usable source clips").repair("Add or enable a source sequence"));
+            diagnostics.push(
+                Diagnostic::error(
+                    "posedb.no_sources",
+                    "The database has no usable source clips",
+                )
+                .repair("Add or enable a source sequence"),
+            );
         }
         if clips.iter().any(|c| c.mirrored) && mirror.is_none() {
-            diagnostics.push(Diagnostic::error("posedb.mirror_unavailable", "A mirrored source needs a left/right bone table"));
+            diagnostics.push(Diagnostic::error(
+                "posedb.mirror_unavailable",
+                "A mirrored source needs a left/right bone table",
+            ));
         }
         if !diagnostics.is_empty() {
             return Err(diagnostics);
@@ -278,7 +366,11 @@ impl PoseIndex {
         let expected: usize = clips
             .iter()
             .map(|sc| {
-                let limit = if sc.looping { sc.clip.duration } else { sc.clip.duration - asset.sampling.end_margin };
+                let limit = if sc.looping {
+                    sc.clip.duration
+                } else {
+                    sc.clip.duration - asset.sampling.end_margin
+                };
                 (limit.max(0.0) / interval).floor() as usize + 1
             })
             .sum();
@@ -287,7 +379,11 @@ impl PoseIndex {
         let mut features = Vec::new();
         for (ci, sc) in clips.iter().enumerate() {
             let dur = sc.clip.duration;
-            let limit = if sc.looping { dur } else { dur - asset.sampling.end_margin };
+            let limit = if sc.looping {
+                dur
+            } else {
+                dur - asset.sampling.end_margin
+            };
             let mut k = 0u32;
             loop {
                 let t = k as f32 * interval;
@@ -297,7 +393,10 @@ impl PoseIndex {
                 k += 1;
                 visited += 1;
                 if !progress(visited, expected.max(visited)) {
-                    return Err(vec![Diagnostic::error("posedb.cancelled", "The build was cancelled")]);
+                    return Err(vec![Diagnostic::error(
+                        "posedb.cancelled",
+                        "The build was cancelled",
+                    )]);
                 }
                 if sc.exclusions.iter().any(|r| t >= r.start && t < r.end) {
                     continue;
@@ -305,47 +404,104 @@ impl PoseIndex {
                 let tt = t.min(dur);
                 let f = Self::clip_features(asset, skel, sc, tt, interval, mirror);
                 debug_assert_eq!(f.len(), dims);
-                entries.push(IndexEntry { clip: ci as u32, time: tt });
+                entries.push(IndexEntry {
+                    clip: ci as u32,
+                    time: tt,
+                });
                 features.extend(f);
             }
         }
         if entries.is_empty() {
-            return Err(vec![Diagnostic::error("posedb.empty", "No pose could be indexed: every source is excluded or shorter than the end margin").repair("Check source exclusions and the sampling end margin")]);
+            return Err(vec![Diagnostic::error(
+                "posedb.empty",
+                "No pose could be indexed: every source is excluded or shorter than the end margin",
+            )
+            .repair("Check source exclusions and the sampling end margin")]);
         }
         let n = entries.len();
         let (mut mean, mut inv_std) = (vec![0.0f32; dims], vec![1.0f32; dims]);
         for span in spans.iter().filter(|s| s.standardize) {
             for d in span.start..span.start + span.len {
                 let m = (0..n).map(|e| features[e * dims + d] as f64).sum::<f64>() / n as f64;
-                let var = (0..n).map(|e| (features[e * dims + d] as f64 - m).powi(2)).sum::<f64>() / n as f64;
+                let var = (0..n)
+                    .map(|e| (features[e * dims + d] as f64 - m).powi(2))
+                    .sum::<f64>()
+                    / n as f64;
                 mean[d] = m as f32;
                 let sd = var.sqrt() as f32;
                 inv_std[d] = if sd > 1e-6 { 1.0 / sd } else { 1.0 };
             }
         }
-        Ok(Self { spans, dims, entries, features, mean, inv_std })
+        Ok(Self {
+            spans,
+            dims,
+            entries,
+            features,
+            mean,
+            inv_std,
+        })
     }
 
-    fn clip_features(asset: &PoseDbAsset, skel: &RuntimeSkeleton, sc: &SearchClip, t: f32, interval: f32, mirror: Option<&MirrorTable>) -> Vec<f32> {
+    fn clip_features(
+        asset: &PoseDbAsset,
+        skel: &RuntimeSkeleton,
+        sc: &SearchClip,
+        t: f32,
+        interval: f32,
+        mirror: Option<&MirrorTable>,
+    ) -> Vec<f32> {
         let sample = |time: f32| {
             let pose = sc.clip.sample(skel, time);
-            if sc.mirrored { mirror.expect("checked").mirror(skel, &pose) } else { pose }
+            if sc.mirrored {
+                mirror.expect("checked").mirror(skel, &pose)
+            } else {
+                pose
+            }
         };
         let h = (interval * 0.5).max(1.0 / 480.0);
         let pose = sample(t);
         let prev = sample((t - h).max(0.0));
-        let frame = FrameFeatures::from_pose(skel, &pose, Some(&prev), (t - (t - h).max(0.0)).max(1e-6), if sc.clip.duration > 0.0 { t / sc.clip.duration } else { 0.0 });
+        let frame = FrameFeatures::from_pose(
+            skel,
+            &pose,
+            Some(&prev),
+            (t - (t - h).max(0.0)).max(1e-6),
+            if sc.clip.duration > 0.0 {
+                t / sc.clip.duration
+            } else {
+                0.0
+            },
+        );
         let mut out = Vec::new();
         for c in &asset.channels {
             match &c.kind {
-                ChannelKind::Trajectory { offsets, position, facing, velocity } => {
+                ChannelKind::Trajectory {
+                    offsets,
+                    position,
+                    facing,
+                    velocity,
+                } => {
                     for &o in offsets {
                         let traj = |dt: f32| {
-                            let m = sc.clip.trajectory_between(skel, t as f64, (t + dt) as f64, sc.looping);
+                            let m = sc.clip.trajectory_between(
+                                skel,
+                                t as f64,
+                                (t + dt) as f64,
+                                sc.looping,
+                            );
                             if sc.mirrored {
                                 RootMotion {
-                                    translation: Vec3::new(-m.translation.x, m.translation.y, m.translation.z),
-                                    rotation: Quat::from_xyzw(m.rotation.x, -m.rotation.y, -m.rotation.z, m.rotation.w),
+                                    translation: Vec3::new(
+                                        -m.translation.x,
+                                        m.translation.y,
+                                        m.translation.z,
+                                    ),
+                                    rotation: Quat::from_xyzw(
+                                        m.rotation.x,
+                                        -m.rotation.y,
+                                        -m.rotation.z,
+                                        m.rotation.w,
+                                    ),
                                 }
                             } else {
                                 m
@@ -354,7 +510,15 @@ impl PoseIndex {
                         let at = traj(o);
                         let facing_v = at.rotation * Vec3::Z;
                         let vel = (traj(o + h).translation - traj(o - h).translation) / (2.0 * h);
-                        push_trajectory(&mut out, *position, *facing, *velocity, at.translation, facing_v, vel);
+                        push_trajectory(
+                            &mut out,
+                            *position,
+                            *facing,
+                            *velocity,
+                            at.translation,
+                            facing_v,
+                            vel,
+                        );
                     }
                 }
                 other => Self::push_pose_channel(&mut out, skel, other, &frame),
@@ -363,11 +527,22 @@ impl PoseIndex {
         out
     }
 
-    fn push_pose_channel(out: &mut Vec<f32>, skel: &RuntimeSkeleton, kind: &ChannelKind, f: &FrameFeatures) {
+    fn push_pose_channel(
+        out: &mut Vec<f32>,
+        skel: &RuntimeSkeleton,
+        kind: &ChannelKind,
+        f: &FrameFeatures,
+    ) {
         match kind {
-            ChannelKind::BonePosition { bone } => out.extend_from_slice(&f.positions[bone_for(skel, bone).unwrap_or(0)].to_array()),
-            ChannelKind::BoneRotation { bone } => out.extend_from_slice(&f.rotations[bone_for(skel, bone).unwrap_or(0)].to_array()),
-            ChannelKind::BoneVelocity { bone } => out.extend_from_slice(&f.velocities[bone_for(skel, bone).unwrap_or(0)].to_array()),
+            ChannelKind::BonePosition { bone } => {
+                out.extend_from_slice(&f.positions[bone_for(skel, bone).unwrap_or(0)].to_array())
+            }
+            ChannelKind::BoneRotation { bone } => {
+                out.extend_from_slice(&f.rotations[bone_for(skel, bone).unwrap_or(0)].to_array())
+            }
+            ChannelKind::BoneVelocity { bone } => {
+                out.extend_from_slice(&f.velocities[bone_for(skel, bone).unwrap_or(0)].to_array())
+            }
             ChannelKind::Curve { curve } => out.push(f.curves.get(curve).copied().unwrap_or(0.0)),
             ChannelKind::Phase => out.push(f.phase),
             ChannelKind::Trajectory { .. } => {}
@@ -377,15 +552,38 @@ impl PoseIndex {
     /// Feature vector for a runtime query: pose channels from `frame`,
     /// trajectory channels from the desired constant velocity (past offsets
     /// assume the character has been moving the same way).
-    pub fn query_vector(&self, asset: &PoseDbAsset, skel: &RuntimeSkeleton, frame: &FrameFeatures, desired: &DesiredTrajectory) -> Vec<f32> {
+    pub fn query_vector(
+        &self,
+        asset: &PoseDbAsset,
+        skel: &RuntimeSkeleton,
+        frame: &FrameFeatures,
+        desired: &DesiredTrajectory,
+    ) -> Vec<f32> {
         let mut out = Vec::with_capacity(self.dims);
         let speed = desired.velocity.length();
-        let facing = if speed > 1e-4 { desired.velocity / speed } else { Vec3::Z };
+        let facing = if speed > 1e-4 {
+            desired.velocity / speed
+        } else {
+            Vec3::Z
+        };
         for c in &asset.channels {
             match &c.kind {
-                ChannelKind::Trajectory { offsets, position, facing: want_facing, velocity } => {
+                ChannelKind::Trajectory {
+                    offsets,
+                    position,
+                    facing: want_facing,
+                    velocity,
+                } => {
                     for &o in offsets {
-                        push_trajectory(&mut out, *position, *want_facing, *velocity, desired.velocity * o, facing, desired.velocity);
+                        push_trajectory(
+                            &mut out,
+                            *position,
+                            *want_facing,
+                            *velocity,
+                            desired.velocity * o,
+                            facing,
+                            desired.velocity,
+                        );
                     }
                 }
                 other => Self::push_pose_channel(&mut out, skel, other, frame),
@@ -395,7 +593,11 @@ impl PoseIndex {
     }
 
     fn normalised(&self, d: usize, v: f32, standardize: bool) -> f32 {
-        if standardize { (v - self.mean[d]) * self.inv_std[d] } else { v }
+        if standardize {
+            (v - self.mean[d]) * self.inv_std[d]
+        } else {
+            v
+        }
     }
 
     /// Cost of one entry against `query`, with the contribution of each channel.
@@ -410,7 +612,8 @@ impl PoseIndex {
             }
             let mut sum = 0.0;
             for d in s.start..s.start + s.len {
-                let diff = self.normalised(d, row[d], s.standardize) - self.normalised(d, query[d], s.standardize);
+                let diff = self.normalised(d, row[d], s.standardize)
+                    - self.normalised(d, query[d], s.standardize);
                 sum += diff * diff;
             }
             let c = s.weight * sum / s.len as f32;
@@ -439,7 +642,12 @@ impl PoseIndex {
                 .iter()
                 .enumerate()
                 .filter(|(_, e)| e.clip == clip)
-                .min_by(|a, b| (a.1.time - time).abs().total_cmp(&(b.1.time - time).abs()).then(a.0.cmp(&b.0)))
+                .min_by(|a, b| {
+                    (a.1.time - time)
+                        .abs()
+                        .total_cmp(&(b.1.time - time).abs())
+                        .then(a.0.cmp(&b.0))
+                })
                 .map(|(i, _)| i)
         });
         let mut scored: Vec<(f32, usize, Vec<f32>)> = Vec::with_capacity(self.entries.len());
@@ -447,7 +655,9 @@ impl PoseIndex {
             let (mut c, per) = self.cost(i, query);
             c += clips[self.entries[i].clip as usize].cost_bias;
             if continuing == Some(i) {
-                c = (c * (1.0 - node_bias.clamp(0.0, 1.0)) - settings.continuing_pose_bias.max(0.0)).max(0.0);
+                c = (c * (1.0 - node_bias.clamp(0.0, 1.0))
+                    - settings.continuing_pose_bias.max(0.0))
+                .max(0.0);
             }
             scored.push((c, i, per));
         }
@@ -460,9 +670,21 @@ impl PoseIndex {
             clip_time: e.time,
             mirrored: clips[e.clip as usize].mirrored,
             cost,
-            breakdown: self.spans.iter().zip(breakdown).map(|(s, c)| ChannelCost { channel: s.name.clone(), cost: c }).collect(),
+            breakdown: self
+                .spans
+                .iter()
+                .zip(breakdown)
+                .map(|(s, c)| ChannelCost {
+                    channel: s.name.clone(),
+                    cost: c,
+                })
+                .collect(),
             continuing: continuing == Some(entry),
-            candidates: scored.iter().take(settings.candidate_count.max(1) as usize).map(|(c, i, _)| (*i, *c)).collect(),
+            candidates: scored
+                .iter()
+                .take(settings.candidate_count.max(1) as usize)
+                .map(|(c, i, _)| (*i, *c))
+                .collect(),
         })
     }
 
@@ -487,8 +709,16 @@ impl PoseIndex {
     pub fn from_payload(asset: &PoseDbAsset, bytes: &[u8]) -> Option<Self> {
         let spans = layout(asset);
         let want_dims: usize = spans.iter().map(|s| s.len).sum();
-        let u32_at = |o: usize| bytes.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
-        let f32_at = |o: usize| bytes.get(o..o + 4).map(|b| f32::from_le_bytes(b.try_into().unwrap()));
+        let u32_at = |o: usize| {
+            bytes
+                .get(o..o + 4)
+                .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+        };
+        let f32_at = |o: usize| {
+            bytes
+                .get(o..o + 4)
+                .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+        };
         let dims = u32_at(0)? as usize;
         let n = u32_at(4)? as usize;
         if dims != want_dims || bytes.len() != 8 + n * 8 + (n * dims + 2 * dims) * 4 {
@@ -497,18 +727,30 @@ impl PoseIndex {
         let mut o = 8;
         let mut entries = Vec::with_capacity(n);
         for _ in 0..n {
-            entries.push(IndexEntry { clip: u32_at(o)?, time: f32_at(o + 4)? });
+            entries.push(IndexEntry {
+                clip: u32_at(o)?,
+                time: f32_at(o + 4)?,
+            });
             o += 8;
         }
         let mut take = |count: usize| -> Option<Vec<f32>> {
-            let v = (0..count).map(|i| f32_at(o + i * 4)).collect::<Option<Vec<_>>>()?;
+            let v = (0..count)
+                .map(|i| f32_at(o + i * 4))
+                .collect::<Option<Vec<_>>>()?;
             o += count * 4;
             Some(v)
         };
         let features = take(n * dims)?;
         let mean = take(dims)?;
         let inv_std = take(dims)?;
-        Some(Self { spans, dims, entries, features, mean, inv_std })
+        Some(Self {
+            spans,
+            dims,
+            entries,
+            features,
+            mean,
+            inv_std,
+        })
     }
 }
 
@@ -542,21 +784,66 @@ mod tests {
     fn setup() -> (RuntimeSkeleton, Vec<SearchClip>, PoseDbAsset) {
         let skel = RuntimeSkeleton::new("s", &chain_skeleton(3)).unwrap();
         // "walk": b2 oscillates +x over time and the root walks forward; "idle": still
-        let mut walk = clip_asset("walk", 2.0, vec![translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 2.0), translate_track("b2", [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], 2.0)]);
+        let mut walk = clip_asset(
+            "walk",
+            2.0,
+            vec![
+                translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 2.0),
+                translate_track("b2", [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], 2.0),
+            ],
+        );
         walk.features.root_motion.enabled = true;
         let idle = clip_asset("idle", 2.0, vec![]);
         let clips = vec![
-            SearchClip { source_id: "walk".into(), clip: Arc::new(CompiledClip::compile(&walk, &skel)), mirrored: false, looping: false, exclusions: vec![], cost_bias: 0.0 },
-            SearchClip { source_id: "idle".into(), clip: Arc::new(CompiledClip::compile(&idle, &skel)), mirrored: false, looping: false, exclusions: vec![], cost_bias: 0.0 },
+            SearchClip {
+                source_id: "walk".into(),
+                clip: Arc::new(CompiledClip::compile(&walk, &skel)),
+                mirrored: false,
+                looping: false,
+                exclusions: vec![],
+                cost_bias: 0.0,
+            },
+            SearchClip {
+                source_id: "idle".into(),
+                clip: Arc::new(CompiledClip::compile(&idle, &skel)),
+                mirrored: false,
+                looping: false,
+                exclusions: vec![],
+                cost_bias: 0.0,
+            },
         ];
         let mut db = PoseDbAsset::new("db", None);
         db.sampling.interval = 0.25;
         db.sampling.end_margin = 0.5;
-        db.sources.push(PoseDbSource { id: "w".into(), source: PoseSource::Sequence { sequence: pulsar_reflection::AssetRef::new() }, enabled: true, mirrored: false, looping: false, exclusions: vec![], cost_bias: 0.0 });
-        db.channels.push(FeatureChannel { id: "p".into(), name: "hand".into(), weight: 1.0, normalization: Normalization::Standardize, kind: ChannelKind::BonePosition { bone: "b2".into() } });
+        db.sources.push(PoseDbSource {
+            id: "w".into(),
+            source: PoseSource::Sequence {
+                sequence: pulsar_reflection::AssetRef::new(),
+            },
+            enabled: true,
+            mirrored: false,
+            looping: false,
+            exclusions: vec![],
+            cost_bias: 0.0,
+        });
         db.channels.push(FeatureChannel {
-            id: "t".into(), name: "traj".into(), weight: 2.0, normalization: Normalization::Standardize,
-            kind: ChannelKind::Trajectory { offsets: vec![0.5], position: true, facing: false, velocity: false },
+            id: "p".into(),
+            name: "hand".into(),
+            weight: 1.0,
+            normalization: Normalization::Standardize,
+            kind: ChannelKind::BonePosition { bone: "b2".into() },
+        });
+        db.channels.push(FeatureChannel {
+            id: "t".into(),
+            name: "traj".into(),
+            weight: 2.0,
+            normalization: Normalization::Standardize,
+            kind: ChannelKind::Trajectory {
+                offsets: vec![0.5],
+                position: true,
+                facing: false,
+                velocity: false,
+            },
         });
         (skel, clips, db)
     }
@@ -589,7 +876,14 @@ mod tests {
         // the walk's pose at t=1.0: hand at x=0.5, moving +z at 2/s -> 1.0 m ahead in 0.5 s
         let pose = clips[0].clip.sample(&skel, 1.0);
         let frame = FrameFeatures::from_pose(&skel, &pose, None, 0.0, 0.5);
-        let q = index.query_vector(&db, &skel, &frame, &DesiredTrajectory { velocity: Vec3::new(0.0, 0.0, 2.0) });
+        let q = index.query_vector(
+            &db,
+            &skel,
+            &frame,
+            &DesiredTrajectory {
+                velocity: Vec3::new(0.0, 0.0, 2.0),
+            },
+        );
         let r = index.search(&clips, &q, None, 0.0, &db.search).unwrap();
         assert_eq!(r.clip, 0);
         assert!((r.clip_time - 1.0).abs() < 0.26, "{}", r.clip_time);
@@ -598,10 +892,25 @@ mod tests {
         // standing still with the hand at rest matches idle
         let idle = clips[1].clip.sample(&skel, 0.5);
         let frame = FrameFeatures::from_pose(&skel, &idle, None, 0.0, 0.0);
-        let q = index.query_vector(&db, &skel, &frame, &DesiredTrajectory { velocity: Vec3::ZERO });
-        assert_eq!(index.search(&clips, &q, None, 0.0, &db.search).unwrap().clip, 1);
+        let q = index.query_vector(
+            &db,
+            &skel,
+            &frame,
+            &DesiredTrajectory {
+                velocity: Vec3::ZERO,
+            },
+        );
+        assert_eq!(
+            index
+                .search(&clips, &q, None, 0.0, &db.search)
+                .unwrap()
+                .clip,
+            1
+        );
         // wrong-size queries find nothing, so the caller plays its fallback
-        assert!(index.search(&clips, &[0.0], None, 0.0, &db.search).is_none());
+        assert!(index
+            .search(&clips, &[0.0], None, 0.0, &db.search)
+            .is_none());
     }
 
     #[test]
@@ -610,17 +919,36 @@ mod tests {
         let index = PoseIndex::build(&db, &skel, &clips, None).unwrap();
         let pose = clips[0].clip.sample(&skel, 1.0);
         let frame = FrameFeatures::from_pose(&skel, &pose, None, 0.0, 0.5);
-        let q = index.query_vector(&db, &skel, &frame, &DesiredTrajectory { velocity: Vec3::new(0.0, 0.0, 2.0) });
-        let free = index.search(&clips, &q, Some((0, 0.0)), 0.0, &db.search).unwrap();
-        let biased = index.search(&clips, &q, Some((0, 1.0)), 0.9, &db.search).unwrap();
+        let q = index.query_vector(
+            &db,
+            &skel,
+            &frame,
+            &DesiredTrajectory {
+                velocity: Vec3::new(0.0, 0.0, 2.0),
+            },
+        );
+        let free = index
+            .search(&clips, &q, Some((0, 0.0)), 0.0, &db.search)
+            .unwrap();
+        let biased = index
+            .search(&clips, &q, Some((0, 1.0)), 0.9, &db.search)
+            .unwrap();
         assert!(biased.cost <= free.cost);
         assert!(biased.continuing || biased.clip == 0);
-        assert_eq!(free, index.search(&clips, &q, Some((0, 0.0)), 0.0, &db.search).unwrap());
+        assert_eq!(
+            free,
+            index
+                .search(&clips, &q, Some((0, 0.0)), 0.0, &db.search)
+                .unwrap()
+        );
         // two identical clips tie: the first wins
         let twin = vec![clips[1].clone(), clips[1].clone()];
         let idx = PoseIndex::build(&db, &skel, &twin, None).unwrap();
         let q0 = idx.features[..idx.dims].to_vec();
-        assert_eq!(idx.search(&twin, &q0, None, 0.0, &db.search).unwrap().clip, 0);
+        assert_eq!(
+            idx.search(&twin, &q0, None, 0.0, &db.search).unwrap().clip,
+            0
+        );
     }
 
     #[test]
@@ -628,14 +956,28 @@ mod tests {
         let (skel, clips, mut db) = setup();
         let mut no_channels = db.clone();
         no_channels.channels.clear();
-        assert!(PoseIndex::build(&no_channels, &skel, &clips, None).unwrap_err().iter().any(|d| d.code == "posedb.no_channels"));
-        db.channels[0].kind = ChannelKind::BonePosition { bone: "missing".into() };
-        assert!(PoseIndex::build(&db, &skel, &clips, None).unwrap_err().iter().any(|d| d.code == "posedb.unknown_bone"));
+        assert!(PoseIndex::build(&no_channels, &skel, &clips, None)
+            .unwrap_err()
+            .iter()
+            .any(|d| d.code == "posedb.no_channels"));
+        db.channels[0].kind = ChannelKind::BonePosition {
+            bone: "missing".into(),
+        };
+        assert!(PoseIndex::build(&db, &skel, &clips, None)
+            .unwrap_err()
+            .iter()
+            .any(|d| d.code == "posedb.unknown_bone"));
         let (skel, clips, mut db) = setup();
         db.sampling.end_margin = 5.0;
-        assert!(PoseIndex::build(&db, &skel, &clips, None).unwrap_err().iter().any(|d| d.code == "posedb.empty"));
+        assert!(PoseIndex::build(&db, &skel, &clips, None)
+            .unwrap_err()
+            .iter()
+            .any(|d| d.code == "posedb.empty"));
         let (skel, _, db) = setup();
-        assert!(PoseIndex::build(&db, &skel, &[], None).unwrap_err().iter().any(|d| d.code == "posedb.no_sources"));
+        assert!(PoseIndex::build(&db, &skel, &[], None)
+            .unwrap_err()
+            .iter()
+            .any(|d| d.code == "posedb.no_sources"));
     }
 
     #[test]
@@ -649,7 +991,15 @@ mod tests {
                     name: n.to_string(),
                     parent: (i > 0).then(|| "root".to_string()),
                     bind_transform: crate::math::Transform {
-                        translation: crate::math::Vec3::new(match i { 1 => 1.0, 2 => -1.0, _ => 0.0 }, 0.0, 0.0),
+                        translation: crate::math::Vec3::new(
+                            match i {
+                                1 => 1.0,
+                                2 => -1.0,
+                                _ => 0.0,
+                            },
+                            0.0,
+                            0.0,
+                        ),
                         ..crate::math::Transform::IDENTITY
                     },
                 })
@@ -663,7 +1013,11 @@ mod tests {
         pose.bones[1].translation = Vec3::new(1.0, 0.5, 0.0); // left arm raised
         pose.root_motion.translation = Vec3::new(1.0, 0.0, 2.0);
         let m = table.mirror(&skel, &pose);
-        assert!((m.bones[2].translation - Vec3::new(-1.0, 0.5, 0.0)).length() < 1e-5, "right arm raised: {:?}", m.bones[2].translation);
+        assert!(
+            (m.bones[2].translation - Vec3::new(-1.0, 0.5, 0.0)).length() < 1e-5,
+            "right arm raised: {:?}",
+            m.bones[2].translation
+        );
         assert!((m.bones[1].translation - Vec3::new(1.0, 0.0, 0.0)).length() < 1e-5);
         assert_eq!(m.root_motion.translation, Vec3::new(-1.0, 0.0, 2.0));
         // mirroring twice is the identity

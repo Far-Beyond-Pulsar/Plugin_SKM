@@ -122,10 +122,6 @@ impl IkRigModel {
             false
         }
     }
-    pub fn select_bone(&mut self, bone: &str) {
-        self.selection = AnimSelection::Bone { id: bone.into() };
-    }
-
     /// Select whatever the bone is: a goal's bone selects the goal, a limited
     /// bone its limit, otherwise the bone itself. This is the viewport pick.
     pub fn pick_bone(&mut self, bone: &str) {
@@ -731,7 +727,10 @@ impl IkRigModel {
         }
         out
     }
+}
 
+#[cfg(test)]
+impl IkRigModel {
     pub fn save(&mut self) -> anyhow::Result<super::document::SaveOutcome> {
         self.doc.save()
     }

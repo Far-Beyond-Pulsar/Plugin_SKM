@@ -515,7 +515,10 @@ impl BlendSpaceModel {
         out.extend(self.asset().diagnostics());
         out
     }
+}
 
+#[cfg(test)]
+impl BlendSpaceModel {
     pub fn save(&mut self) -> anyhow::Result<super::document::SaveOutcome> {
         self.doc.save()
     }

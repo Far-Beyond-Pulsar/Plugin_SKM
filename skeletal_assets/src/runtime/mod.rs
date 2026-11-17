@@ -5,16 +5,16 @@
 //! mutable state lives in the types that start with `Instance`/`State` and is
 //! owned by the component that plays it.
 
-pub mod clip;
-pub mod pose;
+pub mod anim_instance;
 pub mod blendspace;
+pub mod clip;
+pub mod graph;
 pub mod ik;
 pub mod ikrig;
-pub mod retarget;
-pub mod posesearch;
-pub mod montage;
-pub mod graph;
 pub mod memory;
-pub mod anim_instance;
+pub mod montage;
 pub mod playback;
+pub mod pose;
+pub mod posesearch;
+pub mod retarget;
 pub mod rootmotion;

@@ -72,6 +72,7 @@ pub enum Preset {
     /// `bone` and everything below it takes the layer (an upper body from the spine).
     Subtree(String),
     /// Everything except `bone` and what is below it (a lower body).
+    #[cfg(test)]
     Except(String),
 }
 
@@ -96,6 +97,7 @@ pub fn apply_preset(spec: &mut BoneMaskSpec, preset: &Preset) {
             default_weight: 0.0,
             ..Default::default()
         },
+        #[cfg(test)]
         Preset::Except(bone) => BoneMaskSpec {
             branches: vec![MaskBranch {
                 bone: bone.clone(),

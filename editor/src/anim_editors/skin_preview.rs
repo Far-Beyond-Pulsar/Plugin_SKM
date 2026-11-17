@@ -37,7 +37,7 @@ use skeletal_assets::runtime::pose::{Pose, RuntimeSkeleton};
 use skeletal_assets::skeleton::Skeleton;
 use skeletal_assets::skmesh::SkeletalMeshAsset;
 
-use crate::core::{Mat4, Vec3};
+use crate::core::Mat4;
 
 use super::graph_preview::ProjectAssets;
 
@@ -264,6 +264,7 @@ impl MontagePreview {
             .advance(dt, TimeStep::Variable, UpdateMode::Scrub)
     }
 
+    #[cfg(test)]
     pub fn instance(&self) -> &AnimInstance {
         &self.instance
     }
@@ -462,6 +463,7 @@ impl BlendSpacePreview {
             .advance(dt, TimeStep::Variable, UpdateMode::Scrub)
     }
 
+    #[cfg(test)]
     pub fn instance(&self) -> &AnimInstance {
         &self.instance
     }
@@ -488,13 +490,6 @@ pub fn world_of(rig: &Rig, pose: &Pose) -> HashMap<String, Mat4> {
         }
     }
     out
-}
-
-/// Where a bone sits in the pose, for the tests and readouts.
-pub fn bone_position(rig: &Rig, pose: &Pose, bone: &str) -> Option<Vec3> {
-    world_of(rig, pose)
-        .get(bone)
-        .map(|m| m.transform_point(Vec3::ZERO))
 }
 
 /// Load the rig of skeleton `id` from the project, with the mesh the skeleton

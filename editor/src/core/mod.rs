@@ -11,11 +11,11 @@ pub mod sample;
 pub mod serialization;
 pub mod validate;
 
-pub use skeletal_assets::{animation, assets, ids, issue, math, skeleton, skinning, skmesh};
+pub use skeletal_assets::{animation, assets, ids, math, skeleton, skinning, skmesh};
 
 pub use animation::{
     bone_world_transform, evaluate_world_transforms, AnimationClip, BoneTrack, KeyInterpolation,
-    Keyframe, KeyframeTangent,
+    Keyframe,
 };
 pub use ids::{AnimSequenceId, SkeletalMeshId, SkeletonId};
 pub use library::{Library, SkeletonLink};

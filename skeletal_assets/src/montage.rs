@@ -6,7 +6,9 @@
 //! by id. Version 1 migrates on read: all segments go on one `DefaultSlot`
 //! track laid end to end, and section `next_section` names become ids.
 
-use pulsar_reflection::{AnimationMontageAssetKind, AnimationSequenceAssetKind, AssetRef, SkeletonAssetKind};
+use pulsar_reflection::{
+    AnimationMontageAssetKind, AnimationSequenceAssetKind, AssetRef, SkeletonAssetKind,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -254,7 +256,10 @@ impl Default for AnimationMontageAsset {
 }
 
 fn slot_name_ok(name: &str) -> bool {
-    !name.trim().is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ' ')
+    !name.trim().is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ' ')
 }
 
 impl AnimationMontageAsset {
@@ -297,7 +302,10 @@ impl AnimationMontageAsset {
 
     /// Montage length, given each sequence's duration (`None` for unknown).
     /// Segments whose clip length is unknown contribute their start only.
-    pub fn length(&self, duration_of: impl Fn(&AssetRef<AnimationSequenceAssetKind>) -> Option<f32>) -> f32 {
+    pub fn length(
+        &self,
+        duration_of: impl Fn(&AssetRef<AnimationSequenceAssetKind>) -> Option<f32>,
+    ) -> f32 {
         self.segments()
             .map(|s| {
                 let len = s
@@ -333,7 +341,10 @@ impl AnimationMontageAsset {
         let mut slots = std::collections::HashSet::new();
         for track in &self.tracks {
             if !slot_name_ok(&track.slot) || !slot_name_ok(&track.group) {
-                return Err(format!("Slot `{}` / group `{}` need plain names", track.slot, track.group));
+                return Err(format!(
+                    "Slot `{}` / group `{}` need plain names",
+                    track.slot, track.group
+                ));
             }
             if !slots.insert((&track.group, &track.slot)) {
                 return Err(format!(
@@ -360,7 +371,10 @@ impl AnimationMontageAsset {
                     }
                 }
                 if !segment.play_rate.is_finite() || segment.play_rate <= 0.0 {
-                    return Err(format!("Segment `{}` play rate must be positive", segment.id));
+                    return Err(format!(
+                        "Segment `{}` play rate must be positive",
+                        segment.id
+                    ));
                 }
                 if segment.loop_count == 0 {
                     return Err(format!("Segment `{}` must play at least once", segment.id));
@@ -377,15 +391,24 @@ impl AnimationMontageAsset {
             }
             if let Some(next) = &section.next {
                 if !self.sections.iter().any(|s| &s.id == next) {
-                    return Err(format!("Section `{}` links to a section that does not exist", section.name));
+                    return Err(format!(
+                        "Section `{}` links to a section that does not exist",
+                        section.name
+                    ));
                 }
             }
         }
-        ensure_unique("section name", self.sections.iter().map(|s| s.name.as_str()))?;
+        ensure_unique(
+            "section name",
+            self.sections.iter().map(|s| s.name.as_str()),
+        )?;
         let mut ids: Vec<&str> = self.notifies.iter().map(|n| n.id.as_str()).collect();
         ids.extend(self.notify_states.iter().map(|n| n.id.as_str()));
         ensure_unique("notify", ids)?;
-        ensure_unique("payload schema", self.notify_schemas.iter().map(|s| s.id.as_str()))?;
+        ensure_unique(
+            "payload schema",
+            self.notify_schemas.iter().map(|s| s.id.as_str()),
+        )?;
         for schema in &self.notify_schemas {
             schema.validate()?;
         }
@@ -434,31 +457,58 @@ impl AnimationMontageAsset {
     ) -> Vec<Diagnostic> {
         let mut out = Vec::new();
         if self.tracks.iter().all(|t| t.segments.is_empty()) {
-            out.push(Diagnostic::error("montage.empty", "Montage has no segments").repair("Add a segment to a slot track"));
+            out.push(
+                Diagnostic::error("montage.empty", "Montage has no segments")
+                    .repair("Add a segment to a slot track"),
+            );
         }
         for track in &self.tracks {
             let mut spans: Vec<(f32, f32, &str)> = Vec::new();
             for segment in &track.segments {
                 let Some(sequence) = &segment.sequence else {
-                    out.push(Diagnostic::error("montage.empty_segment", "Segment has no sequence").at(&segment.id));
+                    out.push(
+                        Diagnostic::error("montage.empty_segment", "Segment has no sequence")
+                            .at(&segment.id),
+                    );
                     continue;
                 };
-                let Some(duration) = duration_of(sequence) else { continue };
+                let Some(duration) = duration_of(sequence) else {
+                    continue;
+                };
                 if segment.clip_start >= duration {
-                    out.push(Diagnostic::error("montage.trim_outside_clip", "Segment trim starts after the clip ends").at(&segment.id));
+                    out.push(
+                        Diagnostic::error(
+                            "montage.trim_outside_clip",
+                            "Segment trim starts after the clip ends",
+                        )
+                        .at(&segment.id),
+                    );
                 }
                 if segment.clip_end.is_some_and(|e| e > duration) {
-                    out.push(Diagnostic::warning("montage.trim_clamped", "Segment trim end is past the clip end and will be clamped").at(&segment.id));
+                    out.push(
+                        Diagnostic::warning(
+                            "montage.trim_clamped",
+                            "Segment trim end is past the clip end and will be clamped",
+                        )
+                        .at(&segment.id),
+                    );
                 }
-                spans.push((segment.start, segment.start + segment.timeline_length(duration), &segment.id));
+                spans.push((
+                    segment.start,
+                    segment.start + segment.timeline_length(duration),
+                    &segment.id,
+                ));
             }
             spans.sort_by(|a, b| a.0.total_cmp(&b.0));
             for pair in spans.windows(2) {
                 if pair[1].0 < pair[0].1 - 1e-4 {
                     out.push(
-                        Diagnostic::error("montage.segment_overlap", format!("Segments overlap on slot `{}`", track.slot))
-                            .at(pair[1].2)
-                            .repair("Move or trim one of the overlapping segments"),
+                        Diagnostic::error(
+                            "montage.segment_overlap",
+                            format!("Segments overlap on slot `{}`", track.slot),
+                        )
+                        .at(pair[1].2)
+                        .repair("Move or trim one of the overlapping segments"),
                     );
                 }
             }
@@ -466,7 +516,13 @@ impl AnimationMontageAsset {
         let length = self.length(&duration_of);
         for section in &self.sections {
             if length > 0.0 && section.start > length {
-                out.push(Diagnostic::error("montage.section_outside", "Section starts after the montage ends").at(&section.id));
+                out.push(
+                    Diagnostic::error(
+                        "montage.section_outside",
+                        "Section starts after the montage ends",
+                    )
+                    .at(&section.id),
+                );
             }
         }
         if let Some(first) = self.sections.iter().map(|s| s.start).reduce(f32::min) {
@@ -479,26 +535,50 @@ impl AnimationMontageAsset {
         }
         for section in &self.sections {
             let walk = self.section_walk(&section.id);
-            if let Some(last) = walk.last().and_then(|id| self.sections.iter().find(|s| &s.id == id)) {
-                if last.next.as_deref().is_some_and(|n| walk.contains(&n)) && walk.len() == self.sections.len() && self.sections.iter().all(|s| s.next.is_some()) {
-                    out.push(Diagnostic::warning("montage.endless_loop", "Every section links onward, so the montage never ends unless stopped").at(&section.id));
+            if let Some(last) = walk
+                .last()
+                .and_then(|id| self.sections.iter().find(|s| &s.id == id))
+            {
+                if last.next.as_deref().is_some_and(|n| walk.contains(&n))
+                    && walk.len() == self.sections.len()
+                    && self.sections.iter().all(|s| s.next.is_some())
+                {
+                    out.push(
+                        Diagnostic::warning(
+                            "montage.endless_loop",
+                            "Every section links onward, so the montage never ends unless stopped",
+                        )
+                        .at(&section.id),
+                    );
                     break;
                 }
             }
         }
         for state in &self.notify_states {
             if length > 0.0 && state.end > length {
-                out.push(Diagnostic::error("montage.notify_state_outside", "Notify state ends after the montage ends").at(&state.id));
+                out.push(
+                    Diagnostic::error(
+                        "montage.notify_state_outside",
+                        "Notify state ends after the montage ends",
+                    )
+                    .at(&state.id),
+                );
             }
         }
         for notify in &self.notifies {
             if length > 0.0 && notify.time > length {
-                out.push(Diagnostic::error("montage.notify_outside", "Notify is after the montage ends").at(&notify.id));
+                out.push(
+                    Diagnostic::error("montage.notify_outside", "Notify is after the montage ends")
+                        .at(&notify.id),
+                );
             }
         }
         if let Some(t) = self.blend_out_time {
             if length > 0.0 && t > length {
-                out.push(Diagnostic::warning("montage.blend_out_longer", "Blend-out trigger is longer than the montage"));
+                out.push(Diagnostic::warning(
+                    "montage.blend_out_longer",
+                    "Blend-out trigger is longer than the montage",
+                ));
             }
         }
         out
@@ -506,41 +586,66 @@ impl AnimationMontageAsset {
 }
 
 fn migrate_v1(value: &mut Value, migration: &mut Migration) {
-    let Some(object) = value.as_object_mut() else { return };
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
     if !object.contains_key("id") {
         object.insert("id".into(), Value::String(uuid::Uuid::new_v4().to_string()));
         migration.id_assigned = true;
-        migration.notes.push("File had no id; one was assigned and must be saved".into());
+        migration
+            .notes
+            .push("File had no id; one was assigned and must be saved".into());
     }
-    let namespace = object.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let namespace = object
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
 
     // Segments: one DefaultSlot track, laid end to end. Version 1 stored only a
     // start offset into the clip, so the timeline position is not recoverable;
     // each segment starts where the previous nominally began plus nothing, and
     // the user re-times them in the editor.
-    let old_segments = object.remove("segments").and_then(|s| match s {
-        Value::Array(a) => Some(a),
-        _ => None,
-    }).unwrap_or_default();
+    let old_segments = object
+        .remove("segments")
+        .and_then(|s| match s {
+            Value::Array(a) => Some(a),
+            _ => None,
+        })
+        .unwrap_or_default();
     let mut segments = Vec::new();
     for (index, segment) in old_segments.into_iter().enumerate() {
-        let Value::Object(mut old) = segment else { continue };
+        let Value::Object(mut old) = segment else {
+            continue;
+        };
         let mut new = serde_json::Map::new();
-        new.insert("id".into(), Value::String(derived_uuid(&namespace, &format!("segment:{index}"))));
+        new.insert(
+            "id".into(),
+            Value::String(derived_uuid(&namespace, &format!("segment:{index}"))),
+        );
         if let Some(sequence) = old.remove("sequence") {
             new.insert("sequence".into(), sequence);
         }
         // `start` in v1 is the offset into the clip.
         new.insert("start".into(), Value::from(0.0));
-        new.insert("clip_start".into(), old.remove("start").unwrap_or(Value::from(0.0)));
+        new.insert(
+            "clip_start".into(),
+            old.remove("start").unwrap_or(Value::from(0.0)),
+        );
         if let Some(rate) = old.remove("play_rate") {
             new.insert("play_rate".into(), rate);
         }
         // A looping v1 segment had no count; two plays keeps it observably
         // repeating without inventing an endless loop.
-        if old.remove("looping").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if old
+            .remove("looping")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             new.insert("loop_count".into(), Value::from(2));
-            migration.notes.push(format!("Segment {index} looped; migrated to loop_count 2"));
+            migration
+                .notes
+                .push(format!("Segment {index} looped; migrated to loop_count 2"));
         }
         for (k, v) in old {
             new.insert(k, v);
@@ -548,7 +653,9 @@ fn migrate_v1(value: &mut Value, migration: &mut Migration) {
         segments.push(Value::Object(new));
     }
     if !segments.is_empty() {
-        migration.notes.push("Segments moved to DefaultSlot track; timeline starts need review".into());
+        migration
+            .notes
+            .push("Segments moved to DefaultSlot track; timeline starts need review".into());
         let track = serde_json::json!({
             "id": derived_uuid(&namespace, "track:default"),
             "slot": DEFAULT_SLOT,
@@ -573,13 +680,21 @@ fn migrate_v1(value: &mut Value, migration: &mut Migration) {
         };
         let mut migrated = Vec::new();
         for (index, section) in sections.into_iter().enumerate() {
-            let Value::Object(mut old) = section else { continue };
+            let Value::Object(mut old) = section else {
+                continue;
+            };
             let mut new = serde_json::Map::new();
-            new.insert("id".into(), Value::String(derived_uuid(&namespace, &format!("section:{index}"))));
+            new.insert(
+                "id".into(),
+                Value::String(derived_uuid(&namespace, &format!("section:{index}"))),
+            );
             if let Some(name) = old.remove("name") {
                 new.insert("name".into(), name);
             }
-            new.insert("start".into(), old.remove("start").unwrap_or(Value::from(0.0)));
+            new.insert(
+                "start".into(),
+                old.remove("start").unwrap_or(Value::from(0.0)),
+            );
             if let Some(end) = old.remove("end") {
                 // Version 2 derives a section's end from the next section.
                 new.insert("legacy_end".into(), end);
@@ -589,7 +704,9 @@ fn migrate_v1(value: &mut Value, migration: &mut Migration) {
                     Some(id) => {
                         new.insert("next".into(), Value::String(id));
                     }
-                    None => migration.notes.push(format!("Section {index} linked to missing section `{next}`; link dropped")),
+                    None => migration.notes.push(format!(
+                        "Section {index} linked to missing section `{next}`; link dropped"
+                    )),
                 }
             }
             for (k, v) in old {

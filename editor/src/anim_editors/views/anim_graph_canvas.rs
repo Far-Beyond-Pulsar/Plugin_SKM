@@ -11,8 +11,7 @@ use std::sync::{Arc, RwLock};
 
 use graphy::core::GraphComment;
 use graphy::{
-    Compatibility, DataType, GraphDescription, NodeInstance, PinInstance, Position,
-    StructuralResolver, TypeResolver,
+    Compatibility, DataType, NodeInstance, PinInstance, Position, StructuralResolver, TypeResolver,
 };
 #[cfg(test)]
 use graphy_blueprint as authored;
@@ -26,7 +25,7 @@ use serde_json::Value;
 use skeletal_assets::anim_graph::catalogue::{
     node_def, AnimPinType, GraphKind, ParamType, PropKind, CATALOGUE,
 };
-use skeletal_assets::anim_graph::{instantiate_node, AnimationGraphAsset};
+use skeletal_assets::anim_graph::instantiate_node;
 
 // ---- authored <-> canvas ---------------------------------------------------
 
@@ -270,11 +269,6 @@ impl CoreType for AnimPinType {
     fn data_type_core(self) -> DataType {
         DataType::typed(self.type_name())
     }
-}
-
-/// Used by tests: the pose graph of a fresh asset as a canvas document.
-pub fn main_canvas(asset: &AnimationGraphAsset) -> GraphDescription {
-    to_canvas(&asset.main)
 }
 
 #[cfg(test)]

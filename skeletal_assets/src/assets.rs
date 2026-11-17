@@ -263,7 +263,8 @@ pub fn load_skeleton_asset(path: &Path) -> anyhow::Result<SkeletonAsset> {
 
 pub fn save_skeleton_asset(path: &Path, asset: &SkeletonAsset) -> anyhow::Result<()> {
     asset.sockets.validate(&asset.skeleton())?;
-    super::bone_mask::validate_library(&asset.masks, &asset.skeleton()).map_err(anyhow::Error::msg)?;
+    super::bone_mask::validate_library(&asset.masks, &asset.skeleton())
+        .map_err(anyhow::Error::msg)?;
     write_text(path, &asset.to_text())
 }
 

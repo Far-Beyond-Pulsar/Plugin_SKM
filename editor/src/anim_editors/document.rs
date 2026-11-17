@@ -11,7 +11,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use pulsar_reflection::AssetKind;
 use skeletal_assets::anim_graph::AnimationGraphAsset;
 use skeletal_assets::blend_space::BlendSpaceAsset;
 use skeletal_assets::ik_retarget::IkRetargetAsset;
@@ -21,12 +20,10 @@ use skeletal_assets::pose_db::PoseDbAsset;
 use skeletal_assets::retarget::RetargetProfileAsset;
 
 use super::store::DocStore;
-use plugin_editor_api::undo::{lock, History, SharedHistory, UndoEntry};
+use plugin_editor_api::undo::{lock, SharedHistory, UndoEntry};
 
 /// What every animation asset kind offers the editor.
 pub trait AnimAsset: Clone + Send + 'static {
-    /// `AssetKind::KIND` of the asset, as recorded in the file index.
-    const KIND: &'static str;
     /// Parse and migrate. The flag is true when an id had to be assigned and
     /// the file should be written once so it stays stable.
     fn parse_text(text: &str) -> Result<(Self, bool), String>;
@@ -276,9 +273,8 @@ impl<A: AnimAsset> AnimDocument<A> {
 }
 
 macro_rules! migrating_asset {
-    ($ty:ty, $kind:expr) => {
+    ($ty:ty) => {
         impl AnimAsset for $ty {
-            const KIND: &'static str = $kind;
             fn parse_text(text: &str) -> Result<(Self, bool), String> {
                 <$ty>::parse_migrating(text)
                     .map(|(a, m)| (a, m.id_assigned))
@@ -301,9 +297,8 @@ macro_rules! migrating_asset {
 }
 
 macro_rules! plain_asset {
-    ($ty:ty, $kind:expr) => {
+    ($ty:ty) => {
         impl AnimAsset for $ty {
-            const KIND: &'static str = $kind;
             fn parse_text(text: &str) -> Result<(Self, bool), String> {
                 <$ty>::parse(text)
                     .map(|a| (a, false))
@@ -325,28 +320,13 @@ macro_rules! plain_asset {
     };
 }
 
-migrating_asset!(
-    BlendSpaceAsset,
-    pulsar_reflection::BlendSpaceAssetKind::KIND
-);
-migrating_asset!(
-    AnimationMontageAsset,
-    pulsar_reflection::AnimationMontageAssetKind::KIND
-);
-migrating_asset!(
-    AnimationGraphAsset,
-    pulsar_reflection::AnimationGraphAssetKind::KIND
-);
-plain_asset!(
-    RetargetProfileAsset,
-    pulsar_reflection::RetargetProfileAssetKind::KIND
-);
-plain_asset!(IkRigAsset, pulsar_reflection::IkRigAssetKind::KIND);
-plain_asset!(
-    IkRetargetAsset,
-    pulsar_reflection::IkRetargeterAssetKind::KIND
-);
-plain_asset!(PoseDbAsset, pulsar_reflection::PoseDatabaseAssetKind::KIND);
+migrating_asset!(BlendSpaceAsset);
+migrating_asset!(AnimationMontageAsset);
+migrating_asset!(AnimationGraphAsset);
+plain_asset!(RetargetProfileAsset);
+plain_asset!(IkRigAsset);
+plain_asset!(IkRetargetAsset);
+plain_asset!(PoseDbAsset);
 
 #[cfg(test)]
 mod tests {

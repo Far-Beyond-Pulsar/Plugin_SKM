@@ -257,7 +257,9 @@ impl CompiledClip {
     /// their bind pose.
     pub fn sample(&self, skel: &RuntimeSkeleton, time: f32) -> Pose {
         let time = time.clamp(0.0, self.duration);
-        let bones = (0..skel.len()).map(|b| self.sample_bone(b, time, skel.bind[b])).collect();
+        let bones = (0..skel.len())
+            .map(|b| self.sample_bone(b, time, skel.bind[b]))
+            .collect();
         let mut pose = Pose::from_bones(bones);
         pose.curves = self.sample_curves(time);
         pose
@@ -266,7 +268,9 @@ impl CompiledClip {
     pub fn sample_curves(&self, time: f32) -> Curves {
         let mut out = Curves::new();
         for curve in &self.curves {
-            let Some(value) = curve.sample(time) else { continue };
+            let Some(value) = curve.sample(time) else {
+                continue;
+            };
             // Vector curves are exposed per component: `name.x`, `name.y`, `name.z`.
             match value {
                 CurveValue::Float(v) => {
@@ -289,12 +293,20 @@ impl CompiledClip {
             chain.push(p);
             at = p;
         }
-        chain.iter().rev().fold(Mat4::IDENTITY, |acc, &b| acc * self.sample_bone(b, time, skel.bind[b]).to_mat4())
+        chain.iter().rev().fold(Mat4::IDENTITY, |acc, &b| {
+            acc * self.sample_bone(b, time, skel.bind[b]).to_mat4()
+        })
     }
 
     /// The rigid part of the root-motion source bone at `time`: enabled
     /// translation axes and, when enabled, rotation.
-    fn motion_at(&self, skel: &RuntimeSkeleton, bone: usize, time: f32, s: &RootMotionSettings) -> RootMotion {
+    fn motion_at(
+        &self,
+        skel: &RuntimeSkeleton,
+        bone: usize,
+        time: f32,
+        s: &RootMotionSettings,
+    ) -> RootMotion {
         let m = self.motion_bone_mesh(skel, bone, time.clamp(0.0, self.duration));
         let (_, r, t) = m.to_scale_rotation_translation();
         RootMotion {
@@ -303,7 +315,11 @@ impl CompiledClip {
                 if s.translation[1] { t.y } else { 0.0 },
                 if s.translation[2] { t.z } else { 0.0 },
             ),
-            rotation: if s.rotation { r.normalize() } else { Quat::IDENTITY },
+            rotation: if s.rotation {
+                r.normalize()
+            } else {
+                Quat::IDENTITY
+            },
         }
     }
 
@@ -311,7 +327,13 @@ impl CompiledClip {
     /// `to` (unbounded positions, so a looping player passes its running
     /// total). Reverse playback is the inverse of the forward motion. Loop
     /// seams compose: whole cycles contribute the clip's start-to-end motion.
-    pub fn root_motion_between(&self, skel: &RuntimeSkeleton, from: f64, to: f64, looping: bool) -> RootMotion {
+    pub fn root_motion_between(
+        &self,
+        skel: &RuntimeSkeleton,
+        from: f64,
+        to: f64,
+        looping: bool,
+    ) -> RootMotion {
         if !self.root_motion.enabled {
             return RootMotion::IDENTITY;
         }
@@ -321,12 +343,30 @@ impl CompiledClip {
     /// The root bone's motion between two play positions with every axis and
     /// rotation included, whether or not root motion is enabled for playback.
     /// Pose Search trajectories are built from this.
-    pub fn trajectory_between(&self, skel: &RuntimeSkeleton, from: f64, to: f64, looping: bool) -> RootMotion {
-        let all = RootMotionSettings { enabled: true, source_bone: None, translation: [true; 3], rotation: true };
+    pub fn trajectory_between(
+        &self,
+        skel: &RuntimeSkeleton,
+        from: f64,
+        to: f64,
+        looping: bool,
+    ) -> RootMotion {
+        let all = RootMotionSettings {
+            enabled: true,
+            source_bone: None,
+            translation: [true; 3],
+            rotation: true,
+        };
         self.motion_between(skel, from, to, looping, &all)
     }
 
-    fn motion_between(&self, skel: &RuntimeSkeleton, from: f64, to: f64, looping: bool, settings: &RootMotionSettings) -> RootMotion {
+    fn motion_between(
+        &self,
+        skel: &RuntimeSkeleton,
+        from: f64,
+        to: f64,
+        looping: bool,
+        settings: &RootMotionSettings,
+    ) -> RootMotion {
         let Some(bone) = self.root_bone else {
             return RootMotion::IDENTITY;
         };
@@ -334,7 +374,9 @@ impl CompiledClip {
             return RootMotion::IDENTITY;
         }
         if to < from {
-            return self.motion_between(skel, to, from, looping, settings).inverse();
+            return self
+                .motion_between(skel, to, from, looping, settings)
+                .inverse();
         }
         let dur = self.duration as f64;
         let at = |t: f32| self.motion_at(skel, bone, t, settings);
@@ -363,13 +405,20 @@ impl CompiledClip {
     /// Remove the root-motion source's accumulated motion from a sampled pose
     /// so applying the delta to the actor does not move the character twice.
     /// The source keeps the rest of its animation relative to its start frame.
-    pub fn remove_root_motion(&self, skel: &RuntimeSkeleton, bones: &mut [BoneTransform], time: f32) {
+    pub fn remove_root_motion(
+        &self,
+        skel: &RuntimeSkeleton,
+        bones: &mut [BoneTransform],
+        time: f32,
+    ) {
         let Some(bone) = self.root_bone.filter(|_| self.root_motion.enabled) else {
             return;
         };
         let time = time.clamp(0.0, self.duration);
         let full = self.motion_bone_mesh(skel, bone, time);
-        let motion_now = self.motion_at(skel, bone, time, &self.root_motion).to_mat4();
+        let motion_now = self
+            .motion_at(skel, bone, time, &self.root_motion)
+            .to_mat4();
         let motion_start = self.motion_at(skel, bone, 0.0, &self.root_motion).to_mat4();
         let residual = motion_start * motion_now.inverse() * full;
         let local = match skel.parents[bone] {
@@ -417,35 +466,72 @@ pub(crate) mod tests {
     use crate::runtime::pose::tests::chain_skeleton;
 
     pub(crate) fn clip_asset(name: &str, duration: f32, tracks: Vec<BoneTrack>) -> AnimSeqAsset {
-        AnimSeqAsset::new(None, AnimationClip { name: name.into(), duration, fps: 30.0, tracks })
+        AnimSeqAsset::new(
+            None,
+            AnimationClip {
+                name: name.into(),
+                duration,
+                fps: 30.0,
+                tracks,
+            },
+        )
     }
 
-    pub(crate) fn translate_track(bone: &str, from: [f32; 3], to: [f32; 3], duration: f32) -> BoneTrack {
-        let t = |p: [f32; 3]| Transform { translation: AV3::new(p[0], p[1], p[2]), ..Transform::IDENTITY };
-        BoneTrack { bone_id: bone.into(), keyframes: vec![Keyframe::linear(0.0, t(from)), Keyframe::linear(duration, t(to))] }
+    pub(crate) fn translate_track(
+        bone: &str,
+        from: [f32; 3],
+        to: [f32; 3],
+        duration: f32,
+    ) -> BoneTrack {
+        let t = |p: [f32; 3]| Transform {
+            translation: AV3::new(p[0], p[1], p[2]),
+            ..Transform::IDENTITY
+        };
+        BoneTrack {
+            bone_id: bone.into(),
+            keyframes: vec![
+                Keyframe::linear(0.0, t(from)),
+                Keyframe::linear(duration, t(to)),
+            ],
+        }
     }
 
     #[test]
     fn samples_between_keys_and_holds_outside() {
         let skel = RuntimeSkeleton::new("s", &chain_skeleton(2)).unwrap();
-        let asset = clip_asset("c", 1.0, vec![translate_track("b1", [0.0, 1.0, 0.0], [2.0, 1.0, 0.0], 1.0)]);
+        let asset = clip_asset(
+            "c",
+            1.0,
+            vec![translate_track("b1", [0.0, 1.0, 0.0], [2.0, 1.0, 0.0], 1.0)],
+        );
         let clip = CompiledClip::compile(&asset, &skel);
         assert!((clip.sample(&skel, 0.5).bones[1].translation.x - 1.0).abs() < 1e-5);
         assert!((clip.sample(&skel, 9.0).bones[1].translation.x - 2.0).abs() < 1e-5);
-        assert_eq!(clip.sample(&skel, 0.5).bones[0].translation, skel.bind[0].translation);
+        assert_eq!(
+            clip.sample(&skel, 0.5).bones[0].translation,
+            skel.bind[0].translation
+        );
     }
 
     #[test]
     fn root_motion_composes_across_loop_seams_and_reverses() {
         let skel = RuntimeSkeleton::new("s", &chain_skeleton(2)).unwrap();
-        let mut asset = clip_asset("c", 1.0, vec![translate_track("b0", [0.0, 0.0, 0.0], [0.0, 0.0, 4.0], 1.0)]);
+        let mut asset = clip_asset(
+            "c",
+            1.0,
+            vec![translate_track("b0", [0.0, 0.0, 0.0], [0.0, 0.0, 4.0], 1.0)],
+        );
         asset.features.root_motion.enabled = true;
         let clip = CompiledClip::compile(&asset, &skel);
         let d = clip.root_motion_between(&skel, 0.0, 0.5, true);
         assert!((d.translation.z - 2.0).abs() < 1e-4);
         // 0.75 -> 2.25 crosses two seams: 1 (to end) + 4 (a cycle) + 1 (0..0.25)... = 6
         let across = clip.root_motion_between(&skel, 0.75, 2.25, true);
-        assert!((across.translation.z - 6.0).abs() < 1e-3, "{:?}", across.translation);
+        assert!(
+            (across.translation.z - 6.0).abs() < 1e-3,
+            "{:?}",
+            across.translation
+        );
         // splitting the interval changes nothing
         let a = clip.root_motion_between(&skel, 0.75, 1.5, true);
         let b = clip.root_motion_between(&skel, 1.5, 2.25, true);
@@ -460,7 +546,11 @@ pub(crate) mod tests {
     #[test]
     fn removing_root_motion_leaves_the_residual_pose_in_place() {
         let skel = RuntimeSkeleton::new("s", &chain_skeleton(2)).unwrap();
-        let mut asset = clip_asset("c", 1.0, vec![translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 1.0)]);
+        let mut asset = clip_asset(
+            "c",
+            1.0,
+            vec![translate_track("b0", [0.0; 3], [0.0, 0.0, 4.0], 1.0)],
+        );
         asset.features.root_motion.enabled = true;
         let clip = CompiledClip::compile(&asset, &skel);
         let mut pose = clip.sample(&skel, 0.5);

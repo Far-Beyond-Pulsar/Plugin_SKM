@@ -31,7 +31,7 @@ use crate::core::asset_index;
 use super::anim_graph_canvas::{to_authored, to_canvas, AnimProfile, ParamTypes};
 use super::chrome::{
     edit, empty_inspector, fmt_f32, frame, labelled, parse_f32, section, value_row, Chrome,
-    EditorBody, EditorHost, EditorModel, Widgets,
+    EditorBody, EditorHost, Widgets,
 };
 use super::skeleton_canvas;
 

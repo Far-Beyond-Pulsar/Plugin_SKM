@@ -15,6 +15,7 @@ use skeletal_assets::montage::{
     AnimationMontageAsset, BlendCurve, InterruptPolicy, MontageRootMotion, MontageSection,
     MontageSegment, SlotTrack,
 };
+#[cfg(test)]
 use skeletal_assets::notifies::{NotifyTarget, NotifyValue};
 
 use super::document::AnimDocument;
@@ -907,75 +908,6 @@ impl MontageModel {
         )
     }
 
-    pub fn delete_notify(&mut self, id: &str) -> bool {
-        let deleted = self.notify_edit("Delete notify", None, |v, _| {
-            let c = v.delete(id);
-            (c, c)
-        });
-        if deleted
-            && matches!(&self.selection, AnimSelection::Notify { id: s } | AnimSelection::NotifyState { id: s } if s == id)
-        {
-            self.selection = AnimSelection::None;
-        }
-        deleted
-    }
-
-    pub fn rename_notify(&mut self, id: &str, name: &str) -> bool {
-        self.notify_edit("Rename notify", Some(&format!("nname:{id}")), |v, _| {
-            let c = v.rename(id, name);
-            (c, c)
-        })
-    }
-
-    pub fn set_notify_field(
-        &mut self,
-        id: &str,
-        name: &str,
-        value: NotifyValue,
-    ) -> Result<bool, String> {
-        let result = self.notify_edit(
-            "Edit notify payload",
-            Some(&format!("nfield:{id}:{name}")),
-            |v, _| match v.set_field(id, name, value) {
-                Ok(c) => (c, Ok(c)),
-                Err(e) => (false, Err(e)),
-            },
-        );
-        result
-    }
-
-    pub fn remove_notify_field(&mut self, id: &str, name: &str) -> bool {
-        self.notify_edit("Remove notify field", None, |v, _| {
-            let c = v.remove_field(id, name);
-            (c, c)
-        })
-    }
-
-    pub fn set_notify_target(&mut self, id: &str, target: NotifyTarget) -> Result<bool, String> {
-        self.notify_edit("Set notify target", None, |v, _| {
-            match v.set_target(id, target) {
-                Ok(c) => (c, Ok(c)),
-                Err(e) => (false, Err(e)),
-            }
-        })
-    }
-
-    pub fn set_notify_schema(&mut self, id: &str, schema: Option<&str>) -> Result<bool, String> {
-        self.notify_edit("Set payload schema", None, |v, _| {
-            match v.set_schema(id, schema) {
-                Ok(c) => (c, Ok(c)),
-                Err(e) => (false, Err(e)),
-            }
-        })
-    }
-
-    pub fn set_state_disabled(&mut self, id: &str, disabled: bool) -> bool {
-        self.notify_edit("Toggle notify state", None, |v, _| {
-            let c = v.set_disabled(id, disabled);
-            (c, c)
-        })
-    }
-
     pub fn lane(&self, metrics: &LaneMetrics) -> (Vec<LanePlacement>, usize) {
         let a = self.asset();
         let mut entries: Vec<LaneEntry> = a
@@ -1056,6 +988,55 @@ impl MontageModel {
             .diagnostics(limit),
         );
         out
+    }
+}
+
+#[cfg(test)]
+impl MontageModel {
+    pub fn delete_notify(&mut self, id: &str) -> bool {
+        let deleted = self.notify_edit("Delete notify", None, |v, _| {
+            let c = v.delete(id);
+            (c, c)
+        });
+        if deleted
+            && matches!(&self.selection, AnimSelection::Notify { id: s } | AnimSelection::NotifyState { id: s } if s == id)
+        {
+            self.selection = AnimSelection::None;
+        }
+        deleted
+    }
+
+    pub fn set_notify_field(
+        &mut self,
+        id: &str,
+        name: &str,
+        value: NotifyValue,
+    ) -> Result<bool, String> {
+        let result = self.notify_edit(
+            "Edit notify payload",
+            Some(&format!("nfield:{id}:{name}")),
+            |v, _| match v.set_field(id, name, value) {
+                Ok(c) => (c, Ok(c)),
+                Err(e) => (false, Err(e)),
+            },
+        );
+        result
+    }
+
+    pub fn set_notify_target(&mut self, id: &str, target: NotifyTarget) -> Result<bool, String> {
+        self.notify_edit("Set notify target", None, |v, _| {
+            match v.set_target(id, target) {
+                Ok(c) => (c, Ok(c)),
+                Err(e) => (false, Err(e)),
+            }
+        })
+    }
+
+    pub fn set_state_disabled(&mut self, id: &str, disabled: bool) -> bool {
+        self.notify_edit("Toggle notify state", None, |v, _| {
+            let c = v.set_disabled(id, disabled);
+            (c, c)
+        })
     }
 
     pub fn save(&mut self) -> anyhow::Result<super::document::SaveOutcome> {

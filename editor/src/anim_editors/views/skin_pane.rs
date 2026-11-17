@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use gpui::*;
 use skeletal_assets::runtime::pose::Pose;
-use ui::{v_flex, ActiveTheme, StyledExt};
+use ui::{v_flex, ActiveTheme};
 
 use crate::anim_editors::graph_preview::ProjectAssets;
 use crate::anim_editors::skin_preview::{load_rig, Rig, SkinRenderer};
@@ -45,12 +45,6 @@ impl SkinPane {
         }
     }
 
-    /// Forget the loaded rig (the skeleton or its mesh changed on disk).
-    pub fn invalidate(&mut self) {
-        self.rig = None;
-        self.drawn_key = None;
-    }
-
     /// Draw `pose` unless the frame for `key` is already on screen.
     pub fn draw(&mut self, pose: &Pose, key: u64, palette: &crate::style::Palette) {
         if self.drawn_key == Some(key) {
@@ -76,10 +70,6 @@ impl SkinPane {
 
     pub fn has_gpu(&self) -> bool {
         !matches!(self.renderer, Some(None))
-    }
-
-    pub fn has_mesh(&self) -> bool {
-        matches!(&self.rig, Some((_, Ok(rig))) if rig.mesh.is_some())
     }
 
     /// The frame, or the reason there is none.

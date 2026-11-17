@@ -25,7 +25,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::blend_space::Migration;
-use crate::codec::{self, ensure_unique, from_value, read_envelope, CodecError, Extra, VersionPolicy};
+use crate::codec::{
+    self, ensure_unique, from_value, read_envelope, CodecError, Extra, VersionPolicy,
+};
 use catalogue::{default_properties, node_def, resolve_pins, GraphKind, ParamType, PinSpec};
 
 pub const ANIMATION_GRAPH_EXTENSION: &str = "animgraph";
@@ -89,8 +91,11 @@ pub struct AnimationGraphAsset {
 impl Default for AnimationGraphAsset {
     fn default() -> Self {
         let mut main = GraphDescription::new("AnimGraph");
-        main.add_node(instantiate_node("output", "anim.output_pose", (400.0, 0.0), &|_| None).expect("catalogue node"))
-            .expect("fresh graph");
+        main.add_node(
+            instantiate_node("output", "anim.output_pose", (400.0, 0.0), &|_| None)
+                .expect("catalogue node"),
+        )
+        .expect("fresh graph");
         Self {
             version: ANIM_GRAPH_VERSION,
             id: AssetRef::new(),
@@ -118,10 +123,19 @@ pub fn instantiate_node(
     Some(NodeInstance {
         id: id.to_string(),
         node_type: type_id.to_string(),
-        position: Position { x: position.0, y: position.1 },
+        position: Position {
+            x: position.0,
+            y: position.1,
+        },
         properties,
-        inputs: inputs.iter().map(|p| pin_instance(p, PinType::Input)).collect(),
-        outputs: outputs.iter().map(|p| pin_instance(p, PinType::Output)).collect(),
+        inputs: inputs
+            .iter()
+            .map(|p| pin_instance(p, PinType::Input))
+            .collect(),
+        outputs: outputs
+            .iter()
+            .map(|p| pin_instance(p, PinType::Output))
+            .collect(),
     })
 }
 
@@ -144,13 +158,18 @@ pub fn refresh_node_pins(
     node: &mut NodeInstance,
     param_type: &dyn Fn(&str) -> Option<ParamType>,
 ) -> Vec<String> {
-    let Some(def) = node_def(&node.node_type) else { return Vec::new() };
+    let Some(def) = node_def(&node.node_type) else {
+        return Vec::new();
+    };
     let (inputs, outputs) = resolve_pins(def, &node.properties, param_type);
     let mut lost = Vec::new();
     let mut rebuild = |old: &mut Vec<PinInstance>, wanted: &[PinSpec], direction: PinType| {
         let mut next = Vec::with_capacity(wanted.len());
         for spec in wanted {
-            match old.iter().position(|p| p.id == spec.name && p.pin.data_type == spec.ty.data_type()) {
+            match old
+                .iter()
+                .position(|p| p.id == spec.name && p.pin.data_type == spec.ty.data_type())
+            {
                 Some(i) => next.push(old.remove(i)),
                 None => next.push(pin_instance(spec, direction.clone())),
             }
@@ -166,7 +185,12 @@ pub fn refresh_node_pins(
 }
 
 /// A data connection between two pins, with a deterministic id.
-pub fn data_connection(source: &str, source_pin: &str, target: &str, target_pin: &str) -> Connection {
+pub fn data_connection(
+    source: &str,
+    source_pin: &str,
+    target: &str,
+    target_pin: &str,
+) -> Connection {
     Connection {
         id: format!("{source}.{source_pin}->{target}.{target_pin}"),
         source_node: source.into(),
@@ -187,7 +211,9 @@ impl AnimationGraphAsset {
     }
 
     /// Every graph with its kind: the main graph, then each sub-graph.
-    pub fn graphs(&self) -> impl Iterator<Item = (Option<&AnimSubGraph>, GraphKind, &GraphDescription)> {
+    pub fn graphs(
+        &self,
+    ) -> impl Iterator<Item = (Option<&AnimSubGraph>, GraphKind, &GraphDescription)> {
         std::iter::once((None, GraphKind::Main, &self.main))
             .chain(self.subgraphs.iter().map(|s| (Some(s), s.kind, &s.graph)))
     }
@@ -209,7 +235,13 @@ impl AnimationGraphAsset {
         let mut asset: Self = from_value(value)?;
         asset.version = ANIM_GRAPH_VERSION;
         asset.validate_structure().map_err(CodecError::Invalid)?;
-        Ok((asset, Migration { from_version: from, ..Default::default() }))
+        Ok((
+            asset,
+            Migration {
+                from_version: from,
+                ..Default::default()
+            },
+        ))
     }
 
     pub fn to_text(&self) -> anyhow::Result<String> {
@@ -227,11 +259,17 @@ impl AnimationGraphAsset {
     /// problems (unconnected pins, wrong types) are [`validate::validate`].
     pub fn validate_structure(&self) -> Result<(), String> {
         ensure_unique("parameter", self.parameters.iter().map(|p| p.id.as_str()))?;
-        ensure_unique("parameter name", self.parameters.iter().map(|p| p.name.as_str()))?;
+        ensure_unique(
+            "parameter name",
+            self.parameters.iter().map(|p| p.name.as_str()),
+        )?;
         ensure_unique("sub-graph", self.subgraphs.iter().map(|s| s.id.as_str()))?;
         for parameter in &self.parameters {
             if !parameter.ty.accepts(&parameter.default) {
-                return Err(format!("Parameter `{}` default does not match its type", parameter.name));
+                return Err(format!(
+                    "Parameter `{}` default does not match its type",
+                    parameter.name
+                ));
             }
         }
         for (_, _, graph) in self.graphs() {
@@ -239,7 +277,10 @@ impl AnimationGraphAsset {
             // symptom of hand edits or a bad merge.
             for (key, node) in &graph.nodes {
                 if key != &node.id {
-                    return Err(format!("Node key `{key}` does not match node id `{}`", node.id));
+                    return Err(format!(
+                        "Node key `{key}` does not match node id `{}`",
+                        node.id
+                    ));
                 }
             }
             let ids: Vec<&str> = graph.connections.iter().map(|c| c.id.as_str()).collect();
@@ -250,8 +291,15 @@ impl AnimationGraphAsset {
 
     /// A parameter-name to type lookup for pin resolution.
     pub fn param_types(&self) -> HashMap<String, ParamType> {
-        self.parameters.iter().map(|p| (p.name.clone(), p.ty)).collect()
+        self.parameters
+            .iter()
+            .map(|p| (p.name.clone(), p.ty))
+            .collect()
     }
 }
 
-crate::asset_file_io!(AnimationGraphAsset, load_animation_graph, save_animation_graph);
+crate::asset_file_io!(
+    AnimationGraphAsset,
+    load_animation_graph,
+    save_animation_graph
+);

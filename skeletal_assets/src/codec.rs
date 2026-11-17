@@ -177,7 +177,8 @@ pub fn to_stable_pretty<T: serde::Serialize>(value: &T) -> Result<String, serde_
     fn sort(value: Value) -> Value {
         match value {
             Value::Object(map) => {
-                let mut entries: Vec<(String, Value)> = map.into_iter().map(|(k, v)| (k, sort(v))).collect();
+                let mut entries: Vec<(String, Value)> =
+                    map.into_iter().map(|(k, v)| (k, sort(v))).collect();
                 entries.sort_by(|a, b| a.0.cmp(&b.0));
                 Value::Object(entries.into_iter().collect())
             }

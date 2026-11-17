@@ -49,7 +49,6 @@ pub trait EditorModel {
     fn changed_on_disk(&self) -> bool;
     fn generation(&self) -> u64;
     fn validation(&self) -> Vec<Diagnostic>;
-    fn selection(&self) -> &AnimSelection;
     fn clear_selection(&mut self);
     /// Register this document's history with the host so Undo/Redo and the Edit menu reach it.
     fn adopt_undo(&self, service: &plugin_editor_api::UndoService);
@@ -116,9 +115,6 @@ macro_rules! editor_model {
             }
             fn validation(&self) -> Vec<skeletal_assets::diagnostics::Diagnostic> {
                 <$model>::validation(self)
-            }
-            fn selection(&self) -> &$crate::anim_editors::selection::AnimSelection {
-                &self.selection
             }
             fn adopt_undo(&self, service: &plugin_editor_api::UndoService) {
                 service.adopt(

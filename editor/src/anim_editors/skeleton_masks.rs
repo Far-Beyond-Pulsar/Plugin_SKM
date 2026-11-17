@@ -33,14 +33,10 @@ pub enum MaskOp {
     Delete {
         name: String,
     },
-    /// Edit the rule of one mask.
-    Edit {
-        name: String,
-    },
 }
 
-/// Apply `op` to the skeleton's library. `Edit` is applied by [`edit`] with a closure;
-/// this handles the structural operations and returns the name now in use.
+/// Apply the structural operation `op` to the skeleton's library and return the
+/// name now in use. Editing one mask's rule is [`edit`].
 pub fn apply(asset: &mut SkeletonAsset, op: MaskOp) -> Result<String, String> {
     let name = match op {
         MaskOp::Add { name, spec } => {
@@ -75,7 +71,6 @@ pub fn apply(asset: &mut SkeletonAsset, op: MaskOp) -> Result<String, String> {
             }
             name
         }
-        MaskOp::Edit { name } => name,
     };
     validate_library(&asset.masks, &asset.skeleton())?;
     Ok(name)

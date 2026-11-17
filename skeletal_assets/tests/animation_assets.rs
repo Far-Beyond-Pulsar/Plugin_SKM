@@ -26,10 +26,12 @@ use skeletal_assets::ik_rig::{IkChain, IkGoal, IkRigAsset, IkSolver, SolverKind}
 use skeletal_assets::math::Transform;
 use skeletal_assets::montage::{AnimationMontageAsset, MontageSection, MontageSegment, SlotTrack};
 use skeletal_assets::notifies::{AnimationNotify, NotifyField, NotifyValue};
-use skeletal_assets::notify_schema::{AnimationNotifyState, NotifyFieldDef, NotifyFieldType, NotifyPayloadSchema};
+use skeletal_assets::notify_schema::{
+    AnimationNotifyState, NotifyFieldDef, NotifyFieldType, NotifyPayloadSchema,
+};
 use skeletal_assets::pose_db::{
-    check_index, encode_index, ChannelKind, FeatureChannel, IndexState, Normalization, PoseDbAsset, PoseDbSource,
-    PoseSource,
+    check_index, encode_index, ChannelKind, FeatureChannel, IndexState, Normalization, PoseDbAsset,
+    PoseDbSource, PoseSource,
 };
 use skeletal_assets::retarget::{BoneMapping, ChainMapping, RetargetPose, RetargetProfileAsset};
 use skeletal_assets::skeleton::{Bone, Skeleton};
@@ -41,7 +43,9 @@ const RUN: &str = "aaaaaaaa-0000-4000-8000-000000000002";
 const JUMP: &str = "aaaaaaaa-0000-4000-8000-000000000003";
 
 fn fixture(path: &str) -> String {
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(path);
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(path);
     std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
 }
 
@@ -50,7 +54,12 @@ fn aref<K: AssetKind>(id: &str) -> AssetRef<K> {
 }
 
 fn bone(id: &str, parent: Option<&str>) -> Bone {
-    Bone { id: id.into(), name: id.into(), parent: parent.map(Into::into), bind_transform: Transform::IDENTITY }
+    Bone {
+        id: id.into(),
+        name: id.into(),
+        parent: parent.map(Into::into),
+        bind_transform: Transform::IDENTITY,
+    }
 }
 
 fn skeleton() -> Skeleton {
@@ -76,7 +85,11 @@ fn has(d: &[Diagnostic], code: &str) -> bool {
 
 /// `to_text` then `parse` yields the same document, and writing it again is
 /// byte-identical: a stable round trip.
-fn assert_text_stable<A>(text: &str, parse: impl Fn(&str) -> Result<A, CodecError>, write: impl Fn(&A) -> String) {
+fn assert_text_stable<A>(
+    text: &str,
+    parse: impl Fn(&str) -> Result<A, CodecError>,
+    write: impl Fn(&A) -> String,
+) {
     let first = parse(text).expect("parses");
     let written = write(&first);
     let second = parse(&written).expect("reparses");
@@ -103,7 +116,10 @@ fn blend_space_v1_migrates_keeping_identity_and_assigning_stable_sample_ids() {
 
     // Migrating the same bytes again mints the same sample ids.
     let b = BlendSpaceAsset::parse(&text).unwrap();
-    assert_eq!(a.samples.iter().map(|s| &s.id).collect::<Vec<_>>(), b.samples.iter().map(|s| &s.id).collect::<Vec<_>>());
+    assert_eq!(
+        a.samples.iter().map(|s| &s.id).collect::<Vec<_>>(),
+        b.samples.iter().map(|s| &s.id).collect::<Vec<_>>()
+    );
     let ids: std::collections::HashSet<_> = a.samples.iter().map(|s| s.id.clone()).collect();
     assert_eq!(ids.len(), 3);
 
@@ -122,7 +138,10 @@ fn blend_space_without_an_id_is_assigned_once_by_the_migration_and_never_by_v2()
     assert_eq!(BlendSpaceAsset::parse(&saved).unwrap().id, a.id);
     let mut value: Value = serde_json::from_str(&saved).unwrap();
     value.as_object_mut().unwrap().remove("id");
-    assert_eq!(BlendSpaceAsset::parse(&value.to_string()).unwrap_err(), CodecError::MissingId);
+    assert_eq!(
+        BlendSpaceAsset::parse(&value.to_string()).unwrap_err(),
+        CodecError::MissingId
+    );
 }
 
 #[test]
@@ -138,7 +157,10 @@ fn blend_space_2d_fixture_reports_authoring_problems() {
 #[test]
 fn blend_space_rules_are_enforced_on_read_and_write() {
     let mut a = BlendSpaceAsset::default();
-    a.samples = vec![BlendSample::new(None, 0.0, None), BlendSample::new(None, 1.0, None)];
+    a.samples = vec![
+        BlendSample::new(None, 0.0, None),
+        BlendSample::new(None, 1.0, None),
+    ];
     let good = a.to_text().unwrap();
     assert_text_stable(&good, BlendSpaceAsset::parse, |a| a.to_text().unwrap());
 
@@ -146,14 +168,22 @@ fn blend_space_rules_are_enforced_on_read_and_write() {
     let mut dup = a.clone();
     dup.samples[1].id = dup.samples[0].id.clone();
     assert!(dup.to_text().is_err());
-    assert!(matches!(BlendSpaceAsset::parse(&serde_json::to_string(&dup).unwrap()), Err(CodecError::Invalid(m)) if m.contains("duplicate")));
+    assert!(
+        matches!(BlendSpaceAsset::parse(&serde_json::to_string(&dup).unwrap()), Err(CodecError::Invalid(m)) if m.contains("duplicate"))
+    );
     // dimension mismatch
     let mut bad = a.clone();
     bad.samples[0].y = Some(0.0);
     assert!(bad.to_text().is_err());
     // inverted axis, zero rate, bad phase, unknown leader
     for edit in [
-        (|a: &mut BlendSpaceAsset| a.x_axis = BlendAxis { min: 1.0, max: 0.0, ..BlendAxis::default() }) as fn(&mut BlendSpaceAsset),
+        (|a: &mut BlendSpaceAsset| {
+            a.x_axis = BlendAxis {
+                min: 1.0,
+                max: 0.0,
+                ..BlendAxis::default()
+            }
+        }) as fn(&mut BlendSpaceAsset),
         |a| a.samples[0].play_rate = 0.0,
         |a| a.samples[0].phase_offset = 1.0,
         |a| a.sync.leader = Some("nope".into()),
@@ -177,22 +207,41 @@ fn blend_space_rules_are_enforced_on_read_and_write() {
 
 #[test]
 fn blend_space_unknown_fields_survive_and_versions_are_policed() {
-    let mut value: Value = serde_json::from_str(&BlendSpaceAsset::default().to_text().unwrap()).unwrap();
+    let mut value: Value =
+        serde_json::from_str(&BlendSpaceAsset::default().to_text().unwrap()).unwrap();
     value["from_a_newer_writer"] = json!({ "deep": [1, 2, { "x": null }] });
     let a = BlendSpaceAsset::parse(&value.to_string()).unwrap();
     let back: Value = serde_json::from_str(&a.to_text().unwrap()).unwrap();
     assert_eq!(back["from_a_newer_writer"], value["from_a_newer_writer"]);
 
     value["version"] = 3.into();
-    assert_eq!(BlendSpaceAsset::parse(&value.to_string()).unwrap_err(), CodecError::FutureVersion { found: 3, supported: 2 });
+    assert_eq!(
+        BlendSpaceAsset::parse(&value.to_string()).unwrap_err(),
+        CodecError::FutureVersion {
+            found: 3,
+            supported: 2
+        }
+    );
     value["version"] = 0.into();
-    assert!(matches!(BlendSpaceAsset::parse(&value.to_string()), Err(CodecError::UnsupportedVersion { .. })));
-    assert!(matches!(BlendSpaceAsset::parse("[]"), Err(CodecError::Malformed(_))));
-    assert!(matches!(BlendSpaceAsset::parse("{"), Err(CodecError::Malformed(_))));
+    assert!(matches!(
+        BlendSpaceAsset::parse(&value.to_string()),
+        Err(CodecError::UnsupportedVersion { .. })
+    ));
+    assert!(matches!(
+        BlendSpaceAsset::parse("[]"),
+        Err(CodecError::Malformed(_))
+    ));
+    assert!(matches!(
+        BlendSpaceAsset::parse("{"),
+        Err(CodecError::Malformed(_))
+    ));
     // a reference that is not a UUID is a malformed file, not a silent None
     value["version"] = 2.into();
     value["skeleton"] = "not-a-uuid".into();
-    assert!(matches!(BlendSpaceAsset::parse(&value.to_string()), Err(CodecError::Malformed(_))));
+    assert!(matches!(
+        BlendSpaceAsset::parse(&value.to_string()),
+        Err(CodecError::Malformed(_))
+    ));
 }
 
 // -------------------------------------------------------------------- montage
@@ -203,7 +252,10 @@ fn montage_v1_migrates_to_slot_tracks_with_ids_and_section_links() {
     assert_eq!(a.id.as_str(), "c0a7a600-0000-4000-8000-000000000001");
     assert_eq!(a.tracks.len(), 1);
     let track = &a.tracks[0];
-    assert_eq!((track.slot.as_str(), track.group.as_str()), ("DefaultSlot", "DefaultGroup"));
+    assert_eq!(
+        (track.slot.as_str(), track.group.as_str()),
+        ("DefaultSlot", "DefaultGroup")
+    );
     assert_eq!(track.segments.len(), 2);
     // v1 `start` was the offset into the clip.
     assert_eq!(track.segments[0].clip_start, 0.25);
@@ -213,30 +265,66 @@ fn montage_v1_migrates_to_slot_tracks_with_ids_and_section_links() {
     assert_eq!(track.segments[1].sequence.as_ref().unwrap().as_str(), RUN);
 
     let by_name = |n: &str| a.sections.iter().find(|s| s.name == n).unwrap();
-    assert_eq!(by_name("Start").next.as_deref(), Some(by_name("Loop").id.as_str()));
-    assert_eq!(by_name("Loop").next.as_deref(), Some(by_name("Loop").id.as_str()));
-    assert_eq!(by_name("End").next, None, "a link to a missing section is dropped, not kept dangling");
+    assert_eq!(
+        by_name("Start").next.as_deref(),
+        Some(by_name("Loop").id.as_str())
+    );
+    assert_eq!(
+        by_name("Loop").next.as_deref(),
+        Some(by_name("Loop").id.as_str())
+    );
+    assert_eq!(
+        by_name("End").next,
+        None,
+        "a link to a missing section is dropped, not kept dangling"
+    );
     assert!(m.notes.iter().any(|n| n.contains("Gone")));
     // the dropped v1 `end` is kept on the section, not lost
     assert_eq!(by_name("Start").extra.get("legacy_end"), Some(&json!(0.5)));
 
     let again = AnimationMontageAsset::parse(&fixture("v1/reload.montage")).unwrap();
-    assert_eq!(a.sections.iter().map(|s| &s.id).collect::<Vec<_>>(), again.sections.iter().map(|s| &s.id).collect::<Vec<_>>());
+    assert_eq!(
+        a.sections.iter().map(|s| &s.id).collect::<Vec<_>>(),
+        again.sections.iter().map(|s| &s.id).collect::<Vec<_>>()
+    );
     let saved = a.to_text().unwrap();
-    assert_text_stable(&saved, AnimationMontageAsset::parse, |a| a.to_text().unwrap());
-    assert!(serde_json::from_str::<Value>(&saved).unwrap()["tracks"][0]["segments"][0]["legacy"].is_null());
+    assert_text_stable(&saved, AnimationMontageAsset::parse, |a| {
+        a.to_text().unwrap()
+    });
+    assert!(
+        serde_json::from_str::<Value>(&saved).unwrap()["tracks"][0]["segments"][0]["legacy"]
+            .is_null()
+    );
 }
 
 fn montage_with_two_tracks() -> AnimationMontageAsset {
     let mut a = AnimationMontageAsset::default();
     a.skeleton = Some(aref(SKEL_A));
     let mut lower = SlotTrack::new("LowerBody", "DefaultGroup");
-    lower.segments.push(MontageSegment::new(Some(aref(WALK)), 0.0));
+    lower
+        .segments
+        .push(MontageSegment::new(Some(aref(WALK)), 0.0));
     let mut upper = SlotTrack::new("UpperBody", "DefaultGroup");
-    upper.mask = Some(BoneMaskSpec { branches: vec![MaskBranch { bone: "spine".into(), depth: None, weight: 1.0 }], default_weight: 0.0, ..Default::default() });
-    upper.segments.push(MontageSegment::new(Some(aref(RUN)), 0.5));
+    upper.mask = Some(BoneMaskSpec {
+        branches: vec![MaskBranch {
+            bone: "spine".into(),
+            depth: None,
+            weight: 1.0,
+        }],
+        default_weight: 0.0,
+        ..Default::default()
+    });
+    upper
+        .segments
+        .push(MontageSegment::new(Some(aref(RUN)), 0.5));
     a.tracks = vec![lower, upper];
-    a.sections = vec![MontageSection { id: "s1".into(), name: "Intro".into(), start: 0.0, next: None, extra: Default::default() }];
+    a.sections = vec![MontageSection {
+        id: "s1".into(),
+        name: "Intro".into(),
+        start: 0.0,
+        next: None,
+        extra: Default::default(),
+    }];
     a
 }
 
@@ -244,10 +332,18 @@ fn montage_with_two_tracks() -> AnimationMontageAsset {
 fn montage_round_trips_slots_sections_blends_policy_and_notifies() {
     let mut a = montage_with_two_tracks();
     let mut schema = NotifyPayloadSchema::new("Sound");
-    schema.fields.push(NotifyFieldDef { name: "volume".into(), ty: NotifyFieldType::Float, default: Some(NotifyValue::Float(1.0)), required: false });
+    schema.fields.push(NotifyFieldDef {
+        name: "volume".into(),
+        ty: NotifyFieldType::Float,
+        default: Some(NotifyValue::Float(1.0)),
+        required: false,
+    });
     let mut n = AnimationNotify::new("Shot".into(), 0.4);
     n.schema = Some(schema.id.clone());
-    n.fields = vec![NotifyField { name: "volume".into(), value: NotifyValue::Int(2) }];
+    n.fields = vec![NotifyField {
+        name: "volume".into(),
+        value: NotifyValue::Int(2),
+    }];
     a.notify_schemas = vec![schema];
     a.notifies = vec![n];
     a.notify_states = vec![AnimationNotifyState::new("Reloading", 0.2, 0.9)];
@@ -255,7 +351,9 @@ fn montage_round_trips_slots_sections_blends_policy_and_notifies() {
     a.interrupt = skeletal_assets::montage::InterruptPolicy::StartIfHigherPriority;
     a.priority = 3;
     let text = a.to_text().unwrap();
-    assert_text_stable(&text, AnimationMontageAsset::parse, |a| a.to_text().unwrap());
+    assert_text_stable(&text, AnimationMontageAsset::parse, |a| {
+        a.to_text().unwrap()
+    });
     let b = AnimationMontageAsset::parse(&text).unwrap();
     assert_eq!(b.interrupt, a.interrupt);
     assert_eq!(b.tracks[1].mask, a.tracks[1].mask);
@@ -267,7 +365,10 @@ fn montage_rejects_duplicates_bad_links_and_wrong_payloads_and_reports_overlaps(
     let a = montage_with_two_tracks();
     let mut dup_track = a.clone();
     dup_track.tracks[1].slot = "LowerBody".into();
-    assert!(dup_track.validate_structure().unwrap_err().contains("two tracks"));
+    assert!(dup_track
+        .validate_structure()
+        .unwrap_err()
+        .contains("two tracks"));
     let mut dup_segment = a.clone();
     dup_segment.tracks[1].segments[0].id = dup_segment.tracks[0].segments[0].id.clone();
     assert!(dup_segment.validate_structure().is_err());
@@ -276,18 +377,37 @@ fn montage_rejects_duplicates_bad_links_and_wrong_payloads_and_reports_overlaps(
     assert!(link.validate_structure().is_err());
     let mut dup_notify = a.clone();
     let n = AnimationNotify::new("A".into(), 0.1);
-    dup_notify.notify_states = vec![AnimationNotifyState { id: n.id.clone(), ..AnimationNotifyState::new("B", 0.0, 1.0) }];
+    dup_notify.notify_states = vec![AnimationNotifyState {
+        id: n.id.clone(),
+        ..AnimationNotifyState::new("B", 0.0, 1.0)
+    }];
     dup_notify.notifies = vec![n];
-    assert!(dup_notify.validate_structure().is_err(), "notify and state share one id space");
+    assert!(
+        dup_notify.validate_structure().is_err(),
+        "notify and state share one id space"
+    );
     let mut payload = a.clone();
-    let schema = NotifyPayloadSchema { id: "s".into(), name: "S".into(), fields: vec![NotifyFieldDef { name: "who".into(), ty: NotifyFieldType::String, default: None, required: true }] };
+    let schema = NotifyPayloadSchema {
+        id: "s".into(),
+        name: "S".into(),
+        fields: vec![NotifyFieldDef {
+            name: "who".into(),
+            ty: NotifyFieldType::String,
+            default: None,
+            required: true,
+        }],
+    };
     payload.notify_schemas = vec![schema];
     let mut n = AnimationNotify::new("A".into(), 0.1);
     n.schema = Some("s".into());
     payload.notifies = vec![n];
-    assert!(payload.validate_structure().unwrap_err().contains("Required field"));
+    assert!(payload
+        .validate_structure()
+        .unwrap_err()
+        .contains("Required field"));
     for bad in [
-        (|a: &mut AnimationMontageAsset| a.tracks[0].segments[0].play_rate = 0.0) as fn(&mut AnimationMontageAsset),
+        (|a: &mut AnimationMontageAsset| a.tracks[0].segments[0].play_rate = 0.0)
+            as fn(&mut AnimationMontageAsset),
         |a| a.tracks[0].segments[0].loop_count = 0,
         |a| a.tracks[0].segments[0].clip_end = Some(0.0),
         |a| a.blend_out.duration = -1.0,
@@ -300,14 +420,25 @@ fn montage_rejects_duplicates_bad_links_and_wrong_payloads_and_reports_overlaps(
 
     // overlap + out-of-clip trims are diagnostics with known clip lengths
     let mut overlapping = a.clone();
-    overlapping.tracks[0].segments.push(MontageSegment::new(Some(aref(RUN)), 0.5));
+    overlapping.tracks[0]
+        .segments
+        .push(MontageSegment::new(Some(aref(RUN)), 0.5));
     let d = overlapping.diagnostics(|_| Some(1.0));
     assert!(has(&d, "montage.segment_overlap"), "{:?}", codes(&d));
     let mut trim = a.clone();
     trim.tracks[0].segments[0].clip_start = 5.0;
-    assert!(has(&trim.diagnostics(|_| Some(1.0)), "montage.trim_outside_clip"));
-    assert!(!has(&a.diagnostics(|_| Some(1.0)), "montage.segment_overlap"));
-    assert!(has(&AnimationMontageAsset::default().diagnostics(|_| None), "montage.empty"));
+    assert!(has(
+        &trim.diagnostics(|_| Some(1.0)),
+        "montage.trim_outside_clip"
+    ));
+    assert!(!has(
+        &a.diagnostics(|_| Some(1.0)),
+        "montage.segment_overlap"
+    ));
+    assert!(has(
+        &AnimationMontageAsset::default().diagnostics(|_| None),
+        "montage.empty"
+    ));
 }
 
 // ------------------------------------------------------------------ animseq
@@ -317,17 +448,30 @@ fn animseq_keeps_old_versions_unchanged_and_bumps_to_v4_for_states_and_schemas()
     let v1 = AnimSeqAsset::parse(&fixture("v1/walk_v1.animseq")).unwrap();
     let written: Value = serde_json::from_str(&v1.to_text()).unwrap();
     assert_eq!(written["version"], 1, "an untouched v1 file is not churned");
-    assert_eq!(written["unknown_future_field"], json!({"kept": [1, 2, 3]}), "unknown fields survive a resave");
+    assert_eq!(
+        written["unknown_future_field"],
+        json!({"kept": [1, 2, 3]}),
+        "unknown fields survive a resave"
+    );
 
     let v3 = AnimSeqAsset::parse(&fixture("v1/footstep_v3.animseq")).unwrap();
-    assert_eq!(serde_json::from_str::<Value>(&v3.to_text()).unwrap()["version"], 3);
+    assert_eq!(
+        serde_json::from_str::<Value>(&v3.to_text()).unwrap()["version"],
+        3
+    );
 
     let mut with_state = v3.clone();
-    with_state.features.notify_states.push(AnimationNotifyState::new("Footplant", 0.5, 1.5));
+    with_state
+        .features
+        .notify_states
+        .push(AnimationNotifyState::new("Footplant", 0.5, 1.5));
     let value: Value = serde_json::from_str(&with_state.to_text()).unwrap();
     assert_eq!(value["version"], 4);
     assert_eq!(value["notify_states"][0]["name"], "Footplant");
-    assert_eq!(value["notifies"][0]["name"], "Footstep", "instant notifies keep their v3 shape");
+    assert_eq!(
+        value["notifies"][0]["name"], "Footstep",
+        "instant notifies keep their v3 shape"
+    );
     let back = AnimSeqAsset::parse(&with_state.to_text()).unwrap();
     assert_eq!(back.features, with_state.features);
     assert_eq!(back.id, with_state.id, "identity is stable across the bump");
@@ -341,9 +485,21 @@ fn animseq_notify_states_and_payload_schemas_are_validated() {
         edit(&mut a);
         AnimSeqAsset::parse(&a.to_text())
     };
-    assert!(try_with(&|a| a.features.notify_states.push(AnimationNotifyState::new("Ok", 0.0, 2.0))).is_ok());
-    assert!(try_with(&|a| a.features.notify_states.push(AnimationNotifyState::new("Inverted", 1.0, 0.5))).is_err());
-    assert!(try_with(&|a| a.features.notify_states.push(AnimationNotifyState::new("Past end", 1.0, 3.0))).is_err());
+    assert!(try_with(&|a| a
+        .features
+        .notify_states
+        .push(AnimationNotifyState::new("Ok", 0.0, 2.0)))
+    .is_ok());
+    assert!(try_with(&|a| a
+        .features
+        .notify_states
+        .push(AnimationNotifyState::new("Inverted", 1.0, 0.5)))
+    .is_err());
+    assert!(try_with(&|a| a
+        .features
+        .notify_states
+        .push(AnimationNotifyState::new("Past end", 1.0, 3.0)))
+    .is_err());
     assert!(try_with(&|a| {
         let mut s = AnimationNotifyState::new("Ticks", 0.0, 1.0);
         s.tick_interval = Some(0.0);
@@ -352,7 +508,10 @@ fn animseq_notify_states_and_payload_schemas_are_validated() {
     .is_err());
     assert!(try_with(&|a| {
         let s = AnimationNotifyState::new("Clash", 0.0, 1.0);
-        a.features.notify_states.push(AnimationNotifyState { id: "n-step".into(), ..s })
+        a.features.notify_states.push(AnimationNotifyState {
+            id: "n-step".into(),
+            ..s
+        })
     })
     .is_err());
     // a state referencing an undefined schema
@@ -365,33 +524,61 @@ fn animseq_notify_states_and_payload_schemas_are_validated() {
     // a typed schema: wrong type rejected, defaults resolved, int widens to float
     let mut schema = NotifyPayloadSchema::new("Footstep");
     schema.fields = vec![
-        NotifyFieldDef { name: "surface".into(), ty: NotifyFieldType::String, default: Some(NotifyValue::String("dirt".into())), required: false },
-        NotifyFieldDef { name: "force".into(), ty: NotifyFieldType::Float, default: None, required: true },
+        NotifyFieldDef {
+            name: "surface".into(),
+            ty: NotifyFieldType::String,
+            default: Some(NotifyValue::String("dirt".into())),
+            required: false,
+        },
+        NotifyFieldDef {
+            name: "force".into(),
+            ty: NotifyFieldType::Float,
+            default: None,
+            required: true,
+        },
     ];
     let id = schema.id.clone();
     let ok = try_with(&|a| {
         a.features.notify_schemas = vec![schema.clone()];
         a.features.notifies[0].schema = Some(id.clone());
-        a.features.notifies[0].fields = vec![NotifyField { name: "force".into(), value: NotifyValue::Int(3) }];
+        a.features.notifies[0].fields = vec![NotifyField {
+            name: "force".into(),
+            value: NotifyValue::Int(3),
+        }];
     })
     .unwrap();
-    assert_eq!(serde_json::from_str::<Value>(&ok.to_text()).unwrap()["version"], 4);
+    assert_eq!(
+        serde_json::from_str::<Value>(&ok.to_text()).unwrap()["version"],
+        4
+    );
     let resolved = ok.features.notify_schemas[0].resolve(&ok.features.notifies[0].fields);
-    assert_eq!(resolved.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["surface", "force"]);
+    assert_eq!(
+        resolved.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+        ["surface", "force"]
+    );
     assert_eq!(resolved[1].value, NotifyValue::Float(3.0));
     assert!(try_with(&|a| {
         a.features.notify_schemas = vec![schema.clone()];
         a.features.notifies[0].schema = Some(id.clone());
-        a.features.notifies[0].fields = vec![NotifyField { name: "force".into(), value: NotifyValue::String("hard".into()) }];
+        a.features.notifies[0].fields = vec![NotifyField {
+            name: "force".into(),
+            value: NotifyValue::String("hard".into()),
+        }];
     })
     .is_err());
-    assert!(try_with(&|a| {
-        a.features.notify_schemas = vec![schema.clone()];
-        a.features.notifies[0].schema = Some(id.clone());
-        a.features.notifies[0].fields = vec![];
-    })
-    .is_err(), "required field missing");
-    assert!(try_with(&|a| a.features.notify_schemas = vec![schema.clone(), schema.clone()]).is_err(), "duplicate schema ids");
+    assert!(
+        try_with(&|a| {
+            a.features.notify_schemas = vec![schema.clone()];
+            a.features.notifies[0].schema = Some(id.clone());
+            a.features.notifies[0].fields = vec![];
+        })
+        .is_err(),
+        "required field missing"
+    );
+    assert!(
+        try_with(&|a| a.features.notify_schemas = vec![schema.clone(), schema.clone()]).is_err(),
+        "duplicate schema ids"
+    );
 }
 
 #[test]
@@ -417,16 +604,37 @@ fn animgraph_v1_migrates_preserving_identity_nodes_and_every_dropped_connection(
     assert_eq!(node("sequence_walk").properties["sequence"], WALK);
     assert_eq!(node("sequence_walk").properties["title"], "Walk");
     assert_eq!(node("blend_loco").node_type, "anim.blend_space_player");
-    assert_eq!(node("blend_loco").properties["blend_space"], "b1e4d500-0000-4000-8000-000000000001");
+    assert_eq!(
+        node("blend_loco").properties["blend_space"],
+        "b1e4d500-0000-4000-8000-000000000001"
+    );
     assert_eq!(node("output").node_type, "anim.output_pose");
     // the first connection into the output is kept as a pose wire
     assert_eq!(a.main.connections.len(), 1);
     let c = &a.main.connections[0];
-    assert_eq!((c.source_node.as_str(), c.source_pin.as_str(), c.target_node.as_str(), c.target_pin.as_str()), ("blend_loco", "pose", "output", "pose"));
+    assert_eq!(
+        (
+            c.source_node.as_str(),
+            c.source_pin.as_str(),
+            c.target_node.as_str(),
+            c.target_pin.as_str()
+        ),
+        ("blend_loco", "pose", "output", "pose")
+    );
     // all four others were dropped, reported and kept
     assert_eq!(m.notes.len(), 4, "{:?}", m.notes);
-    assert_eq!(a.extra["migrated_dropped_connections"].as_array().unwrap().len(), 4);
-    assert_eq!(a.extra["future_note"], json!({"keep": true}), "unknown fields survive migration");
+    assert_eq!(
+        a.extra["migrated_dropped_connections"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    assert_eq!(
+        a.extra["future_note"],
+        json!({"keep": true}),
+        "unknown fields survive migration"
+    );
 
     // the migrated graph is a valid animation graph (unused nodes are warnings)
     let d = validate::validate(&a);
@@ -446,15 +654,22 @@ fn animgraph_v1_migrates_preserving_identity_nodes_and_every_dropped_connection(
 fn animgraph_v1_errors_are_reported_not_swallowed() {
     let mut v: Value = serde_json::from_str(&fixture("v1/locomotion.animgraph")).unwrap();
     v["nodes"][0]["type"] = "teleport".into();
-    assert!(matches!(AnimationGraphAsset::parse(&v.to_string()), Err(CodecError::Invalid(m)) if m.contains("teleport")));
+    assert!(
+        matches!(AnimationGraphAsset::parse(&v.to_string()), Err(CodecError::Invalid(m)) if m.contains("teleport"))
+    );
     let mut v: Value = serde_json::from_str(&fixture("v1/locomotion.animgraph")).unwrap();
     v["nodes"][1]["id"] = "sequence_walk".into();
-    assert!(matches!(AnimationGraphAsset::parse(&v.to_string()), Err(CodecError::Invalid(m)) if m.contains("duplicate")));
+    assert!(
+        matches!(AnimationGraphAsset::parse(&v.to_string()), Err(CodecError::Invalid(m)) if m.contains("duplicate"))
+    );
     let mut v: Value = serde_json::from_str(&fixture("v1/locomotion.animgraph")).unwrap();
     v["nodes"][0]["sequence"] = "xyz".into();
     assert!(AnimationGraphAsset::parse(&v.to_string()).is_err());
     v["version"] = 3.into();
-    assert!(matches!(AnimationGraphAsset::parse(&v.to_string()), Err(CodecError::FutureVersion { .. })));
+    assert!(matches!(
+        AnimationGraphAsset::parse(&v.to_string()),
+        Err(CodecError::FutureVersion { .. })
+    ));
 }
 
 fn node(id: &str, ty: &str, params: &[(&str, ParamType)]) -> graphy_blueprint::NodeInstance {
@@ -465,12 +680,19 @@ fn node(id: &str, ty: &str, params: &[(&str, ParamType)]) -> graphy_blueprint::N
 fn locomotion_graph() -> AnimationGraphAsset {
     let mut g = AnimationGraphAsset::default();
     g.skeleton = Some(aref(SKEL_A));
-    g.parameters = vec![GraphParameter::new("Speed", ParamType::Float), GraphParameter::new("Grounded", ParamType::Bool)];
+    g.parameters = vec![
+        GraphParameter::new("Speed", ParamType::Float),
+        GraphParameter::new("Grounded", ParamType::Bool),
+    ];
     let mut walk = node("walk", "anim.sequence_player", &[]);
     walk.properties.insert("sequence".into(), json!(WALK));
     let mut run = node("run", "anim.sequence_player", &[]);
     run.properties.insert("sequence".into(), json!(RUN));
-    let speed = node("speed", "anim.get_parameter", &[("Speed", ParamType::Float)]);
+    let speed = node(
+        "speed",
+        "anim.get_parameter",
+        &[("Speed", ParamType::Float)],
+    );
     let mut speed = speed;
     speed.properties.insert("parameter".into(), json!("Speed"));
     let blend = node("blend", "anim.blend", &[]);
@@ -479,8 +701,16 @@ fn locomotion_graph() -> AnimationGraphAsset {
     for n in [walk, run, speed, blend, slot] {
         g.main.add_node(n).unwrap();
     }
-    for (s, sp, t, tp) in [("walk", "pose", "blend", "a"), ("run", "pose", "blend", "b"), ("speed", "value", "blend", "alpha"), ("blend", "pose", "slot", "source"), ("slot", "pose", "output", "pose")] {
-        g.main.add_connection(data_connection(s, sp, t, tp)).unwrap();
+    for (s, sp, t, tp) in [
+        ("walk", "pose", "blend", "a"),
+        ("run", "pose", "blend", "b"),
+        ("speed", "value", "blend", "alpha"),
+        ("blend", "pose", "slot", "source"),
+        ("slot", "pose", "output", "pose"),
+    ] {
+        g.main
+            .add_connection(data_connection(s, sp, t, tp))
+            .unwrap();
     }
     g
 }
@@ -494,7 +724,12 @@ fn a_connected_locomotion_graph_validates_and_round_trips() {
     assert_text_stable(&text, AnimationGraphAsset::parse, |a| a.to_text().unwrap());
     // references are exposed for the dependency index
     let refs = validate::asset_references(&g);
-    assert_eq!(refs.iter().map(|r| (r.kind, r.id.as_str())).collect::<Vec<_>>(), [("animseq", RUN), ("animseq", WALK)]);
+    assert_eq!(
+        refs.iter()
+            .map(|r| (r.kind, r.id.as_str()))
+            .collect::<Vec<_>>(),
+        [("animseq", RUN), ("animseq", WALK)]
+    );
     assert!(validate::validate_against_skeleton(&g, &skeleton()).is_empty());
 }
 
@@ -509,18 +744,42 @@ fn graph_validation_reports_unknown_missing_mistyped_and_looped_nodes() {
 
     // missing required property and bad enum / range values
     let mut g = locomotion_graph();
-    g.main.nodes.get_mut("walk").unwrap().properties.remove("sequence");
-    g.main.nodes.get_mut("blend").unwrap().properties.insert("curve".into(), json!("bouncy"));
-    g.main.nodes.get_mut("blend").unwrap().properties.insert("alpha".into(), json!(7.0));
+    g.main
+        .nodes
+        .get_mut("walk")
+        .unwrap()
+        .properties
+        .remove("sequence");
+    g.main
+        .nodes
+        .get_mut("blend")
+        .unwrap()
+        .properties
+        .insert("curve".into(), json!("bouncy"));
+    g.main
+        .nodes
+        .get_mut("blend")
+        .unwrap()
+        .properties
+        .insert("alpha".into(), json!(7.0));
     let d = validate::validate(&g);
-    assert_eq!(d.iter().filter(|d| d.code == "graph.bad_property").count(), 2, "{d:?}");
+    assert_eq!(
+        d.iter().filter(|d| d.code == "graph.bad_property").count(),
+        2,
+        "{d:?}"
+    );
     assert!(has(&d, "graph.missing_property"));
 
     // wire type mismatch: additive pose into a pose input, written directly
     // because Graphy's own add_connection also refuses it
     let mut g = locomotion_graph();
-    g.main.add_node(node("make", "anim.make_additive", &[])).unwrap();
-    assert!(g.main.add_connection(data_connection("make", "additive", "blend", "a")).is_err());
+    g.main
+        .add_node(node("make", "anim.make_additive", &[]))
+        .unwrap();
+    assert!(g
+        .main
+        .add_connection(data_connection("make", "additive", "blend", "a"))
+        .is_err());
     let mut forced = data_connection("make", "additive", "walk", "play_rate");
     forced.id = "forced".into();
     g.main.connections.push(forced);
@@ -542,11 +801,20 @@ fn graph_validation_reports_unknown_missing_mistyped_and_looped_nodes() {
     let mut g = AnimationGraphAsset::default();
     g.main.add_node(node("a", "anim.blend", &[])).unwrap();
     g.main.add_node(node("b", "anim.blend", &[])).unwrap();
-    g.main.add_connection(data_connection("a", "pose", "b", "a")).unwrap();
-    g.main.add_connection(data_connection("b", "pose", "a", "a")).unwrap();
-    g.main.add_connection(data_connection("a", "pose", "output", "pose")).unwrap();
+    g.main
+        .add_connection(data_connection("a", "pose", "b", "a"))
+        .unwrap();
+    g.main
+        .add_connection(data_connection("b", "pose", "a", "a"))
+        .unwrap();
+    g.main
+        .add_connection(data_connection("a", "pose", "output", "pose"))
+        .unwrap();
     let d = validate::validate(&g);
-    let cycle = d.iter().find(|d| d.code == "graph.cycle").unwrap_or_else(|| panic!("{d:?}"));
+    let cycle = d
+        .iter()
+        .find(|d| d.code == "graph.cycle")
+        .unwrap_or_else(|| panic!("{d:?}"));
     assert!(cycle.message.contains("a") && cycle.message.contains("b"));
 
     // a node in the wrong kind of graph; a missing terminal
@@ -555,25 +823,42 @@ fn graph_validation_reports_unknown_missing_mistyped_and_looped_nodes() {
     assert!(has(&validate::validate(&g), "graph.wrong_graph_kind"));
     let mut g = locomotion_graph();
     g.main.nodes.remove("slot");
-    g.main.connections.retain(|c| c.source_node != "slot" && c.target_node != "slot");
+    g.main
+        .connections
+        .retain(|c| c.source_node != "slot" && c.target_node != "slot");
     let d = validate::validate(&g);
-    assert!(has(&d, "graph.missing_terminal") == false && has(&d, "graph.unconnected_input"), "{d:?}");
+    assert!(
+        has(&d, "graph.missing_terminal") == false && has(&d, "graph.unconnected_input"),
+        "{d:?}"
+    );
     g.main.nodes.remove("output");
     assert!(has(&validate::validate(&g), "graph.missing_terminal"));
 
     // dangling wire, stale pins
     let mut g = locomotion_graph();
-    g.main.connections.push(data_connection("walk", "pose", "nowhere", "pose"));
+    g.main
+        .connections
+        .push(data_connection("walk", "pose", "nowhere", "pose"));
     assert!(has(&validate::validate(&g), "graph.dangling_wire"));
     let mut g = locomotion_graph();
-    g.main.nodes.get_mut("blend").unwrap().inputs.retain(|p| p.id != "alpha");
+    g.main
+        .nodes
+        .get_mut("blend")
+        .unwrap()
+        .inputs
+        .retain(|p| p.id != "alpha");
     assert!(has(&validate::validate(&g), "graph.pin_mismatch"));
 }
 
 #[test]
 fn graph_parameters_cached_poses_and_skeleton_requirements_are_checked() {
     let mut g = locomotion_graph();
-    g.main.nodes.get_mut("speed").unwrap().properties.insert("parameter".into(), json!("Missing"));
+    g.main
+        .nodes
+        .get_mut("speed")
+        .unwrap()
+        .properties
+        .insert("parameter".into(), json!("Missing"));
     assert!(has(&validate::validate(&g), "graph.bad_property"));
 
     // cached poses: use without save, duplicate saves, unused save
@@ -582,7 +867,9 @@ fn graph_parameters_cached_poses_and_skeleton_requirements_are_checked() {
     let mut use_ = node("use", "anim.use_cached_pose", &[]);
     use_.properties.insert("name".into(), json!("Base"));
     g.main.add_node(use_).unwrap();
-    g.main.add_connection(data_connection("use", "pose", "output", "pose")).unwrap();
+    g.main
+        .add_connection(data_connection("use", "pose", "output", "pose"))
+        .unwrap();
     assert!(has(&validate::validate(&g), "graph.missing_cached_pose"));
     let mut save = node("save", "anim.save_cached_pose", &[]);
     save.properties.insert("name".into(), json!("Base"));
@@ -593,24 +880,41 @@ fn graph_parameters_cached_poses_and_skeleton_requirements_are_checked() {
     g.main.add_node(player).unwrap();
     g.main.add_node(save).unwrap();
     g.main.add_node(save2).unwrap();
-    g.main.add_connection(data_connection("p", "pose", "save", "pose")).unwrap();
-    g.main.add_connection(data_connection("p", "pose", "save2", "pose")).unwrap();
+    g.main
+        .add_connection(data_connection("p", "pose", "save", "pose"))
+        .unwrap();
+    g.main
+        .add_connection(data_connection("p", "pose", "save2", "pose"))
+        .unwrap();
     let d = validate::validate(&g);
-    assert!(has(&d, "graph.duplicate_cached_pose") && !has(&d, "graph.missing_cached_pose"), "{d:?}");
+    assert!(
+        has(&d, "graph.duplicate_cached_pose") && !has(&d, "graph.missing_cached_pose"),
+        "{d:?}"
+    );
 
     // skeleton-needing nodes without a skeleton
     let mut g = AnimationGraphAsset::default();
-    g.main.add_node(node("p", "anim.reference_pose", &[])).unwrap();
-    g.main.add_connection(data_connection("p", "pose", "output", "pose")).unwrap();
+    g.main
+        .add_node(node("p", "anim.reference_pose", &[]))
+        .unwrap();
+    g.main
+        .add_connection(data_connection("p", "pose", "output", "pose"))
+        .unwrap();
     assert!(has(&validate::validate(&g), "graph.skeleton_required"));
     g.skeleton = Some(aref(SKEL_A));
     assert!(validate::validate(&g).is_empty());
 
     // parameters: duplicate names, bad defaults
     let mut g = AnimationGraphAsset::default();
-    g.parameters = vec![GraphParameter::new("Speed", ParamType::Float), GraphParameter::new("Speed", ParamType::Bool)];
+    g.parameters = vec![
+        GraphParameter::new("Speed", ParamType::Float),
+        GraphParameter::new("Speed", ParamType::Bool),
+    ];
     assert!(g.validate_structure().is_err());
-    g.parameters = vec![GraphParameter { default: json!("fast"), ..GraphParameter::new("Speed", ParamType::Float) }];
+    g.parameters = vec![GraphParameter {
+        default: json!("fast"),
+        ..GraphParameter::new("Speed", ParamType::Float)
+    }];
     assert!(g.validate_structure().is_err());
 }
 
@@ -626,22 +930,55 @@ fn skeleton_dependent_graph_checks_find_bad_bones_and_ik_chains() {
     g.main.add_node(fab).unwrap();
     assert!(validate::validate_against_skeleton(&g, &skeleton()).is_empty());
 
-    g.main.nodes.get_mut("ik").unwrap().properties.insert("end_bone".into(), json!("thigh_l")); // parent only, no grandparent
-    g.main.nodes.get_mut("fab").unwrap().properties.insert("root_bone".into(), json!("foot_l")); // not an ancestor
+    g.main
+        .nodes
+        .get_mut("ik")
+        .unwrap()
+        .properties
+        .insert("end_bone".into(), json!("thigh_l")); // parent only, no grandparent
+    g.main
+        .nodes
+        .get_mut("fab")
+        .unwrap()
+        .properties
+        .insert("root_bone".into(), json!("foot_l")); // not an ancestor
     let d = validate::validate_against_skeleton(&g, &skeleton());
-    assert_eq!(d.iter().filter(|d| d.code == "graph.ik_chain").count(), 2, "{d:?}");
-    g.main.nodes.get_mut("ik").unwrap().properties.insert("end_bone".into(), json!("no_such_bone"));
-    assert!(has(&validate::validate_against_skeleton(&g, &skeleton()), "graph.unknown_bone"));
+    assert_eq!(
+        d.iter().filter(|d| d.code == "graph.ik_chain").count(),
+        2,
+        "{d:?}"
+    );
+    g.main
+        .nodes
+        .get_mut("ik")
+        .unwrap()
+        .properties
+        .insert("end_bone".into(), json!("no_such_bone"));
+    assert!(has(
+        &validate::validate_against_skeleton(&g, &skeleton()),
+        "graph.unknown_bone"
+    ));
 
     // layered blend masks are checked for count and bones
     let mut g = AnimationGraphAsset::default();
     g.skeleton = Some(aref(SKEL_A));
     let mut layered = node("layered", "anim.layered_blend_per_bone", &[]);
-    layered.properties.insert("masks".into(), json!([{ "branches": [{ "bone": "ghost_bone", "weight": 1.0 }], "default_weight": 0.0 }]));
+    layered.properties.insert(
+        "masks".into(),
+        json!([{ "branches": [{ "bone": "ghost_bone", "weight": 1.0 }], "default_weight": 0.0 }]),
+    );
     g.main.add_node(layered).unwrap();
     assert!(!has(&validate::validate(&g), "graph.mask_count"));
-    assert!(has(&validate::validate_against_skeleton(&g, &skeleton()), "graph.unknown_bone"));
-    g.main.nodes.get_mut("layered").unwrap().properties.insert("masks".into(), json!([]));
+    assert!(has(
+        &validate::validate_against_skeleton(&g, &skeleton()),
+        "graph.unknown_bone"
+    ));
+    g.main
+        .nodes
+        .get_mut("layered")
+        .unwrap()
+        .properties
+        .insert("masks".into(), json!([]));
     assert!(has(&validate::validate(&g), "graph.mask_count"));
 }
 
@@ -650,42 +987,78 @@ fn state_machine_graph() -> AnimationGraphAsset {
     g.skeleton = Some(aref(SKEL_A));
     g.parameters = vec![GraphParameter::new("Moving", ParamType::Bool)];
     let mut sm_node = node("sm", "anim.state_machine", &[]);
-    sm_node.properties.insert("machine".into(), json!("machine"));
+    sm_node
+        .properties
+        .insert("machine".into(), json!("machine"));
     g.main.add_node(sm_node).unwrap();
-    g.main.add_connection(data_connection("sm", "pose", "output", "pose")).unwrap();
+    g.main
+        .add_connection(data_connection("sm", "pose", "output", "pose"))
+        .unwrap();
 
     let pose_graph = |seq: &str| {
-        let mut p = AnimSubGraph { id: format!("pose_{seq}"), name: format!("{seq} pose"), kind: GraphKind::StatePose, graph: graphy_blueprint::GraphDescription::new("state") };
+        let mut p = AnimSubGraph {
+            id: format!("pose_{seq}"),
+            name: format!("{seq} pose"),
+            kind: GraphKind::StatePose,
+            graph: graphy_blueprint::GraphDescription::new("state"),
+        };
         let mut player = node("player", "anim.sequence_player", &[]);
-        player.properties.insert("sequence".into(), json!(if seq == "idle" { WALK } else { RUN }));
+        player.properties.insert(
+            "sequence".into(),
+            json!(if seq == "idle" { WALK } else { RUN }),
+        );
         p.graph.add_node(player).unwrap();
-        p.graph.add_node(node("result", "anim.state_result", &[])).unwrap();
-        p.graph.add_connection(data_connection("player", "pose", "result", "pose")).unwrap();
+        p.graph
+            .add_node(node("result", "anim.state_result", &[]))
+            .unwrap();
+        p.graph
+            .add_connection(data_connection("player", "pose", "result", "pose"))
+            .unwrap();
         p
     };
     let rule = |id: &str, want: bool| {
-        let mut r = AnimSubGraph { id: id.into(), name: id.into(), kind: GraphKind::TransitionRule, graph: graphy_blueprint::GraphDescription::new("rule") };
+        let mut r = AnimSubGraph {
+            id: id.into(),
+            name: id.into(),
+            kind: GraphKind::TransitionRule,
+            graph: graphy_blueprint::GraphDescription::new("rule"),
+        };
         let mut get = node("moving", "anim.get_parameter", &[]);
         get.properties.insert("parameter".into(), json!("Moving"));
-        skeletal_assets::anim_graph::refresh_node_pins(&mut get, &|n| (n == "Moving").then_some(ParamType::Bool));
+        skeletal_assets::anim_graph::refresh_node_pins(&mut get, &|n| {
+            (n == "Moving").then_some(ParamType::Bool)
+        });
         r.graph.add_node(get).unwrap();
         r.graph.add_node(node("res", "rule.result", &[])).unwrap();
         if want {
-            r.graph.add_connection(data_connection("moving", "value", "res", "can_enter")).unwrap();
+            r.graph
+                .add_connection(data_connection("moving", "value", "res", "can_enter"))
+                .unwrap();
         } else {
             r.graph.add_node(node("not", "logic.not", &[])).unwrap();
-            r.graph.add_connection(data_connection("moving", "value", "not", "value")).unwrap();
-            r.graph.add_connection(data_connection("not", "result", "res", "can_enter")).unwrap();
+            r.graph
+                .add_connection(data_connection("moving", "value", "not", "value"))
+                .unwrap();
+            r.graph
+                .add_connection(data_connection("not", "result", "res", "can_enter"))
+                .unwrap();
         }
         r
     };
-    let mut machine = AnimSubGraph { id: "machine".into(), name: "Locomotion".into(), kind: GraphKind::StateMachine, graph: graphy_blueprint::GraphDescription::new("machine") };
+    let mut machine = AnimSubGraph {
+        id: "machine".into(),
+        name: "Locomotion".into(),
+        kind: GraphKind::StateMachine,
+        graph: graphy_blueprint::GraphDescription::new("machine"),
+    };
     let mut idle = node("idle", "sm.state", &[]);
     idle.properties.insert("name".into(), json!("Idle"));
-    idle.properties.insert("pose_graph".into(), json!("pose_idle"));
+    idle.properties
+        .insert("pose_graph".into(), json!("pose_idle"));
     let mut run = node("run", "sm.state", &[]);
     run.properties.insert("name".into(), json!("Run"));
-    run.properties.insert("pose_graph".into(), json!("pose_run"));
+    run.properties
+        .insert("pose_graph".into(), json!("pose_run"));
     let mut go = node("go", "sm.transition", &[]);
     go.properties.insert("rule".into(), json!("rule_go"));
     let mut stop = node("stop", "sm.transition", &[]);
@@ -694,10 +1067,25 @@ fn state_machine_graph() -> AnimationGraphAsset {
     for n in [node("entry", "sm.entry", &[]), idle, run, go, stop] {
         machine.graph.add_node(n).unwrap();
     }
-    for (s, sp, t, tp) in [("entry", "start", "idle", "default"), ("idle", "leave", "go", "from"), ("run", "arrive", "go", "to"), ("run", "leave", "stop", "from"), ("idle", "arrive", "stop", "to")] {
-        machine.graph.add_connection(data_connection(s, sp, t, tp)).unwrap();
+    for (s, sp, t, tp) in [
+        ("entry", "start", "idle", "default"),
+        ("idle", "leave", "go", "from"),
+        ("run", "arrive", "go", "to"),
+        ("run", "leave", "stop", "from"),
+        ("idle", "arrive", "stop", "to"),
+    ] {
+        machine
+            .graph
+            .add_connection(data_connection(s, sp, t, tp))
+            .unwrap();
     }
-    g.subgraphs = vec![machine, pose_graph("idle"), pose_graph("run"), rule("rule_go", true), rule("rule_stop", false)];
+    g.subgraphs = vec![
+        machine,
+        pose_graph("idle"),
+        pose_graph("run"),
+        rule("rule_go", true),
+        rule("rule_stop", false),
+    ];
     g
 }
 
@@ -706,10 +1094,14 @@ fn a_state_machine_with_transition_nodes_validates_and_round_trips() {
     let g = state_machine_graph();
     let d = validate::validate(&g);
     assert!(d.is_empty(), "{d:?}");
-    assert_text_stable(&g.to_text().unwrap(), AnimationGraphAsset::parse, |a| a.to_text().unwrap());
+    assert_text_stable(&g.to_text().unwrap(), AnimationGraphAsset::parse, |a| {
+        a.to_text().unwrap()
+    });
     // sub-graph references become dependency edges tagged with their graph
     let refs = validate::asset_references(&g);
-    assert!(refs.iter().any(|r| r.graph == "pose_idle" && r.node == "player" && r.id == WALK));
+    assert!(refs
+        .iter()
+        .any(|r| r.graph == "pose_idle" && r.node == "player" && r.id == WALK));
 }
 
 #[test]
@@ -720,41 +1112,94 @@ fn state_machine_topology_errors_are_specific() {
         validate::validate(&g)
     };
     // no default state
-    assert!(has(&edit(&|m| m.graph.remove_connection("entry.start->idle.default")), "sm.no_default_state"));
+    assert!(has(
+        &edit(&|m| m.graph.remove_connection("entry.start->idle.default")),
+        "sm.no_default_state"
+    ));
     // duplicate names
-    assert!(has(&edit(&|m| { m.graph.nodes.get_mut("run").unwrap().properties.insert("name".into(), json!("Idle")); }), "sm.duplicate_state"));
+    assert!(has(
+        &edit(&|m| {
+            m.graph
+                .nodes
+                .get_mut("run")
+                .unwrap()
+                .properties
+                .insert("name".into(), json!("Idle"));
+        }),
+        "sm.duplicate_state"
+    ));
     // self transition without re-entry
-    assert!(has(&edit(&|m| {
-        m.graph.remove_connection("idle.arrive->stop.to");
-        m.graph.add_connection(data_connection("run", "arrive", "stop", "to")).unwrap();
-    }), "sm.self_transition"));
+    assert!(has(
+        &edit(&|m| {
+            m.graph.remove_connection("idle.arrive->stop.to");
+            m.graph
+                .add_connection(data_connection("run", "arrive", "stop", "to"))
+                .unwrap();
+        }),
+        "sm.self_transition"
+    ));
     // unreachable state
-    assert!(has(&edit(&|m| {
-        let mut orphan = node("orphan", "sm.state", &[]);
-        orphan.properties.insert("name".into(), json!("Orphan"));
-        orphan.properties.insert("pose_graph".into(), json!("pose_run"));
-        m.graph.add_node(orphan).unwrap();
-    }), "sm.unreachable_state"));
+    assert!(has(
+        &edit(&|m| {
+            let mut orphan = node("orphan", "sm.state", &[]);
+            orphan.properties.insert("name".into(), json!("Orphan"));
+            orphan
+                .properties
+                .insert("pose_graph".into(), json!("pose_run"));
+            m.graph.add_node(orphan).unwrap();
+        }),
+        "sm.unreachable_state"
+    ));
     // two transitions from one state with equal priority
-    assert!(has(&edit(&|m| {
-        m.graph.nodes.get_mut("stop").unwrap().properties.insert("priority".into(), json!(0));
-        m.graph.remove_connection("run.leave->stop.from");
-        m.graph.add_connection(data_connection("idle", "leave", "stop", "from")).unwrap();
-    }), "sm.ambiguous_priority"));
+    assert!(has(
+        &edit(&|m| {
+            m.graph
+                .nodes
+                .get_mut("stop")
+                .unwrap()
+                .properties
+                .insert("priority".into(), json!(0));
+            m.graph.remove_connection("run.leave->stop.from");
+            m.graph
+                .add_connection(data_connection("idle", "leave", "stop", "from"))
+                .unwrap();
+        }),
+        "sm.ambiguous_priority"
+    ));
     // transition with no target
-    assert!(has(&edit(&|m| m.graph.remove_connection("run.arrive->go.to")), "graph.unconnected_input"));
+    assert!(has(
+        &edit(&|m| m.graph.remove_connection("run.arrive->go.to")),
+        "graph.unconnected_input"
+    ));
     // wrong or missing sub-graph references
     let mut g = state_machine_graph();
-    g.subgraphs.iter_mut().find(|s| s.id == "machine").unwrap().graph.nodes.get_mut("go").unwrap().properties.insert("rule".into(), json!("pose_run"));
+    g.subgraphs
+        .iter_mut()
+        .find(|s| s.id == "machine")
+        .unwrap()
+        .graph
+        .nodes
+        .get_mut("go")
+        .unwrap()
+        .properties
+        .insert("rule".into(), json!("pose_run"));
     assert!(has(&validate::validate(&g), "graph.wrong_subgraph_kind"));
     let mut g = state_machine_graph();
     g.subgraphs.retain(|s| s.id != "rule_go");
     assert!(has(&validate::validate(&g), "graph.missing_subgraph"));
     let mut g = state_machine_graph();
-    g.subgraphs.push(AnimSubGraph { id: "spare".into(), name: "Spare".into(), kind: GraphKind::Layer, graph: graphy_blueprint::GraphDescription::new("l") });
+    g.subgraphs.push(AnimSubGraph {
+        id: "spare".into(),
+        name: "Spare".into(),
+        kind: GraphKind::Layer,
+        graph: graphy_blueprint::GraphDescription::new("l"),
+    });
     assert!(has(&validate::validate(&g), "graph.unused_subgraph"));
     let mut g = state_machine_graph();
-    g.subgraphs.push(AnimSubGraph { id: "dup".into(), ..g.subgraphs[0].clone() });
+    g.subgraphs.push(AnimSubGraph {
+        id: "dup".into(),
+        ..g.subgraphs[0].clone()
+    });
     g.subgraphs[1].id = "dup".into();
     assert!(g.validate_structure().is_err(), "duplicate sub-graph ids");
 }
@@ -762,19 +1207,30 @@ fn state_machine_topology_errors_are_specific() {
 #[test]
 fn layers_that_run_each_other_are_a_cycle() {
     let layer = |id: &str, calls: &str| {
-        let mut l = AnimSubGraph { id: id.into(), name: id.into(), kind: GraphKind::Layer, graph: graphy_blueprint::GraphDescription::new(id) };
+        let mut l = AnimSubGraph {
+            id: id.into(),
+            name: id.into(),
+            kind: GraphKind::Layer,
+            graph: graphy_blueprint::GraphDescription::new(id),
+        };
         let mut call = node("call", "anim.layer", &[]);
         call.properties.insert("layer".into(), json!(calls));
         l.graph.add_node(call).unwrap();
-        l.graph.add_node(node("out", "anim.layer_output", &[])).unwrap();
-        l.graph.add_connection(data_connection("call", "pose", "out", "pose")).unwrap();
+        l.graph
+            .add_node(node("out", "anim.layer_output", &[]))
+            .unwrap();
+        l.graph
+            .add_connection(data_connection("call", "pose", "out", "pose"))
+            .unwrap();
         l
     };
     let mut g = AnimationGraphAsset::default();
     let mut main_call = node("m", "anim.layer", &[]);
     main_call.properties.insert("layer".into(), json!("a"));
     g.main.add_node(main_call).unwrap();
-    g.main.add_connection(data_connection("m", "pose", "output", "pose")).unwrap();
+    g.main
+        .add_connection(data_connection("m", "pose", "output", "pose"))
+        .unwrap();
     g.subgraphs = vec![layer("a", "b"), layer("b", "a")];
     assert!(has(&validate::validate(&g), "graph.layer_cycle"));
     g.subgraphs = vec![layer("a", "b"), layer("b", "c"), layer("c", "c")];
@@ -786,12 +1242,43 @@ fn layers_that_run_each_other_are_a_cycle() {
 fn rig(skeleton_id: &str) -> IkRigAsset {
     let mut r = IkRigAsset::new("Humanoid", aref(skeleton_id));
     r.retarget_root = Some("pelvis".into());
-    r.goals = vec![IkGoal { id: "g-foot".into(), name: "LeftFoot".into(), bone: "foot_l".into(), position_alpha: 1.0, rotation_alpha: 1.0, default_offset: [0.0; 3] }];
+    r.goals = vec![IkGoal {
+        id: "g-foot".into(),
+        name: "LeftFoot".into(),
+        bone: "foot_l".into(),
+        position_alpha: 1.0,
+        rotation_alpha: 1.0,
+        default_offset: [0.0; 3],
+    }];
     r.chains = vec![
-        IkChain { id: "c-leg".into(), name: "LeftLeg".into(), start_bone: "thigh_l".into(), end_bone: "foot_l".into(), goal: Some("g-foot".into()) },
-        IkChain { id: "c-spine".into(), name: "Spine".into(), start_bone: "spine".into(), end_bone: "head".into(), goal: None },
+        IkChain {
+            id: "c-leg".into(),
+            name: "LeftLeg".into(),
+            start_bone: "thigh_l".into(),
+            end_bone: "foot_l".into(),
+            goal: Some("g-foot".into()),
+        },
+        IkChain {
+            id: "c-spine".into(),
+            name: "Spine".into(),
+            start_bone: "spine".into(),
+            end_bone: "head".into(),
+            goal: None,
+        },
     ];
-    r.solvers = vec![IkSolver { id: "s-leg".into(), name: "Leg".into(), enabled: true, kind: SolverKind::TwoBone { chain: "c-leg".into(), goal: "g-foot".into(), pole: None, allow_stretch: false, max_stretch: 1.25, take_goal_rotation: false } }];
+    r.solvers = vec![IkSolver {
+        id: "s-leg".into(),
+        name: "Leg".into(),
+        enabled: true,
+        kind: SolverKind::TwoBone {
+            chain: "c-leg".into(),
+            goal: "g-foot".into(),
+            pole: None,
+            allow_stretch: false,
+            max_stretch: 1.25,
+            take_goal_rotation: false,
+        },
+    }];
     r
 }
 
@@ -800,12 +1287,22 @@ fn ik_rig_round_trips_and_validates_chains_against_its_skeleton() {
     let r = rig(SKEL_A);
     let text = r.to_text().unwrap();
     assert_text_stable(&text, IkRigAsset::parse, |a| a.to_text().unwrap());
-    assert!(r.diagnostics(&skeleton()).is_empty(), "{:?}", r.diagnostics(&skeleton()));
-    assert_eq!(r.chain_bones(&skeleton(), &r.chains[0]).unwrap(), ["thigh_l", "calf_l", "foot_l"]);
+    assert!(
+        r.diagnostics(&skeleton()).is_empty(),
+        "{:?}",
+        r.diagnostics(&skeleton())
+    );
+    assert_eq!(
+        r.chain_bones(&skeleton(), &r.chains[0]).unwrap(),
+        ["thigh_l", "calf_l", "foot_l"]
+    );
 
     let mut bad = r.clone();
     bad.chains[0].end_bone = "head".into(); // not below thigh_l
-    assert!(has(&bad.diagnostics(&skeleton()), "ikrig.chain_not_contiguous"));
+    assert!(has(
+        &bad.diagnostics(&skeleton()),
+        "ikrig.chain_not_contiguous"
+    ));
     let mut bad = r.clone();
     bad.chains[0].start_bone = "calf_l".into(); // two bones, two-bone solver wants three
     assert!(has(&bad.diagnostics(&skeleton()), "ikrig.two_bone_length"));
@@ -813,8 +1310,16 @@ fn ik_rig_round_trips_and_validates_chains_against_its_skeleton() {
     bad.goals[0].bone = "tail".into();
     assert!(has(&bad.diagnostics(&skeleton()), "ikrig.unknown_bone"));
     let mut bad = r.clone();
-    bad.solvers.push(IkSolver { id: "s2".into(), name: "Again".into(), enabled: true, kind: bad.solvers[0].kind.clone() });
-    assert!(has(&bad.diagnostics(&skeleton()), "ikrig.chain_solved_twice"));
+    bad.solvers.push(IkSolver {
+        id: "s2".into(),
+        name: "Again".into(),
+        enabled: true,
+        kind: bad.solvers[0].kind.clone(),
+    });
+    assert!(has(
+        &bad.diagnostics(&skeleton()),
+        "ikrig.chain_solved_twice"
+    ));
 }
 
 #[test]
@@ -824,7 +1329,16 @@ fn ik_rig_rejects_broken_references_and_duplicate_ids() {
         (|r: &mut IkRigAsset| r.chains[1].id = r.chains[0].id.clone()) as fn(&mut IkRigAsset),
         |r| r.chains[1].name = "LeftLeg".into(),
         |r| r.chains[0].goal = Some("ghost".into()),
-        |r| r.solvers[0].kind = SolverKind::Fabrik { chain: "ghost".into(), goal: "g-foot".into(), precision: 0.01, max_iterations: 10, respect_joint_limits: true, take_goal_rotation: false },
+        |r| {
+            r.solvers[0].kind = SolverKind::Fabrik {
+                chain: "ghost".into(),
+                goal: "g-foot".into(),
+                precision: 0.01,
+                max_iterations: 10,
+                respect_joint_limits: true,
+                take_goal_rotation: false,
+            }
+        },
         |r| r.goals[0].position_alpha = 2.0,
         |r| r.chains[0].name = "not valid".into(),
     ] {
@@ -839,22 +1353,46 @@ fn new_asset_formats_demand_a_version_and_refuse_future_ones() {
     let r = rig(SKEL_A).to_text().unwrap();
     let mut v: Value = serde_json::from_str(&r).unwrap();
     v["version"] = 2.into();
-    assert_eq!(IkRigAsset::parse(&v.to_string()).unwrap_err(), CodecError::FutureVersion { found: 2, supported: 1 });
+    assert_eq!(
+        IkRigAsset::parse(&v.to_string()).unwrap_err(),
+        CodecError::FutureVersion {
+            found: 2,
+            supported: 1
+        }
+    );
     v.as_object_mut().unwrap().remove("version");
-    assert_eq!(IkRigAsset::parse(&v.to_string()).unwrap_err(), CodecError::MissingVersion);
+    assert_eq!(
+        IkRigAsset::parse(&v.to_string()).unwrap_err(),
+        CodecError::MissingVersion
+    );
     v["version"] = 1.into();
     v.as_object_mut().unwrap().remove("id");
-    assert_eq!(IkRigAsset::parse(&v.to_string()).unwrap_err(), CodecError::MissingId);
+    assert_eq!(
+        IkRigAsset::parse(&v.to_string()).unwrap_err(),
+        CodecError::MissingId
+    );
     v["id"] = "garbage".into();
     assert!(IkRigAsset::parse(&v.to_string()).is_err());
     v["id"] = "12345678-1234-4234-8234-123456789abc".into();
     v["skeleton"] = Value::Null;
     let unset = IkRigAsset::parse(&v.to_string()).unwrap();
-    assert!(has(&unset.reference_diagnostics(), "ikrig.no_skeleton"), "a rig without a skeleton loads and says what is missing");
+    assert!(
+        has(&unset.reference_diagnostics(), "ikrig.no_skeleton"),
+        "a rig without a skeleton loads and says what is missing"
+    );
     // unknown fields survive in every new format
     let mut v: Value = serde_json::from_str(&r).unwrap();
     v["x_future"] = json!(1);
-    assert_eq!(serde_json::from_str::<Value>(&IkRigAsset::parse(&v.to_string()).unwrap().to_text().unwrap()).unwrap()["x_future"], 1);
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            &IkRigAsset::parse(&v.to_string())
+                .unwrap()
+                .to_text()
+                .unwrap()
+        )
+        .unwrap()["x_future"],
+        1
+    );
 }
 
 fn profile() -> RetargetProfileAsset {
@@ -862,8 +1400,20 @@ fn profile() -> RetargetProfileAsset {
     p.root.source_root = Some("pelvis".into());
     p.root.target_root = Some("pelvis".into());
     p.bone_map = vec![
-        BoneMapping { id: "m1".into(), source_bone: "pelvis".into(), target_bone: "pelvis".into(), rotation: Default::default(), translation: Default::default() },
-        BoneMapping { id: "m2".into(), source_bone: "spine".into(), target_bone: "spine".into(), rotation: Default::default(), translation: Default::default() },
+        BoneMapping {
+            id: "m1".into(),
+            source_bone: "pelvis".into(),
+            target_bone: "pelvis".into(),
+            rotation: Default::default(),
+            translation: Default::default(),
+        },
+        BoneMapping {
+            id: "m2".into(),
+            source_bone: "spine".into(),
+            target_bone: "spine".into(),
+            rotation: Default::default(),
+            translation: Default::default(),
+        },
     ];
     p
 }
@@ -871,25 +1421,48 @@ fn profile() -> RetargetProfileAsset {
 #[test]
 fn retarget_profile_round_trips_and_reports_unmapped_ambiguous_and_missing_bones() {
     let p = profile();
-    assert_text_stable(&p.to_text().unwrap(), RetargetProfileAsset::parse, |a| a.to_text().unwrap());
+    assert_text_stable(&p.to_text().unwrap(), RetargetProfileAsset::parse, |a| {
+        a.to_text().unwrap()
+    });
     let d = p.diagnostics(&skeleton(), &skeleton(), None);
-    assert!(has(&d, "retarget.unmapped_bones") && !has_errors(&d), "{d:?}");
+    assert!(
+        has(&d, "retarget.unmapped_bones") && !has_errors(&d),
+        "{d:?}"
+    );
 
     let mut ambiguous = p.clone();
     ambiguous.bone_map[1].target_bone = "pelvis".into();
-    assert!(ambiguous.to_text().is_err(), "a target bone is mapped twice");
+    assert!(
+        ambiguous.to_text().is_err(),
+        "a target bone is mapped twice"
+    );
     let mut missing = p.clone();
     missing.bone_map[0].source_bone = "tail".into();
-    assert!(has(&missing.diagnostics(&skeleton(), &skeleton(), None), "retarget.unknown_bone"));
+    assert!(has(
+        &missing.diagnostics(&skeleton(), &skeleton(), None),
+        "retarget.unknown_bone"
+    ));
     let mut no_root = p.clone();
     no_root.root.target_root = None;
-    assert!(has(&no_root.diagnostics(&skeleton(), &skeleton(), None), "retarget.no_root"));
+    assert!(has(
+        &no_root.diagnostics(&skeleton(), &skeleton(), None),
+        "retarget.no_root"
+    ));
     let mut pose = p.clone();
-    pose.target_pose = RetargetPose { bone_rotations: vec![skeletal_assets::retarget::BoneRotation { bone: "head".into(), rotation: [0.0, 0.0, 0.0, 2.0] }], root_translation: [0.0; 3] };
+    pose.target_pose = RetargetPose {
+        bone_rotations: vec![skeletal_assets::retarget::BoneRotation {
+            bone: "head".into(),
+            rotation: [0.0, 0.0, 0.0, 2.0],
+        }],
+        root_translation: [0.0; 3],
+    };
     assert!(pose.to_text().is_err(), "non-unit quaternion");
     let mut empty = p.clone();
     empty.bone_map.clear();
-    assert!(has(&empty.diagnostics(&skeleton(), &skeleton(), None), "retarget.empty"));
+    assert!(has(
+        &empty.diagnostics(&skeleton(), &skeleton(), None),
+        "retarget.empty"
+    ));
 }
 
 #[test]
@@ -900,13 +1473,29 @@ fn retarget_profile_by_chain_needs_both_rigs_and_checks_chain_names() {
     p.target_rig = Some(target_rig.id.clone());
     p.root.source_root = Some("pelvis".into());
     p.root.target_root = Some("pelvis".into());
-    p.chain_map = vec![ChainMapping { id: "cm1".into(), source_chain: "LeftLeg".into(), target_chain: "LeftLeg".into(), rotation: Default::default(), rotation_alpha: 1.0, translation: Default::default(), translation_alpha: 1.0 }];
-    assert_text_stable(&p.to_text().unwrap(), RetargetProfileAsset::parse, |a| a.to_text().unwrap());
+    p.chain_map = vec![ChainMapping {
+        id: "cm1".into(),
+        source_chain: "LeftLeg".into(),
+        target_chain: "LeftLeg".into(),
+        rotation: Default::default(),
+        rotation_alpha: 1.0,
+        translation: Default::default(),
+        translation_alpha: 1.0,
+    }];
+    assert_text_stable(&p.to_text().unwrap(), RetargetProfileAsset::parse, |a| {
+        a.to_text().unwrap()
+    });
     let d = p.diagnostics(&skeleton(), &skeleton(), Some((&source_rig, &target_rig)));
-    assert!(has(&d, "retarget.unmapped_chain"), "Spine has no source: {d:?}");
+    assert!(
+        has(&d, "retarget.unmapped_chain"),
+        "Spine has no source: {d:?}"
+    );
     assert!(!has_errors(&d));
     p.chain_map[0].source_chain = "Tail".into();
-    assert!(has(&p.diagnostics(&skeleton(), &skeleton(), Some((&source_rig, &target_rig))), "retarget.unknown_chain"));
+    assert!(has(
+        &p.diagnostics(&skeleton(), &skeleton(), Some((&source_rig, &target_rig))),
+        "retarget.unknown_chain"
+    ));
     let mut one_rig = p.clone();
     one_rig.target_rig = None;
     assert!(one_rig.to_text().is_err());
@@ -920,40 +1509,117 @@ fn retarget_profile_by_chain_needs_both_rigs_and_checks_chain_names() {
 fn ik_retargeter_reports_per_chain_status() {
     let (source, target) = (rig(SKEL_A), rig(SKEL_B));
     let mut r = IkRetargetAsset::new("A to B", source.id.clone(), target.id.clone());
-    r.chains = vec![ChainRetarget { id: "r-leg".into(), target_chain: "LeftLeg".into(), source_chain: Some("LeftLeg".into()), fk: Default::default(), ik: IkSettings { enabled: true, ..Default::default() } }];
-    assert_text_stable(&r.to_text().unwrap(), IkRetargetAsset::parse, |a| a.to_text().unwrap());
+    r.chains = vec![ChainRetarget {
+        id: "r-leg".into(),
+        target_chain: "LeftLeg".into(),
+        source_chain: Some("LeftLeg".into()),
+        fk: Default::default(),
+        ik: IkSettings {
+            enabled: true,
+            ..Default::default()
+        },
+    }];
+    assert_text_stable(&r.to_text().unwrap(), IkRetargetAsset::parse, |a| {
+        a.to_text().unwrap()
+    });
     let d = r.diagnostics(&source, &target);
-    assert!(has(&d, "ikretarget.no_setting"), "Spine has no setting: {d:?}");
+    assert!(
+        has(&d, "ikretarget.no_setting"),
+        "Spine has no setting: {d:?}"
+    );
     assert!(!has_errors(&d), "{d:?}");
 
     let mut bad = r.clone();
     bad.chains[0].target_chain = "Tail".into();
-    assert!(has(&bad.diagnostics(&source, &target), "ikretarget.unknown_target_chain"));
+    assert!(has(
+        &bad.diagnostics(&source, &target),
+        "ikretarget.unknown_target_chain"
+    ));
     let mut bad = r.clone();
     bad.chains[0].source_chain = Some("Tail".into());
-    assert!(has(&bad.diagnostics(&source, &target), "ikretarget.unknown_source_chain"));
+    assert!(has(
+        &bad.diagnostics(&source, &target),
+        "ikretarget.unknown_source_chain"
+    ));
     let mut no_goal = r.clone();
-    no_goal.chains.push(ChainRetarget { id: "r-spine".into(), target_chain: "Spine".into(), source_chain: Some("Spine".into()), fk: Default::default(), ik: IkSettings { enabled: true, ..Default::default() } });
-    assert!(has(&no_goal.diagnostics(&source, &target), "ikretarget.ik_without_goal"));
+    no_goal.chains.push(ChainRetarget {
+        id: "r-spine".into(),
+        target_chain: "Spine".into(),
+        source_chain: Some("Spine".into()),
+        fk: Default::default(),
+        ik: IkSettings {
+            enabled: true,
+            ..Default::default()
+        },
+    });
+    assert!(has(
+        &no_goal.diagnostics(&source, &target),
+        "ikretarget.ik_without_goal"
+    ));
     let mut unmapped = r.clone();
     unmapped.chains[0].source_chain = None;
-    assert!(has(&unmapped.diagnostics(&source, &target), "ikretarget.unmapped_chain"));
+    assert!(has(
+        &unmapped.diagnostics(&source, &target),
+        "ikretarget.unmapped_chain"
+    ));
     let same = IkRetargetAsset::new("Same", source.id.clone(), source.id.clone());
     assert!(same.to_text().is_err());
     let mut twice = r.clone();
-    twice.chains.push(ChainRetarget { id: "r-leg2".into(), ..twice.chains[0].clone() });
+    twice.chains.push(ChainRetarget {
+        id: "r-leg2".into(),
+        ..twice.chains[0].clone()
+    });
     assert!(twice.to_text().is_err(), "a target chain has two settings");
 }
 
 fn pose_db() -> PoseDbAsset {
     let mut db = PoseDbAsset::new("Locomotion DB", aref(SKEL_A));
     db.sources = vec![
-        PoseDbSource { id: "src-walk".into(), source: PoseSource::Sequence { sequence: aref(WALK) }, enabled: true, mirrored: false, looping: true, exclusions: vec![], cost_bias: 0.0 },
-        PoseDbSource { id: "src-loco".into(), source: PoseSource::BlendSpace { blend_space: aref("b1e4d500-0000-4000-8000-000000000001") }, enabled: false, mirrored: true, looping: false, exclusions: vec![], cost_bias: 0.5 },
+        PoseDbSource {
+            id: "src-walk".into(),
+            source: PoseSource::Sequence {
+                sequence: aref(WALK),
+            },
+            enabled: true,
+            mirrored: false,
+            looping: true,
+            exclusions: vec![],
+            cost_bias: 0.0,
+        },
+        PoseDbSource {
+            id: "src-loco".into(),
+            source: PoseSource::BlendSpace {
+                blend_space: aref("b1e4d500-0000-4000-8000-000000000001"),
+            },
+            enabled: false,
+            mirrored: true,
+            looping: false,
+            exclusions: vec![],
+            cost_bias: 0.5,
+        },
     ];
     db.channels = vec![
-        FeatureChannel { id: "ch-foot".into(), name: "FootPos".into(), weight: 1.0, normalization: Normalization::Standardize, kind: ChannelKind::BonePosition { bone: "foot_l".into() } },
-        FeatureChannel { id: "ch-traj".into(), name: "Trajectory".into(), weight: 2.0, normalization: Normalization::Standardize, kind: ChannelKind::Trajectory { offsets: vec![-0.2, 0.2, 0.5], position: true, facing: true, velocity: false } },
+        FeatureChannel {
+            id: "ch-foot".into(),
+            name: "FootPos".into(),
+            weight: 1.0,
+            normalization: Normalization::Standardize,
+            kind: ChannelKind::BonePosition {
+                bone: "foot_l".into(),
+            },
+        },
+        FeatureChannel {
+            id: "ch-traj".into(),
+            name: "Trajectory".into(),
+            weight: 2.0,
+            normalization: Normalization::Standardize,
+            kind: ChannelKind::Trajectory {
+                offsets: vec![-0.2, 0.2, 0.5],
+                position: true,
+                facing: true,
+                velocity: false,
+            },
+        },
     ];
     db
 }
@@ -961,10 +1627,19 @@ fn pose_db() -> PoseDbAsset {
 #[test]
 fn pose_db_keeps_authored_settings_and_keys_derived_data_by_content() {
     let db = pose_db();
-    assert_text_stable(&db.to_text().unwrap(), PoseDbAsset::parse, |a| a.to_text().unwrap());
-    assert!(db.diagnostics(&skeleton()).is_empty(), "{:?}", db.diagnostics(&skeleton()));
+    assert_text_stable(&db.to_text().unwrap(), PoseDbAsset::parse, |a| {
+        a.to_text().unwrap()
+    });
+    assert!(
+        db.diagnostics(&skeleton()).is_empty(),
+        "{:?}",
+        db.diagnostics(&skeleton())
+    );
     let text = db.to_text().unwrap();
-    assert!(!text.contains("\"index\"") && !text.contains("hash"), "no derived data in the asset");
+    assert!(
+        !text.contains("\"index\"") && !text.contains("hash"),
+        "no derived data in the asset"
+    );
 
     // what changes the hash and what must not
     let base = db.settings_hash();
@@ -973,7 +1648,11 @@ fn pose_db_keeps_authored_settings_and_keys_derived_data_by_content() {
     renamed.search.blend_time = 0.9;
     renamed.search.continuing_pose_bias = 0.4;
     renamed.sources[1].cost_bias = 9.0; // disabled source
-    assert_eq!(renamed.settings_hash(), base, "name, runtime search settings and disabled sources do not rebuild");
+    assert_eq!(
+        renamed.settings_hash(),
+        base,
+        "name, runtime search settings and disabled sources do not rebuild"
+    );
     let mut weight = db.clone();
     weight.channels[0].weight = 3.0;
     assert_ne!(weight.settings_hash(), base);
@@ -985,8 +1664,16 @@ fn pose_db_keeps_authored_settings_and_keys_derived_data_by_content() {
     assert_ne!(enable.settings_hash(), base);
     let mut reordered = db.clone();
     reordered.sources.reverse();
-    assert_eq!(reordered.settings_hash(), base, "source order does not matter");
-    assert_eq!(db.settings_hash(), pose_db().settings_hash(), "deterministic across runs");
+    assert_eq!(
+        reordered.settings_hash(),
+        base,
+        "source order does not matter"
+    );
+    assert_eq!(
+        db.settings_hash(),
+        pose_db().settings_hash(),
+        "deterministic across runs"
+    );
 
     // the derived index is keyed by settings AND source content
     let k1 = db.index_key(&[("src-walk".into(), "hash-a".into())]);
@@ -995,15 +1682,28 @@ fn pose_db_keeps_authored_settings_and_keys_derived_data_by_content() {
     assert_eq!(k1, k2);
     assert_ne!(k1, k3, "editing a source clip invalidates the index");
     let bytes = encode_index(&k1, b"payload");
-    assert_eq!(check_index(&bytes, &k1), IndexState::Current(b"payload".to_vec()));
+    assert_eq!(
+        check_index(&bytes, &k1),
+        IndexState::Current(b"payload".to_vec())
+    );
     assert!(matches!(check_index(&bytes, &k3), IndexState::Stale { found } if found == k1));
     assert_eq!(check_index(&bytes[..10], &k1), IndexState::Corrupt);
-    assert_eq!(check_index(b"not an index at all, nope nope nope nope nope nope nope nope nope nope!!!", &k1), IndexState::Corrupt);
+    assert_eq!(
+        check_index(
+            b"not an index at all, nope nope nope nope nope nope nope nope nope nope!!!",
+            &k1
+        ),
+        IndexState::Corrupt
+    );
     let mut truncated = bytes.clone();
     truncated.pop();
     assert_eq!(check_index(&truncated, &k1), IndexState::Corrupt);
-    let path = skeletal_assets::pose_db::derived_index_path(std::path::Path::new("/proj"), &db.id, &k1);
-    assert!(path.to_string_lossy().replace('\\', "/").contains(".pulsar/cache/posedb/"));
+    let path =
+        skeletal_assets::pose_db::derived_index_path(std::path::Path::new("/proj"), &db.id, &k1);
+    assert!(path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .contains(".pulsar/cache/posedb/"));
 }
 
 #[test]
@@ -1015,10 +1715,36 @@ fn pose_db_rejects_bad_schemas_and_reports_missing_bones_and_sources() {
         |d| d.channels[0].weight = -1.0,
         |d| d.sampling.interval = 0.0,
         |d| d.sampling.interval = 5.0,
-        |d| d.sources[0].exclusions = vec![skeletal_assets::pose_db::TimeRange { start: 2.0, end: 1.0 }],
-        |d| d.channels[1].kind = ChannelKind::Trajectory { offsets: vec![0.5, 0.2], position: true, facing: false, velocity: false },
-        |d| d.channels[1].kind = ChannelKind::Trajectory { offsets: vec![0.0], position: true, facing: false, velocity: false },
-        |d| d.channels[1].kind = ChannelKind::Trajectory { offsets: vec![0.2], position: false, facing: false, velocity: false },
+        |d| {
+            d.sources[0].exclusions = vec![skeletal_assets::pose_db::TimeRange {
+                start: 2.0,
+                end: 1.0,
+            }]
+        },
+        |d| {
+            d.channels[1].kind = ChannelKind::Trajectory {
+                offsets: vec![0.5, 0.2],
+                position: true,
+                facing: false,
+                velocity: false,
+            }
+        },
+        |d| {
+            d.channels[1].kind = ChannelKind::Trajectory {
+                offsets: vec![0.0],
+                position: true,
+                facing: false,
+                velocity: false,
+            }
+        },
+        |d| {
+            d.channels[1].kind = ChannelKind::Trajectory {
+                offsets: vec![0.2],
+                position: false,
+                facing: false,
+                velocity: false,
+            }
+        },
         |d| d.search.candidate_count = 0,
     ] {
         let mut e = db.clone();
@@ -1026,8 +1752,13 @@ fn pose_db_rejects_bad_schemas_and_reports_missing_bones_and_sources() {
         assert!(e.to_text().is_err());
     }
     let mut missing = db.clone();
-    missing.channels[0].kind = ChannelKind::BonePosition { bone: "tail".into() };
-    assert!(has(&missing.diagnostics(&skeleton()), "posedb.unknown_bone"));
+    missing.channels[0].kind = ChannelKind::BonePosition {
+        bone: "tail".into(),
+    };
+    assert!(has(
+        &missing.diagnostics(&skeleton()),
+        "posedb.unknown_bone"
+    ));
     let mut none = db.clone();
     none.sources.clear();
     none.channels.clear();
@@ -1037,8 +1768,14 @@ fn pose_db_rejects_bad_schemas_and_reports_missing_bones_and_sources() {
     zero.channels.iter_mut().for_each(|c| c.weight = 0.0);
     assert!(has(&zero.diagnostics(&skeleton()), "posedb.zero_weights"));
     let mut dup = db.clone();
-    dup.sources.push(PoseDbSource { id: "again".into(), ..dup.sources[0].clone() });
-    assert!(has(&dup.diagnostics(&skeleton()), "posedb.duplicate_source"));
+    dup.sources.push(PoseDbSource {
+        id: "again".into(),
+        ..dup.sources[0].clone()
+    });
+    assert!(has(
+        &dup.diagnostics(&skeleton()),
+        "posedb.duplicate_source"
+    ));
 }
 
 // ------------------------------------------------------------- dependencies
@@ -1059,13 +1796,20 @@ impl AssetSource for Project {
         if self.wrong_kind.contains(&key) {
             return Lookup::WrongKind("textures/walk.png".into());
         }
-        self.files.get(&key).cloned().map_or(Lookup::Missing, Lookup::Found)
+        self.files
+            .get(&key)
+            .cloned()
+            .map_or(Lookup::Missing, Lookup::Found)
     }
 }
 
 impl Project {
     fn new() -> Self {
-        let mut p = Self { files: HashMap::new(), ambiguous: vec![], wrong_kind: vec![] };
+        let mut p = Self {
+            files: HashMap::new(),
+            ambiguous: vec![],
+            wrong_kind: vec![],
+        };
         for (id, name) in [(SKEL_A, "A"), (SKEL_B, "B")] {
             let mut s = SkeletonAsset::new(skeleton());
             s.id = skeleton_id(id);
@@ -1081,7 +1825,9 @@ impl Project {
         self.files.insert((kind.into(), id.into()), text.into());
     }
     fn seq(&mut self, id: &str, skeleton: &str) {
-        let text = format!(r#"{{"version":1,"id":"{id}","skeleton":"{skeleton}","name":"clip","duration":1.0,"fps":30.0,"tracks":[]}}"#);
+        let text = format!(
+            r#"{{"version":1,"id":"{id}","skeleton":"{skeleton}","name":"clip","duration":1.0,"fps":30.0,"tracks":[]}}"#
+        );
         self.put("animseq", id, text);
     }
 }
@@ -1094,7 +1840,11 @@ fn blend_space_over(project: &mut Project, id: &str, skeleton: &str, seqs: &[&st
     let mut b = BlendSpaceAsset::default();
     b.id = aref(id);
     b.skeleton = Some(aref(skeleton));
-    b.samples = seqs.iter().enumerate().map(|(i, s)| BlendSample::new(Some(aref(s)), i as f32, None)).collect();
+    b.samples = seqs
+        .iter()
+        .enumerate()
+        .map(|(i, s)| BlendSample::new(Some(aref(s)), i as f32, None))
+        .collect();
     project.put("blendspace", id, b.to_text().unwrap());
 }
 
@@ -1104,20 +1854,38 @@ const BS: &str = "b1e4d500-0000-4000-8000-0000000000aa";
 fn extractors_list_typed_edges_for_every_kind() {
     let mut p = Project::new();
     blend_space_over(&mut p, BS, SKEL_A, &[WALK, RUN]);
-    let e = dependencies::extract("blendspace", &p.files[&("blendspace".into(), BS.into())]).unwrap();
+    let e =
+        dependencies::extract("blendspace", &p.files[&("blendspace".into(), BS.into())]).unwrap();
     assert_eq!(e.id, BS);
     assert_eq!(e.primary_skeleton.as_deref(), Some(SKEL_A));
-    let targets: Vec<_> = e.edges.iter().map(|e| (e.target_kind, e.target_id.as_str())).collect();
-    assert!(targets.contains(&("skeleton", SKEL_A)) && targets.contains(&("animseq", WALK)) && targets.contains(&("animseq", RUN)));
+    let targets: Vec<_> = e
+        .edges
+        .iter()
+        .map(|e| (e.target_kind, e.target_id.as_str()))
+        .collect();
+    assert!(
+        targets.contains(&("skeleton", SKEL_A))
+            && targets.contains(&("animseq", WALK))
+            && targets.contains(&("animseq", RUN))
+    );
     assert!(e.edges.iter().all(|e| e.role == EdgeRole::Hard));
 
     let m = montage_with_two_tracks();
     let e = dependencies::extract("anim_montage", m.to_text().unwrap().as_bytes()).unwrap();
-    assert_eq!(e.edges.iter().filter(|e| e.target_kind == "animseq").count(), 2);
+    assert_eq!(
+        e.edges
+            .iter()
+            .filter(|e| e.target_kind == "animseq")
+            .count(),
+        2
+    );
 
     let g = state_machine_graph();
     let e = dependencies::extract("anim_graph", g.to_text().unwrap().as_bytes()).unwrap();
-    assert!(e.edges.iter().any(|e| e.target_id == WALK && e.via.contains("pose_idle")));
+    assert!(e
+        .edges
+        .iter()
+        .any(|e| e.target_id == WALK && e.via.contains("pose_idle")));
 
     let r = rig(SKEL_A);
     let e = dependencies::extract("ik_rig", r.to_text().unwrap().as_bytes()).unwrap();
@@ -1125,15 +1893,28 @@ fn extractors_list_typed_edges_for_every_kind() {
     let rt = IkRetargetAsset::new("x", r.id.clone(), rig(SKEL_B).id);
     let e = dependencies::extract("ik_retarget", rt.to_text().unwrap().as_bytes()).unwrap();
     assert_eq!((e.edges.len(), e.primary_skeleton), (2, None));
-    let e = dependencies::extract("anim_retarget", profile().to_text().unwrap().as_bytes()).unwrap();
-    assert_eq!(e.primary_skeleton.as_deref(), Some(SKEL_B), "retargeted animation ends up on the target skeleton");
+    let e =
+        dependencies::extract("anim_retarget", profile().to_text().unwrap().as_bytes()).unwrap();
+    assert_eq!(
+        e.primary_skeleton.as_deref(),
+        Some(SKEL_B),
+        "retargeted animation ends up on the target skeleton"
+    );
     let e = dependencies::extract("pose_db", pose_db().to_text().unwrap().as_bytes()).unwrap();
-    assert!(e.edges.iter().any(|e| e.target_kind == "blendspace") && e.edges.iter().any(|e| e.target_id == WALK));
+    assert!(
+        e.edges.iter().any(|e| e.target_kind == "blendspace")
+            && e.edges.iter().any(|e| e.target_id == WALK)
+    );
 
     // preview_mesh is a hint, not a dependency
-    let seq = format!(r#"{{"version":1,"id":"{WALK}","skeleton":"{SKEL_A}","preview_mesh":"99999999-9999-4999-8999-999999999999","name":"w","duration":1.0,"fps":30.0,"tracks":[]}}"#);
+    let seq = format!(
+        r#"{{"version":1,"id":"{WALK}","skeleton":"{SKEL_A}","preview_mesh":"99999999-9999-4999-8999-999999999999","name":"w","duration":1.0,"fps":30.0,"tracks":[]}}"#
+    );
     let e = dependencies::extract("animseq", seq.as_bytes()).unwrap();
-    assert!(e.edges.iter().any(|e| e.target_kind == "skmesh" && e.role == EdgeRole::Hint));
+    assert!(e
+        .edges
+        .iter()
+        .any(|e| e.target_kind == "skmesh" && e.role == EdgeRole::Hint));
     assert!(dependencies::extract("texture", b"{}").is_err());
     assert!(dependencies::extract("blendspace", b"not json").is_err());
 }
@@ -1152,16 +1933,31 @@ fn closure_reports_broken_incompatible_wrong_kind_ambiguous_and_unset_edges() {
     let mut p = Project::new();
     blend_space_over(&mut p, BS, SKEL_A, &[WALK, JUMP]);
     let d = check_closure(&p, "blendspace", BS);
-    let mismatch: Vec<_> = d.iter().filter(|d| d.code == "dep.skeleton_mismatch").collect();
+    let mismatch: Vec<_> = d
+        .iter()
+        .filter(|d| d.code == "dep.skeleton_mismatch")
+        .collect();
     assert_eq!(mismatch.len(), 1, "{d:?}");
     assert!(mismatch[0].message.contains("aaaaaaaa") && mismatch[0].repair.is_some());
 
     // broken ref
     let mut p = Project::new();
-    blend_space_over(&mut p, BS, SKEL_A, &[WALK, "aaaaaaaa-0000-4000-8000-0000000000ff"]);
+    blend_space_over(
+        &mut p,
+        BS,
+        SKEL_A,
+        &[WALK, "aaaaaaaa-0000-4000-8000-0000000000ff"],
+    );
     let d = check_closure(&p, "blendspace", BS);
     assert!(has(&d, "dep.missing"), "{d:?}");
-    assert!(d.iter().find(|d| d.code == "dep.missing").unwrap().location.as_deref().unwrap().contains("samples/"));
+    assert!(d
+        .iter()
+        .find(|d| d.code == "dep.missing")
+        .unwrap()
+        .location
+        .as_deref()
+        .unwrap()
+        .contains("samples/"));
 
     // missing skeleton itself
     let mut p = Project::new();
@@ -1173,8 +1969,16 @@ fn closure_reports_broken_incompatible_wrong_kind_ambiguous_and_unset_edges() {
     let mut p = Project::new();
     blend_space_over(&mut p, BS, SKEL_A, &[WALK]);
     p.wrong_kind.push(("animseq".into(), RUN.into()));
-    blend_space_over(&mut p, "b1e4d500-0000-4000-8000-0000000000bb", SKEL_A, &[RUN]);
-    assert!(has(&check_closure(&p, "blendspace", "b1e4d500-0000-4000-8000-0000000000bb"), "dep.wrong_kind"));
+    blend_space_over(
+        &mut p,
+        "b1e4d500-0000-4000-8000-0000000000bb",
+        SKEL_A,
+        &[RUN],
+    );
+    assert!(has(
+        &check_closure(&p, "blendspace", "b1e4d500-0000-4000-8000-0000000000bb"),
+        "dep.wrong_kind"
+    ));
 
     // unreadable
     let mut p = Project::new();
@@ -1192,10 +1996,17 @@ fn closure_reports_broken_incompatible_wrong_kind_ambiguous_and_unset_edges() {
     let mut p = Project::new();
     let mut b = BlendSpaceAsset::default();
     b.id = aref(BS);
-    b.samples = vec![BlendSample::new(Some(aref(WALK)), 0.0, None), BlendSample::new(Some(aref(RUN)), 1.0, None)];
+    b.samples = vec![
+        BlendSample::new(Some(aref(WALK)), 0.0, None),
+        BlendSample::new(Some(aref(RUN)), 1.0, None),
+    ];
     p.put("blendspace", BS, b.to_text().unwrap());
     let d = check_closure(&p, "blendspace", BS);
-    assert_eq!(d.iter().filter(|d| d.code == "dep.skeleton_unset").count(), 2, "{d:?}");
+    assert_eq!(
+        d.iter().filter(|d| d.code == "dep.skeleton_unset").count(),
+        2,
+        "{d:?}"
+    );
 }
 
 #[test]
@@ -1204,66 +2015,129 @@ fn closure_checks_graphs_montages_and_retarget_edges() {
     blend_space_over(&mut p, BS, SKEL_A, &[WALK, RUN]);
     let mut m = montage_with_two_tracks();
     m.id = aref("c0a7a600-0000-4000-8000-0000000000aa");
-    p.put("anim_montage", m.id.as_str().to_string().as_str(), m.to_text().unwrap());
+    p.put(
+        "anim_montage",
+        m.id.as_str().to_string().as_str(),
+        m.to_text().unwrap(),
+    );
     let mut g = AnimationGraphAsset::default();
     g.id = aref("d0a4b100-0000-4000-8000-0000000000aa");
     g.skeleton = Some(aref(SKEL_A));
     let mut bsp = node("bsp", "anim.blend_space_player", &[]);
     bsp.properties.insert("blend_space".into(), json!(BS));
     g.main.add_node(bsp).unwrap();
-    g.main.add_connection(data_connection("bsp", "pose", "output", "pose")).unwrap();
-    p.put("anim_graph", g.id.as_str().to_string().as_str(), g.to_text().unwrap());
+    g.main
+        .add_connection(data_connection("bsp", "pose", "output", "pose"))
+        .unwrap();
+    p.put(
+        "anim_graph",
+        g.id.as_str().to_string().as_str(),
+        g.to_text().unwrap(),
+    );
     assert!(check_closure(&p, "anim_graph", g.id.as_str()).is_empty());
 
     // graph on skeleton B pointing at a blend space for skeleton A
     let mut wrong = g.clone();
     wrong.skeleton = Some(aref(SKEL_B));
-    p.put("anim_graph", g.id.as_str().to_string().as_str(), wrong.to_text().unwrap());
-    assert!(has(&check_closure(&p, "anim_graph", g.id.as_str()), "dep.skeleton_mismatch"));
+    p.put(
+        "anim_graph",
+        g.id.as_str().to_string().as_str(),
+        wrong.to_text().unwrap(),
+    );
+    assert!(has(
+        &check_closure(&p, "anim_graph", g.id.as_str()),
+        "dep.skeleton_mismatch"
+    ));
 
     // retarget profile A -> B used by a graph on B is fine; used on A is not
     let prof = profile();
-    p.put("anim_retarget", prof.id.as_str().to_string().as_str(), prof.to_text().unwrap());
+    p.put(
+        "anim_retarget",
+        prof.id.as_str().to_string().as_str(),
+        prof.to_text().unwrap(),
+    );
     let mut on_b = AnimationGraphAsset::default();
     on_b.id = aref("d0a4b100-0000-4000-8000-0000000000bb");
     on_b.skeleton = Some(aref(SKEL_B));
     let mut rt = node("rt", "anim.retarget", &[]);
-    rt.properties.insert("profile".into(), json!(prof.id.as_str()));
+    rt.properties
+        .insert("profile".into(), json!(prof.id.as_str()));
     let mut src = node("src", "anim.reference_pose", &[]);
     src.properties.clear();
     on_b.main.add_node(rt).unwrap();
     on_b.main.add_node(src).unwrap();
-    on_b.main.add_connection(data_connection("src", "pose", "rt", "source")).unwrap();
-    on_b.main.add_connection(data_connection("rt", "pose", "output", "pose")).unwrap();
-    p.put("anim_graph", on_b.id.as_str().to_string().as_str(), on_b.to_text().unwrap());
+    on_b.main
+        .add_connection(data_connection("src", "pose", "rt", "source"))
+        .unwrap();
+    on_b.main
+        .add_connection(data_connection("rt", "pose", "output", "pose"))
+        .unwrap();
+    p.put(
+        "anim_graph",
+        on_b.id.as_str().to_string().as_str(),
+        on_b.to_text().unwrap(),
+    );
     let d = check_closure(&p, "anim_graph", on_b.id.as_str());
     assert!(d.is_empty(), "{d:?}");
     let mut on_a = on_b.clone();
     on_a.skeleton = Some(aref(SKEL_A));
-    p.put("anim_graph", on_b.id.as_str().to_string().as_str(), on_a.to_text().unwrap());
-    assert!(has(&check_closure(&p, "anim_graph", on_b.id.as_str()), "dep.skeleton_mismatch"));
+    p.put(
+        "anim_graph",
+        on_b.id.as_str().to_string().as_str(),
+        on_a.to_text().unwrap(),
+    );
+    assert!(has(
+        &check_closure(&p, "anim_graph", on_b.id.as_str()),
+        "dep.skeleton_mismatch"
+    ));
 
     // a rig on the wrong skeleton inside a profile
     let mut bad = profile();
     let rig_a = rig(SKEL_A);
     let rig_b_wrong = rig(SKEL_A); // should be B for the target side
-    p.put("ik_rig", rig_a.id.as_str().to_string().as_str(), rig_a.to_text().unwrap());
+    p.put(
+        "ik_rig",
+        rig_a.id.as_str().to_string().as_str(),
+        rig_a.to_text().unwrap(),
+    );
     let mut rig_b_wrong = rig_b_wrong;
     rig_b_wrong.id = AssetRef::new();
-    p.put("ik_rig", rig_b_wrong.id.as_str().to_string().as_str(), rig_b_wrong.to_text().unwrap());
+    p.put(
+        "ik_rig",
+        rig_b_wrong.id.as_str().to_string().as_str(),
+        rig_b_wrong.to_text().unwrap(),
+    );
     bad.source_rig = Some(rig_a.id.clone());
     bad.target_rig = Some(rig_b_wrong.id.clone());
     bad.bone_map.clear();
     bad.chain_map.clear();
-    p.put("anim_retarget", bad.id.as_str().to_string().as_str(), bad.to_text().unwrap());
+    p.put(
+        "anim_retarget",
+        bad.id.as_str().to_string().as_str(),
+        bad.to_text().unwrap(),
+    );
     let d = check_closure(&p, "anim_retarget", bad.id.as_str());
-    assert_eq!(d.iter().filter(|d| d.code == "dep.skeleton_mismatch").count(), 1, "only the target rig is wrong: {d:?}");
+    assert_eq!(
+        d.iter()
+            .filter(|d| d.code == "dep.skeleton_mismatch")
+            .count(),
+        1,
+        "only the target rig is wrong: {d:?}"
+    );
 
     // an IK retargeter between rigs on different skeletons is fine by design
     let rig_b = rig(SKEL_B);
-    p.put("ik_rig", rig_b.id.as_str().to_string().as_str(), rig_b.to_text().unwrap());
+    p.put(
+        "ik_rig",
+        rig_b.id.as_str().to_string().as_str(),
+        rig_b.to_text().unwrap(),
+    );
     let rt = IkRetargetAsset::new("x", rig_a.id.clone(), rig_b.id.clone());
-    p.put("ik_retarget", rt.id.as_str().to_string().as_str(), rt.to_text().unwrap());
+    p.put(
+        "ik_retarget",
+        rt.id.as_str().to_string().as_str(),
+        rt.to_text().unwrap(),
+    );
     assert!(check_closure(&p, "ik_retarget", rt.id.as_str()).is_empty());
 }
 
@@ -1277,15 +2151,24 @@ fn dependency_cycles_between_assets_are_found() {
         let mut link = node("link", "anim.linked_graph", &[]);
         link.properties.insert("graph".into(), json!(links));
         g.main.add_node(link).unwrap();
-        g.main.add_connection(data_connection("link", "pose", "output", "pose")).unwrap();
+        g.main
+            .add_connection(data_connection("link", "pose", "output", "pose"))
+            .unwrap();
         g
     };
-    let (a, b, c) = ("d0a4b100-0000-4000-8000-0000000000a1", "d0a4b100-0000-4000-8000-0000000000a2", "d0a4b100-0000-4000-8000-0000000000a3");
+    let (a, b, c) = (
+        "d0a4b100-0000-4000-8000-0000000000a1",
+        "d0a4b100-0000-4000-8000-0000000000a2",
+        "d0a4b100-0000-4000-8000-0000000000a3",
+    );
     p.put("anim_graph", a, graph(a, b).to_text().unwrap());
     p.put("anim_graph", b, graph(b, c).to_text().unwrap());
     p.put("anim_graph", c, graph(c, a).to_text().unwrap());
     let d = check_closure(&p, "anim_graph", a);
-    let cycle = d.iter().find(|d| d.code == "dep.cycle").unwrap_or_else(|| panic!("{d:?}"));
+    let cycle = d
+        .iter()
+        .find(|d| d.code == "dep.cycle")
+        .unwrap_or_else(|| panic!("{d:?}"));
     assert!(cycle.message.contains(a) && cycle.message.contains(b) && cycle.message.contains(c));
     // a graph linking itself is caught by the graph validator
     let mut s = graph(a, a);
@@ -1298,8 +2181,12 @@ fn dependency_cycles_between_assets_are_found() {
             let mut leaf = AnimationGraphAsset::default();
             leaf.id = aref(c);
             leaf.skeleton = Some(aref(SKEL_A));
-            leaf.main.add_node(node("r", "anim.reference_pose", &[])).unwrap();
-            leaf.main.add_connection(data_connection("r", "pose", "output", "pose")).unwrap();
+            leaf.main
+                .add_node(node("r", "anim.reference_pose", &[]))
+                .unwrap();
+            leaf.main
+                .add_connection(data_connection("r", "pose", "output", "pose"))
+                .unwrap();
             leaf.to_text().unwrap()
         });
         check_closure(&p, "anim_graph", a)
@@ -1321,11 +2208,19 @@ fn v2_fixtures() -> Vec<(&'static str, String)> {
     blend.id = aref("b1e4d500-0000-4000-8000-0000000000c1");
     blend.name = "Locomotion".into();
     blend.skeleton = Some(aref(SKEL_A));
-    blend.x_axis = BlendAxis { name: "Speed".into(), min: 0.0, max: 600.0, ..BlendAxis::default() };
+    blend.x_axis = BlendAxis {
+        name: "Speed".into(),
+        min: 0.0,
+        max: 600.0,
+        ..BlendAxis::default()
+    };
     blend.samples = [(WALK, 0.0), (RUN, 600.0)]
         .iter()
         .enumerate()
-        .map(|(i, (s, x))| BlendSample { id: format!("sample-{i}"), ..BlendSample::new(Some(aref(s)), *x, None) })
+        .map(|(i, (s, x))| BlendSample {
+            id: format!("sample-{i}"),
+            ..BlendSample::new(Some(aref(s)), *x, None)
+        })
         .collect();
 
     let mut montage = montage_with_two_tracks();
@@ -1375,27 +2270,58 @@ fn v2_fixtures() -> Vec<(&'static str, String)> {
 #[test]
 fn v2_fixtures_match_the_writer() {
     for (name, expected) in v2_fixtures() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name);
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name);
         if std::env::var_os("REGEN_FIXTURES").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, &expected).unwrap();
         }
         let actual = fixture(name);
         let normalize = |s: &str| s.replace("\r\n", "\n");
-        assert_eq!(normalize(&actual), normalize(&expected), "{name} is stale; rerun with REGEN_FIXTURES=1");
+        assert_eq!(
+            normalize(&actual),
+            normalize(&expected),
+            "{name} is stale; rerun with REGEN_FIXTURES=1"
+        );
     }
 }
 
 #[test]
 fn every_checked_in_v2_fixture_reads_with_its_codec_and_is_a_stable_fixed_point() {
     for (name, parse_ok) in [
-        ("v2/locomotion.blendspace", BlendSpaceAsset::parse(&fixture("v2/locomotion.blendspace")).map(|a| a.to_text().unwrap())),
-        ("v2/reload.montage", AnimationMontageAsset::parse(&fixture("v2/reload.montage")).map(|a| a.to_text().unwrap())),
-        ("v2/locomotion.animgraph", AnimationGraphAsset::parse(&fixture("v2/locomotion.animgraph")).map(|a| a.to_text().unwrap())),
-        ("v2/humanoid_a.ikrig", IkRigAsset::parse(&fixture("v2/humanoid_a.ikrig")).map(|a| a.to_text().unwrap())),
-        ("v2/a_to_b.animretarget", RetargetProfileAsset::parse(&fixture("v2/a_to_b.animretarget")).map(|a| a.to_text().unwrap())),
-        ("v2/a_to_b.ikretarget", IkRetargetAsset::parse(&fixture("v2/a_to_b.ikretarget")).map(|a| a.to_text().unwrap())),
-        ("v2/locomotion.posedb", PoseDbAsset::parse(&fixture("v2/locomotion.posedb")).map(|a| a.to_text().unwrap())),
+        (
+            "v2/locomotion.blendspace",
+            BlendSpaceAsset::parse(&fixture("v2/locomotion.blendspace"))
+                .map(|a| a.to_text().unwrap()),
+        ),
+        (
+            "v2/reload.montage",
+            AnimationMontageAsset::parse(&fixture("v2/reload.montage"))
+                .map(|a| a.to_text().unwrap()),
+        ),
+        (
+            "v2/locomotion.animgraph",
+            AnimationGraphAsset::parse(&fixture("v2/locomotion.animgraph"))
+                .map(|a| a.to_text().unwrap()),
+        ),
+        (
+            "v2/humanoid_a.ikrig",
+            IkRigAsset::parse(&fixture("v2/humanoid_a.ikrig")).map(|a| a.to_text().unwrap()),
+        ),
+        (
+            "v2/a_to_b.animretarget",
+            RetargetProfileAsset::parse(&fixture("v2/a_to_b.animretarget"))
+                .map(|a| a.to_text().unwrap()),
+        ),
+        (
+            "v2/a_to_b.ikretarget",
+            IkRetargetAsset::parse(&fixture("v2/a_to_b.ikretarget")).map(|a| a.to_text().unwrap()),
+        ),
+        (
+            "v2/locomotion.posedb",
+            PoseDbAsset::parse(&fixture("v2/locomotion.posedb")).map(|a| a.to_text().unwrap()),
+        ),
     ] {
         let written = parse_ok.unwrap_or_else(|e| panic!("{name}: {e}"));
         let a: Value = serde_json::from_str(&written).unwrap();
@@ -1414,8 +2340,15 @@ fn registered_kinds_and_extensions_cover_exactly_the_animation_family() {
         let ext = dependencies::extension_of(kind).unwrap();
         assert_eq!(dependencies::kind_of_extension(ext), Some(kind));
     }
-    assert_eq!(dependencies::kind_of_extension("MONTAGE"), Some("anim_montage"));
-    assert_eq!(dependencies::kind_of_extension("animmontage"), None, "no second spelling");
+    assert_eq!(
+        dependencies::kind_of_extension("MONTAGE"),
+        Some("anim_montage")
+    );
+    assert_eq!(
+        dependencies::kind_of_extension("animmontage"),
+        None,
+        "no second spelling"
+    );
     assert_eq!(dependencies::kind_of_extension("anim_montage"), None);
     assert_eq!(dependencies::kind_of_extension("png"), None);
 }
@@ -1430,23 +2363,44 @@ fn the_asset_report_combines_codec_own_checks_and_closure_checks() {
     let bytes = p.files[&("blendspace".into(), BS.into())].clone();
     let d = asset_report(&p, "blendspace", &bytes);
     assert!(has(&d, "dep.skeleton_mismatch"), "{d:?}");
-    assert!(has(&d, "blendspace.too_few_samples") == false, "two samples in a 1D space is enough");
+    assert!(
+        has(&d, "blendspace.too_few_samples") == false,
+        "two samples in a 1D space is enough"
+    );
 
     // unreadable files are one clear error, not a panic
     let d = asset_report(&p, "montage", b"{ definitely not json");
     assert_eq!(codes(&d), ["asset.unreadable"]);
-    let d = asset_report(&p, "anim_montage", br#"{"version":9,"id":"c0a7a600-0000-4000-8000-000000000001"}"#);
+    let d = asset_report(
+        &p,
+        "anim_montage",
+        br#"{"version":9,"id":"c0a7a600-0000-4000-8000-000000000001"}"#,
+    );
     assert!(d[0].message.contains("newer"), "{d:?}");
 
     // own checks use the skeleton content when it resolves
     let mut g = locomotion_graph();
-    g.main.nodes.get_mut("walk").unwrap().properties.insert("looping".into(), json!("sometimes"));
+    g.main
+        .nodes
+        .get_mut("walk")
+        .unwrap()
+        .properties
+        .insert("looping".into(), json!("sometimes"));
     let mut ik = node("ik", "anim.two_bone_ik", &[]);
-    ik.properties.insert("end_bone".into(), json!("missing_bone"));
+    ik.properties
+        .insert("end_bone".into(), json!("missing_bone"));
     g.main.add_node(ik).unwrap();
-    p.put("anim_graph", g.id.as_str().to_string().as_str(), g.to_text().unwrap());
+    p.put(
+        "anim_graph",
+        g.id.as_str().to_string().as_str(),
+        g.to_text().unwrap(),
+    );
     let d = asset_report(&p, "anim_graph", g.to_text().unwrap().as_bytes());
-    assert!(has(&d, "graph.bad_property") && has(&d, "graph.unknown_bone"), "{:?}", codes(&d));
+    assert!(
+        has(&d, "graph.bad_property") && has(&d, "graph.unknown_bone"),
+        "{:?}",
+        codes(&d)
+    );
 
     // a sequence whose track names a bone the skeleton lacks
     let seq = format!(
@@ -1457,28 +2411,73 @@ fn the_asset_report_combines_codec_own_checks_and_closure_checks() {
 
     // a rig with no skeleton says so; a clean rig reports nothing
     let mut r = rig(SKEL_A);
-    p.put("ik_rig", r.id.as_str().to_string().as_str(), r.to_text().unwrap());
+    p.put(
+        "ik_rig",
+        r.id.as_str().to_string().as_str(),
+        r.to_text().unwrap(),
+    );
     assert!(asset_report(&p, "ik_rig", r.to_text().unwrap().as_bytes()).is_empty());
     r.skeleton = None;
-    assert!(has(&asset_report(&p, "ik_rig", r.to_text().unwrap().as_bytes()), "ikrig.no_skeleton"));
+    assert!(has(
+        &asset_report(&p, "ik_rig", r.to_text().unwrap().as_bytes()),
+        "ikrig.no_skeleton"
+    ));
 
     // a skeleton report catches a broken hierarchy
-    let mut bad = SkeletonAsset::new(Skeleton { bones: vec![bone("a", Some("ghost"))] });
+    let mut bad = SkeletonAsset::new(Skeleton {
+        bones: vec![bone("a", Some("ghost"))],
+    });
     bad.id = skeleton_id(SKEL_B);
-    assert!(has(&asset_report(&p, "skeleton", bad.to_text().as_bytes()), "asset.unreadable"), "a skeleton with a dangling parent does not even load");
+    assert!(
+        has(
+            &asset_report(&p, "skeleton", bad.to_text().as_bytes()),
+            "asset.unreadable"
+        ),
+        "a skeleton with a dangling parent does not even load"
+    );
 }
 
 #[test]
 fn picker_candidates_are_described_from_real_files_and_filtered_by_skeleton() {
     use skeletal_assets::picker::{describe, filter, Compat, PickerFilter};
     let p = Project::new();
-    let candidates: Vec<_> = [("animseq", WALK, "walk.animseq"), ("animseq", RUN, "run.animseq"), ("animseq", JUMP, "jump.animseq")]
-        .iter()
-        .map(|(kind, id, path)| describe(path, &p.files[&(kind.to_string(), id.to_string())]).unwrap())
-        .collect();
-    let entries = filter(candidates.clone(), &PickerFilter { kind: "animseq", skeleton: Some(SKEL_A.into()), show_incompatible: true });
+    let candidates: Vec<_> = [
+        ("animseq", WALK, "walk.animseq"),
+        ("animseq", RUN, "run.animseq"),
+        ("animseq", JUMP, "jump.animseq"),
+    ]
+    .iter()
+    .map(|(kind, id, path)| describe(path, &p.files[&(kind.to_string(), id.to_string())]).unwrap())
+    .collect();
+    let entries = filter(
+        candidates.clone(),
+        &PickerFilter {
+            kind: "animseq",
+            skeleton: Some(SKEL_A.into()),
+            show_incompatible: true,
+        },
+    );
     assert_eq!(entries.len(), 3);
-    assert_eq!(entries.iter().filter(|e| e.compat == Compat::Compatible).count(), 2);
-    assert!(entries.iter().any(|e| matches!(&e.compat, Compat::Incompatible { asset_skeleton } if asset_skeleton == SKEL_B)));
-    assert_eq!(filter(candidates, &PickerFilter { kind: "animseq", skeleton: Some(SKEL_A.into()), show_incompatible: false }).len(), 2);
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|e| e.compat == Compat::Compatible)
+            .count(),
+        2
+    );
+    assert!(entries.iter().any(
+        |e| matches!(&e.compat, Compat::Incompatible { asset_skeleton } if asset_skeleton == SKEL_B)
+    ));
+    assert_eq!(
+        filter(
+            candidates,
+            &PickerFilter {
+                kind: "animseq",
+                skeleton: Some(SKEL_A.into()),
+                show_incompatible: false
+            }
+        )
+        .len(),
+        2
+    );
 }

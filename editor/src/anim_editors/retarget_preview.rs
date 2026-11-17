@@ -7,7 +7,6 @@
 use std::sync::Arc;
 
 use skeletal_assets::assets::AnimSeqAsset;
-use skeletal_assets::diagnostics::Diagnostic;
 use skeletal_assets::ik_retarget::IkRetargetAsset;
 use skeletal_assets::ik_rig::IkRigAsset;
 use skeletal_assets::retarget::RetargetProfileAsset;
@@ -26,7 +25,6 @@ pub struct RetargetPreview {
     clip: Option<CompiledClip>,
     source_bind: SkeletonProjection,
     target_bind: SkeletonProjection,
-    pub diagnostics: Vec<Diagnostic>,
 }
 
 impl RetargetPreview {
@@ -47,7 +45,6 @@ impl RetargetPreview {
         ss: &Skeleton,
         ts: &Skeleton,
     ) -> Self {
-        let diagnostics = plan.diagnostics.clone();
         let clip = sample.map(|a| CompiledClip::compile(a, &source));
         Self {
             source_bind: SkeletonProjection::new(ss),
@@ -56,7 +53,6 @@ impl RetargetPreview {
             target,
             plan,
             clip,
-            diagnostics,
         }
     }
 
@@ -113,6 +109,7 @@ impl RetargetPreview {
         self.clip.as_ref().map_or(0.0, |c| c.duration)
     }
 
+    #[cfg(test)]
     pub fn has_sample(&self) -> bool {
         self.clip.is_some()
     }
@@ -205,6 +202,6 @@ mod tests {
         let sk = skeleton();
         let profile = RetargetProfileAsset::new("Empty", None, None);
         let preview = RetargetPreview::for_profile(&profile, &sk, &sk, None, None).unwrap();
-        assert!(!preview.diagnostics.is_empty());
+        assert!(!preview.plan.diagnostics.is_empty());
     }
 }

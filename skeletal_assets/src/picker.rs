@@ -24,7 +24,9 @@ pub struct PickerCandidate {
 pub enum Compat {
     Compatible,
     /// The asset is for another skeleton.
-    Incompatible { asset_skeleton: String },
+    Incompatible {
+        asset_skeleton: String,
+    },
     /// One side has no skeleton, so nothing can be said.
     Unknown,
 }
@@ -38,7 +40,11 @@ pub struct PickerEntry {
 impl PickerEntry {
     /// First group of the id, enough to tell assets apart on screen.
     pub fn short_id(&self) -> &str {
-        self.candidate.id.split('-').next().unwrap_or(&self.candidate.id)
+        self.candidate
+            .id
+            .split('-')
+            .next()
+            .unwrap_or(&self.candidate.id)
     }
 }
 
@@ -76,7 +82,10 @@ pub fn describe(path: &str, bytes: &[u8]) -> Option<PickerCandidate> {
 
 /// Entries of `filter.kind`, sorted by name then id. A skeleton picker (the
 /// kind `skeleton`) is never filtered by skeleton.
-pub fn filter(candidates: impl IntoIterator<Item = PickerCandidate>, filter: &PickerFilter) -> Vec<PickerEntry> {
+pub fn filter(
+    candidates: impl IntoIterator<Item = PickerCandidate>,
+    filter: &PickerFilter,
+) -> Vec<PickerEntry> {
     let mut entries: Vec<PickerEntry> = candidates
         .into_iter()
         .filter(|c| c.kind == filter.kind)
@@ -84,7 +93,9 @@ pub fn filter(candidates: impl IntoIterator<Item = PickerCandidate>, filter: &Pi
             let compat = match (&filter.skeleton, &candidate.primary_skeleton) {
                 _ if filter.kind == "skeleton" => Compat::Compatible,
                 (Some(want), Some(have)) if want == have => Compat::Compatible,
-                (Some(_), Some(have)) => Compat::Incompatible { asset_skeleton: have.clone() },
+                (Some(_), Some(have)) => Compat::Incompatible {
+                    asset_skeleton: have.clone(),
+                },
                 (None, _) => Compat::Compatible,
                 (Some(_), None) => Compat::Unknown,
             };
@@ -93,7 +104,8 @@ pub fn filter(candidates: impl IntoIterator<Item = PickerCandidate>, filter: &Pi
         .filter(|e| filter.show_incompatible || !matches!(e.compat, Compat::Incompatible { .. }))
         .collect();
     entries.sort_by(|a, b| {
-        (a.candidate.name.to_lowercase(), &a.candidate.id).cmp(&(b.candidate.name.to_lowercase(), &b.candidate.id))
+        (a.candidate.name.to_lowercase(), &a.candidate.id)
+            .cmp(&(b.candidate.name.to_lowercase(), &b.candidate.id))
     });
     entries
 }
@@ -102,8 +114,19 @@ pub fn filter(candidates: impl IntoIterator<Item = PickerCandidate>, filter: &Pi
 mod tests {
     use super::*;
 
-    fn candidate(id: &str, kind: &'static str, name: &str, skeleton: Option<&str>) -> PickerCandidate {
-        PickerCandidate { id: id.into(), kind, name: name.into(), path: format!("{name}.x"), primary_skeleton: skeleton.map(Into::into) }
+    fn candidate(
+        id: &str,
+        kind: &'static str,
+        name: &str,
+        skeleton: Option<&str>,
+    ) -> PickerCandidate {
+        PickerCandidate {
+            id: id.into(),
+            kind,
+            name: name.into(),
+            path: format!("{name}.x"),
+            primary_skeleton: skeleton.map(Into::into),
+        }
     }
 
     #[test]
@@ -115,20 +138,60 @@ mod tests {
             candidate("4", "animseq", "Draft", None),
             candidate("5", "blendspace", "Loco", Some("A")),
         ];
-        let want = PickerFilter { kind: "animseq", skeleton: Some("A".into()), show_incompatible: false };
-        let names = |e: &[PickerEntry]| e.iter().map(|e| e.candidate.name.clone()).collect::<Vec<_>>();
+        let want = PickerFilter {
+            kind: "animseq",
+            skeleton: Some("A".into()),
+            show_incompatible: false,
+        };
+        let names = |e: &[PickerEntry]| {
+            e.iter()
+                .map(|e| e.candidate.name.clone())
+                .collect::<Vec<_>>()
+        };
         let hidden = filter(all.clone(), &want);
-        assert_eq!(names(&hidden), ["Draft", "run", "Walk"], "case-insensitive name order; B hidden; unknown kept");
+        assert_eq!(
+            names(&hidden),
+            ["Draft", "run", "Walk"],
+            "case-insensitive name order; B hidden; unknown kept"
+        );
         assert_eq!(hidden[0].compat, Compat::Unknown);
 
-        let shown = filter(all.clone(), &PickerFilter { show_incompatible: true, ..want.clone() });
+        let shown = filter(
+            all.clone(),
+            &PickerFilter {
+                show_incompatible: true,
+                ..want.clone()
+            },
+        );
         let jump = shown.iter().find(|e| e.candidate.name == "Jump").unwrap();
-        assert_eq!(jump.compat, Compat::Incompatible { asset_skeleton: "B".into() });
+        assert_eq!(
+            jump.compat,
+            Compat::Incompatible {
+                asset_skeleton: "B".into()
+            }
+        );
 
-        let any = filter(all.clone(), &PickerFilter { skeleton: None, ..want });
+        let any = filter(
+            all.clone(),
+            &PickerFilter {
+                skeleton: None,
+                ..want
+            },
+        );
         assert_eq!(any.len(), 4);
-        let skeletons = filter([candidate("9", "skeleton", "Humanoid", Some("9"))], &PickerFilter { kind: "skeleton", skeleton: Some("A".into()), show_incompatible: false });
-        assert_eq!(skeletons.len(), 1, "a skeleton picker is not filtered by skeleton");
+        let skeletons = filter(
+            [candidate("9", "skeleton", "Humanoid", Some("9"))],
+            &PickerFilter {
+                kind: "skeleton",
+                skeleton: Some("A".into()),
+                show_incompatible: false,
+            },
+        );
+        assert_eq!(
+            skeletons.len(),
+            1,
+            "a skeleton picker is not filtered by skeleton"
+        );
     }
 
     #[test]
@@ -136,7 +199,10 @@ mod tests {
         let text = r#"{"version":1,"id":"aaaaaaaa-0000-4000-8000-000000000001","skeleton":"11111111-1111-4111-8111-111111111111","name":"Walk Cycle","duration":1.0,"fps":30.0,"tracks":[]}"#;
         let c = describe("Content/Anim/walk.animseq", text.as_bytes()).unwrap();
         assert_eq!((c.kind, c.name.as_str()), ("animseq", "Walk Cycle"));
-        assert_eq!(c.primary_skeleton.as_deref(), Some("11111111-1111-4111-8111-111111111111"));
+        assert_eq!(
+            c.primary_skeleton.as_deref(),
+            Some("11111111-1111-4111-8111-111111111111")
+        );
         assert!(describe("x.png", b"").is_none());
         assert!(describe("x.animseq", b"nope").is_none());
     }

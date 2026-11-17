@@ -20,7 +20,10 @@ pub struct Effector {
 
 impl Effector {
     pub fn at(translation: Vec3) -> Self {
-        Self { translation, rotation: Quat::IDENTITY }
+        Self {
+            translation,
+            rotation: Quat::IDENTITY,
+        }
     }
 }
 
@@ -31,22 +34,39 @@ pub struct JointLimits(pub HashMap<usize, ([f32; 3], [f32; 3])>);
 impl JointLimits {
     /// Clamp one bone's local rotation to its limits. Returns whether it moved.
     pub fn clamp(&self, bone: usize, local: &mut BoneTransform) -> bool {
-        let Some((min, max)) = self.0.get(&bone) else { return false };
+        let Some((min, max)) = self.0.get(&bone) else {
+            return false;
+        };
         let (x, y, z) = local.rotation.to_euler(EulerRot::XYZ);
         let deg = [x.to_degrees(), y.to_degrees(), z.to_degrees()];
         let clamped = [0, 1, 2].map(|i| deg[i].clamp(min[i], max[i]));
         if clamped == deg {
             return false;
         }
-        local.rotation = Quat::from_euler(EulerRot::XYZ, clamped[0].to_radians(), clamped[1].to_radians(), clamped[2].to_radians()).normalize();
+        local.rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            clamped[0].to_radians(),
+            clamped[1].to_radians(),
+            clamped[2].to_radians(),
+        )
+        .normalize();
         true
     }
 }
 
 /// Rotate `bone` in mesh space by `delta`, keeping its position.
-fn rotate_in_mesh_space(skel: &RuntimeSkeleton, bones: &mut [BoneTransform], bone: usize, delta: Quat) {
+fn rotate_in_mesh_space(
+    skel: &RuntimeSkeleton,
+    bones: &mut [BoneTransform],
+    bone: usize,
+    delta: Quat,
+) {
     let parent_rot = match skel.parents[bone] {
-        Some(p) => skel.bone_mesh_space(bones, p).to_scale_rotation_translation().1,
+        Some(p) => {
+            skel.bone_mesh_space(bones, p)
+                .to_scale_rotation_translation()
+                .1
+        }
         None => Quat::IDENTITY,
     };
     let mesh_rot = parent_rot * bones[bone].rotation;
@@ -54,16 +74,27 @@ fn rotate_in_mesh_space(skel: &RuntimeSkeleton, bones: &mut [BoneTransform], bon
 }
 
 /// Set `bone`'s mesh-space rotation outright.
-fn set_mesh_rotation(skel: &RuntimeSkeleton, bones: &mut [BoneTransform], bone: usize, mesh_rot: Quat) {
+fn set_mesh_rotation(
+    skel: &RuntimeSkeleton,
+    bones: &mut [BoneTransform],
+    bone: usize,
+    mesh_rot: Quat,
+) {
     let parent_rot = match skel.parents[bone] {
-        Some(p) => skel.bone_mesh_space(bones, p).to_scale_rotation_translation().1,
+        Some(p) => {
+            skel.bone_mesh_space(bones, p)
+                .to_scale_rotation_translation()
+                .1
+        }
         None => Quat::IDENTITY,
     };
     bones[bone].rotation = (parent_rot.inverse() * mesh_rot).normalize();
 }
 
 fn mesh_position(skel: &RuntimeSkeleton, bones: &[BoneTransform], bone: usize) -> Vec3 {
-    skel.bone_mesh_space(bones, bone).to_scale_rotation_translation().2
+    skel.bone_mesh_space(bones, bone)
+        .to_scale_rotation_translation()
+        .2
 }
 
 fn arc(from: Vec3, to: Vec3) -> Quat {
@@ -89,7 +120,12 @@ pub struct TwoBoneParams {
 
 impl Default for TwoBoneParams {
     fn default() -> Self {
-        Self { alpha: 1.0, allow_stretch: false, max_stretch: 1.25, take_rotation: false }
+        Self {
+            alpha: 1.0,
+            allow_stretch: false,
+            max_stretch: 1.25,
+            take_rotation: false,
+        }
     }
 }
 
@@ -129,7 +165,10 @@ pub fn solve_two_bone(
     let l1 = (b - a).length();
     let l2 = (c - b).length();
     if l1 < 1e-6 || l2 < 1e-6 {
-        return Some(TwoBoneReport { out_of_reach: false, stretch: 1.0 });
+        return Some(TwoBoneReport {
+            out_of_reach: false,
+            stretch: 1.0,
+        });
     }
     let to_target = effector.translation - a;
     let dist = to_target.length();
@@ -142,14 +181,20 @@ pub fn solve_two_bone(
         bones[end].translation *= stretch;
     }
     let (l1, l2) = (l1 * stretch, l2 * stretch);
-    let axis = if dist > 1e-6 { to_target / dist } else { (c - a).normalize_or_zero() };
+    let axis = if dist > 1e-6 {
+        to_target / dist
+    } else {
+        (c - a).normalize_or_zero()
+    };
     let min_d = (l1 - l2).abs() + 1e-4;
     let max_d = l1 + l2 - 1e-4;
     let d = dist.clamp(min_d, max_d.max(min_d));
 
     // bend direction, perpendicular to the reach axis
     let current_bend = (b - a) - axis * (b - a).dot(axis);
-    let wanted = pole.map(|p| p - axis * p.dot(axis)).filter(|v| v.length_squared() > 1e-10);
+    let wanted = pole
+        .map(|p| p - axis * p.dot(axis))
+        .filter(|v| v.length_squared() > 1e-10);
     let bend = wanted
         .or(Some(current_bend).filter(|v| v.length_squared() > 1e-10))
         .map(Vec3::normalize)
@@ -176,7 +221,10 @@ pub fn solve_two_bone(
             bones[bone] = input[slot].blend(&bones[bone], alpha);
         }
     }
-    Some(TwoBoneReport { out_of_reach, stretch })
+    Some(TwoBoneReport {
+        out_of_reach,
+        stretch,
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -190,7 +238,13 @@ pub struct FabrikParams {
 
 impl Default for FabrikParams {
     fn default() -> Self {
-        Self { alpha: 1.0, precision: 1e-3, max_iterations: 10, take_rotation: false, respect_limits: true }
+        Self {
+            alpha: 1.0,
+            precision: 1e-3,
+            max_iterations: 10,
+            take_rotation: false,
+            respect_limits: true,
+        }
     }
 }
 
@@ -214,7 +268,10 @@ pub fn solve_fabrik(
         return None;
     }
     let input: Vec<BoneTransform> = chain.iter().map(|&b| bones[b]).collect();
-    let mut pos: Vec<Vec3> = chain.iter().map(|&b| mesh_position(skel, bones, b)).collect();
+    let mut pos: Vec<Vec3> = chain
+        .iter()
+        .map(|&b| mesh_position(skel, bones, b))
+        .collect();
     let original = pos.clone();
     let lengths: Vec<f32> = pos.windows(2).map(|w| (w[1] - w[0]).length()).collect();
     let total: f32 = lengths.iter().sum();
@@ -230,7 +287,9 @@ pub fn solve_fabrik(
             pos[i] = pos[i - 1] + dir * lengths[i - 1];
         }
     } else {
-        while iterations < params.max_iterations.max(1) && (pos[n - 1] - target).length() > params.precision {
+        while iterations < params.max_iterations.max(1)
+            && (pos[n - 1] - target).length() > params.precision
+        {
             pos[n - 1] = target;
             for i in (0..n - 1).rev() {
                 let dir = (pos[i] - pos[i + 1]).normalize_or_zero();
@@ -247,7 +306,8 @@ pub fn solve_fabrik(
 
     // rotations: swing each bone from its original child direction to the new one
     for i in 0..n - 1 {
-        let now_dir = mesh_position(skel, bones, chain[i + 1]) - mesh_position(skel, bones, chain[i]);
+        let now_dir =
+            mesh_position(skel, bones, chain[i + 1]) - mesh_position(skel, bones, chain[i]);
         let want_dir = pos[i + 1] - pos[i];
         // the bone's child offset is measured after its parent's change
         let _ = &original;
@@ -270,7 +330,10 @@ pub fn solve_fabrik(
         }
     }
     let tip_error = (mesh_position(skel, bones, chain[n - 1]) - target).length();
-    Some(FabrikReport { iterations, tip_error })
+    Some(FabrikReport {
+        iterations,
+        tip_error,
+    })
 }
 
 #[cfg(test)]
@@ -287,7 +350,10 @@ pub(crate) mod tests {
                     id: format!("b{i}"),
                     name: format!("b{i}"),
                     parent: (i > 0).then(|| format!("b{}", i - 1)),
-                    bind_transform: Transform { translation: AV3::new(0.0, if i == 0 { 0.0 } else { len }, 0.0), ..Transform::IDENTITY },
+                    bind_transform: Transform {
+                        translation: AV3::new(0.0, if i == 0 { 0.0 } else { len }, 0.0),
+                        ..Transform::IDENTITY
+                    },
                 })
                 .collect(),
         };
@@ -303,15 +369,36 @@ pub(crate) mod tests {
         let skel = limb(3, 1.0);
         let mut bones = skel.bind.clone();
         let target = Vec3::new(1.2, 0.8, 0.0);
-        let report = solve_two_bone(&skel, &mut bones, 2, &Effector::at(target), Some(Vec3::X), &TwoBoneParams::default(), &JointLimits::default()).unwrap();
+        let report = solve_two_bone(
+            &skel,
+            &mut bones,
+            2,
+            &Effector::at(target),
+            Some(Vec3::X),
+            &TwoBoneParams::default(),
+            &JointLimits::default(),
+        )
+        .unwrap();
         assert!(!report.out_of_reach);
-        assert!((tip(&skel, &bones, 2) - target).length() < 1e-3, "{:?}", tip(&skel, &bones, 2));
+        assert!(
+            (tip(&skel, &bones, 2) - target).length() < 1e-3,
+            "{:?}",
+            tip(&skel, &bones, 2)
+        );
         assert!(((tip(&skel, &bones, 1) - tip(&skel, &bones, 0)).length() - 1.0).abs() < 1e-3);
         assert!(((tip(&skel, &bones, 2) - tip(&skel, &bones, 1)).length() - 1.0).abs() < 1e-3);
         // the elbow bent toward the pole (+x side is the shorter way round to +x target)
         let again = {
             let mut b2 = skel.bind.clone();
-            solve_two_bone(&skel, &mut b2, 2, &Effector::at(target), Some(Vec3::X), &TwoBoneParams::default(), &JointLimits::default());
+            solve_two_bone(
+                &skel,
+                &mut b2,
+                2,
+                &Effector::at(target),
+                Some(Vec3::X),
+                &TwoBoneParams::default(),
+                &JointLimits::default(),
+            );
             b2
         };
         assert_eq!(bones, again, "deterministic");
@@ -323,11 +410,30 @@ pub(crate) mod tests {
         let target = Vec3::new(0.0, 1.0, 0.0);
         let mut left = skel.bind.clone();
         let mut right = skel.bind.clone();
-        solve_two_bone(&skel, &mut left, 2, &Effector::at(target), Some(Vec3::X), &TwoBoneParams::default(), &JointLimits::default());
-        solve_two_bone(&skel, &mut right, 2, &Effector::at(target), Some(-Vec3::X), &TwoBoneParams::default(), &JointLimits::default());
+        solve_two_bone(
+            &skel,
+            &mut left,
+            2,
+            &Effector::at(target),
+            Some(Vec3::X),
+            &TwoBoneParams::default(),
+            &JointLimits::default(),
+        );
+        solve_two_bone(
+            &skel,
+            &mut right,
+            2,
+            &Effector::at(target),
+            Some(-Vec3::X),
+            &TwoBoneParams::default(),
+            &JointLimits::default(),
+        );
         assert!(tip(&skel, &left, 1).x > 0.3);
         assert!(tip(&skel, &right, 1).x < -0.3);
-        assert!((tip(&skel, &left, 2) - target).length() < 1e-3 && (tip(&skel, &right, 2) - target).length() < 1e-3);
+        assert!(
+            (tip(&skel, &left, 2) - target).length() < 1e-3
+                && (tip(&skel, &right, 2) - target).length() < 1e-3
+        );
     }
 
     #[test]
@@ -335,12 +441,34 @@ pub(crate) mod tests {
         let skel = limb(3, 1.0);
         let far = Vec3::new(5.0, 0.0, 0.0);
         let mut bones = skel.bind.clone();
-        let r = solve_two_bone(&skel, &mut bones, 2, &Effector::at(far), None, &TwoBoneParams::default(), &JointLimits::default()).unwrap();
+        let r = solve_two_bone(
+            &skel,
+            &mut bones,
+            2,
+            &Effector::at(far),
+            None,
+            &TwoBoneParams::default(),
+            &JointLimits::default(),
+        )
+        .unwrap();
         assert!(r.out_of_reach);
         assert!((tip(&skel, &bones, 2) - Vec3::new(2.0, 0.0, 0.0)).length() < 1e-2);
         let mut stretched = skel.bind.clone();
-        let params = TwoBoneParams { allow_stretch: true, max_stretch: 1.25, ..Default::default() };
-        let r = solve_two_bone(&skel, &mut stretched, 2, &Effector::at(far), None, &params, &JointLimits::default()).unwrap();
+        let params = TwoBoneParams {
+            allow_stretch: true,
+            max_stretch: 1.25,
+            ..Default::default()
+        };
+        let r = solve_two_bone(
+            &skel,
+            &mut stretched,
+            2,
+            &Effector::at(far),
+            None,
+            &params,
+            &JointLimits::default(),
+        )
+        .unwrap();
         assert!((r.stretch - 1.25).abs() < 1e-6);
         assert!((tip(&skel, &stretched, 2).length() - 2.5).abs() < 1e-2);
     }
@@ -351,8 +479,27 @@ pub(crate) mod tests {
         let target = Vec3::new(1.0, 1.0, 0.0);
         let mut full = skel.bind.clone();
         let mut none = skel.bind.clone();
-        solve_two_bone(&skel, &mut full, 2, &Effector::at(target), Some(Vec3::X), &TwoBoneParams::default(), &JointLimits::default());
-        solve_two_bone(&skel, &mut none, 2, &Effector::at(target), Some(Vec3::X), &TwoBoneParams { alpha: 0.0, ..Default::default() }, &JointLimits::default());
+        solve_two_bone(
+            &skel,
+            &mut full,
+            2,
+            &Effector::at(target),
+            Some(Vec3::X),
+            &TwoBoneParams::default(),
+            &JointLimits::default(),
+        );
+        solve_two_bone(
+            &skel,
+            &mut none,
+            2,
+            &Effector::at(target),
+            Some(Vec3::X),
+            &TwoBoneParams {
+                alpha: 0.0,
+                ..Default::default()
+            },
+            &JointLimits::default(),
+        );
         assert_eq!(none, skel.bind);
         assert!((tip(&skel, &full, 2) - target).length() < 1e-3);
     }
@@ -363,18 +510,48 @@ pub(crate) mod tests {
         let chain = [0, 1, 2, 3, 4];
         let target = Vec3::new(2.0, 2.0, 1.0);
         let mut a = skel.bind.clone();
-        let rep = solve_fabrik(&skel, &mut a, &chain, &Effector::at(target), &FabrikParams { max_iterations: 40, precision: 1e-4, ..Default::default() }, &JointLimits::default()).unwrap();
+        let rep = solve_fabrik(
+            &skel,
+            &mut a,
+            &chain,
+            &Effector::at(target),
+            &FabrikParams {
+                max_iterations: 40,
+                precision: 1e-4,
+                ..Default::default()
+            },
+            &JointLimits::default(),
+        )
+        .unwrap();
         assert!(rep.tip_error < 1e-2, "{rep:?}");
         for w in chain.windows(2) {
             assert!(((tip(&skel, &a, w[1]) - tip(&skel, &a, w[0])).length() - 1.0).abs() < 1e-3);
         }
         assert!(tip(&skel, &a, 0).length() < 1e-4, "root stays");
         let mut b = skel.bind.clone();
-        solve_fabrik(&skel, &mut b, &chain, &Effector::at(target), &FabrikParams { max_iterations: 40, precision: 1e-4, ..Default::default() }, &JointLimits::default());
+        solve_fabrik(
+            &skel,
+            &mut b,
+            &chain,
+            &Effector::at(target),
+            &FabrikParams {
+                max_iterations: 40,
+                precision: 1e-4,
+                ..Default::default()
+            },
+            &JointLimits::default(),
+        );
         assert_eq!(a, b);
         // unreachable: a straight line toward the target
         let mut far = skel.bind.clone();
-        solve_fabrik(&skel, &mut far, &chain, &Effector::at(Vec3::new(10.0, 0.0, 0.0)), &FabrikParams::default(), &JointLimits::default());
+        solve_fabrik(
+            &skel,
+            &mut far,
+            &chain,
+            &Effector::at(Vec3::new(10.0, 0.0, 0.0)),
+            &FabrikParams::default(),
+            &JointLimits::default(),
+        );
         assert!((tip(&skel, &far, 4) - Vec3::new(4.0, 0.0, 0.0)).length() < 1e-2);
     }
 
@@ -384,8 +561,20 @@ pub(crate) mod tests {
         let mut limits = JointLimits::default();
         limits.0.insert(1, ([-5.0, -5.0, -5.0], [5.0, 5.0, 5.0]));
         let mut bones = skel.bind.clone();
-        solve_two_bone(&skel, &mut bones, 2, &Effector::at(Vec3::new(1.0, 1.0, 0.0)), Some(Vec3::X), &TwoBoneParams::default(), &limits);
+        solve_two_bone(
+            &skel,
+            &mut bones,
+            2,
+            &Effector::at(Vec3::new(1.0, 1.0, 0.0)),
+            Some(Vec3::X),
+            &TwoBoneParams::default(),
+            &limits,
+        );
         let (x, y, z) = bones[1].rotation.to_euler(EulerRot::XYZ);
-        assert!(x.to_degrees().abs() <= 5.001 && y.to_degrees().abs() <= 5.001 && z.to_degrees().abs() <= 5.001);
+        assert!(
+            x.to_degrees().abs() <= 5.001
+                && y.to_degrees().abs() <= 5.001
+                && z.to_degrees().abs() <= 5.001
+        );
     }
 }

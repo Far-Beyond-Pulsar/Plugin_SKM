@@ -23,8 +23,8 @@ use skeletal_assets::ik_retarget::IkRetargetAsset;
 use skeletal_assets::ik_rig::IkRigAsset;
 use skeletal_assets::montage::AnimationMontageAsset;
 use skeletal_assets::pose_db::{
-    check_index, derived_index_path, encode_index, IndexKey, IndexState, PoseDbAsset,
-    INDEX_BUILDER_VERSION,
+    INDEX_BUILDER_VERSION, IndexKey, IndexState, PoseDbAsset, check_index, derived_index_path,
+    encode_index,
 };
 use skeletal_assets::retarget::RetargetProfileAsset;
 use skeletal_assets::runtime::graph::compile::AssetSource;

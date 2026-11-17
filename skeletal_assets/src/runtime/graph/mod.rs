@@ -14,17 +14,17 @@ use std::sync::Arc;
 
 use glam::Vec3;
 
+use crate::anim_graph::catalogue::{GraphKind, ParamType};
 use crate::diagnostics::Diagnostic;
 use crate::montage::BlendCurve;
-use crate::anim_graph::catalogue::{GraphKind, ParamType};
 
 use super::blendspace::CompiledBlendSpace;
 use super::clip::CompiledClip;
 use super::ik::{Effector, TwoBoneParams};
 use super::ikrig::CompiledIkRig;
 use super::montage::MontageSet;
-use super::posesearch::{MirrorTable, PoseIndex, SearchClip};
 use super::pose::RuntimeSkeleton;
+use super::posesearch::{MirrorTable, PoseIndex, SearchClip};
 use super::retarget::RetargetPlan;
 
 /// A typed value on a data wire.
@@ -109,7 +109,9 @@ pub struct ParamValues {
 
 impl ParamValues {
     pub fn from_defs(defs: &[ParamDef]) -> Self {
-        Self { values: defs.iter().map(|d| d.default.clone()).collect() }
+        Self {
+            values: defs.iter().map(|d| d.default.clone()).collect(),
+        }
     }
 }
 
@@ -262,40 +264,93 @@ pub enum NodeKind {
     BlendSpacePlayer(SpaceCfg),
     PoseSearch(SearchCfg),
     ReferencePose,
-    Blend { alpha: f32, curve: BlendCurve },
-    BlendMulti { count: usize },
-    BlendByBool { condition: bool, blend_time: f32, curve: BlendCurve },
-    BlendByInt { count: usize, selector: i32, blend_time: f32 },
-    MakeAdditive { mesh_space: bool },
-    ApplyAdditive { alpha: f32 },
+    Blend {
+        alpha: f32,
+        curve: BlendCurve,
+    },
+    BlendMulti {
+        count: usize,
+    },
+    BlendByBool {
+        condition: bool,
+        blend_time: f32,
+        curve: BlendCurve,
+    },
+    BlendByInt {
+        count: usize,
+        selector: i32,
+        blend_time: f32,
+    },
+    MakeAdditive {
+        mesh_space: bool,
+    },
+    ApplyAdditive {
+        alpha: f32,
+    },
     LayeredBlend(LayeredCfg),
     Slot(SlotCfg),
     SaveCachedPose,
-    UseCachedPose { save: usize },
-    GetCurve { curve: String },
-    ModifyCurve { curve: String, value: f32, mode: CurveEditMode },
+    UseCachedPose {
+        save: usize,
+    },
+    GetCurve {
+        curve: String,
+    },
+    ModifyCurve {
+        curve: String,
+        value: f32,
+        mode: CurveEditMode,
+    },
     TwoBoneIk(TwoBoneCfg),
     Fabrik(FabrikCfg),
     IkRig(IkRigCfg),
-    Retarget { plan: Arc<RetargetPlan>, alpha: f32 },
+    Retarget {
+        plan: Arc<RetargetPlan>,
+        alpha: f32,
+    },
     StateMachine(Arc<machine::Machine>),
-    Layer { program: Arc<Program> },
+    Layer {
+        program: Arc<Program>,
+    },
     LinkedGraph(LinkedCfg),
     OutputPose,
     LayerInput,
     LayerOutput,
     StateResult,
-    GetParameter { index: usize },
+    GetParameter {
+        index: usize,
+    },
     ConstFloat(f32),
     ConstBool(bool),
     ConstVector(Vec3),
-    MakeVector { x: f32, y: f32, z: f32 },
-    MakeTransform { location: Vec3, rotation: Vec3 },
-    GetBoneTransform { bone: usize, mesh_space: bool },
-    FloatOp { op: FloatOp, a: f32, b: f32 },
-    Clamp { min: f32, max: f32 },
+    MakeVector {
+        x: f32,
+        y: f32,
+        z: f32,
+    },
+    MakeTransform {
+        location: Vec3,
+        rotation: Vec3,
+    },
+    GetBoneTransform {
+        bone: usize,
+        mesh_space: bool,
+    },
+    FloatOp {
+        op: FloatOp,
+        a: f32,
+        b: f32,
+    },
+    Clamp {
+        min: f32,
+        max: f32,
+    },
     IntToFloat,
-    Compare { op: CompareOp, b: f32, tolerance: f32 },
+    Compare {
+        op: CompareOp,
+        b: f32,
+        tolerance: f32,
+    },
     And,
     Or,
     Not,
@@ -407,7 +462,12 @@ pub enum StateEventKind {
 }
 
 impl StateEventKind {
-    pub const ALL: [StateEventKind; 4] = [Self::Entered, Self::Exited, Self::TransitionStarted, Self::TransitionCompleted];
+    pub const ALL: [StateEventKind; 4] = [
+        Self::Entered,
+        Self::Exited,
+        Self::TransitionStarted,
+        Self::TransitionCompleted,
+    ];
 
     /// The suffix used in canonical event names (`state_entered`, ...).
     pub fn name(self) -> &'static str {
