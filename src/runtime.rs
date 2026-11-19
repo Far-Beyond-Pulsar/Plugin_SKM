@@ -2,14 +2,14 @@
 //! runtime contribution, grouped by the engine seam it plugs into.
 
 use animation_component::{
-    animation_asset_changed, component_animation_notify_events, flush_animation_notifies, records,
-    run_animation_phase, show_pose, AnimationComponent, ANIMATION_COMPONENT,
+    animation_asset_changed, flush_animation_notifies, records,
+    run_animation_phase, show_pose, AnimationComponent,
 };
 use engine_backend::scene::game_hooks::{
     AssetChangedRegistration, ScriptVariableResolver, TickPhaseRegistration,
 };
 use engine_backend::scene::{
-    ClassSpec, ComponentEventCatalog, ComponentEventsRegistration, ComponentsBuilder,
+    ClassSpec, ComponentsBuilder,
 };
 use helio_component::skinning::{SkeletalPose, SkeletalPoseAccess};
 use pulsar_class::records::RecordMigrationRegistration;
@@ -35,21 +35,7 @@ pub(crate) fn build(p: &mut pulsar_plugins::PluginBuilder) {
 
     // An animator's events, for scripts, are the notifies its animation
     // assets declare.
-    p.add(ComponentEventsRegistration {
-        origin: p.origin(),
-        class_name: ANIMATION_COMPONENT,
-        events: |root, assets| {
-            let catalog = component_animation_notify_events(root, assets);
-            ComponentEventCatalog {
-                events: catalog.events,
-                diagnostics: catalog
-                    .diagnostics
-                    .into_iter()
-                    .map(|diagnostic| (diagnostic.path, diagnostic.error))
-                    .collect(),
-            }
-        },
-    });
+    p.add(crate::event_source::source(p.origin()));
 
     // A changed animation asset file recompiles the running graphs that
     // depend on it (a sequence, Blend Space, rig or Montage the graph names).

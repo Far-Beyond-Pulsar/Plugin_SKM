@@ -31,6 +31,7 @@ pub use animation_component;
 pub use skeletal_animation_editor;
 
 mod examples;
+pub mod event_source;
 pub mod runtime;
 
 #[cfg(feature = "editor")]
