@@ -40,6 +40,13 @@ pub mod editor;
 /// Everything the plugin registers (runtime always, editor with the `editor`
 /// feature), through the builder the kernel hands the plugin's root.
 pub fn build(p: &mut pulsar_plugins::PluginBuilder) {
+    // The icon the editor shows beside this plugin (Extensions window).
+    #[cfg(feature = "editor")]
+    p.add(pulsar_plugins::PluginIcon {
+        origin: p.origin(),
+        format: pulsar_plugins::IconFormat::Png,
+        bytes: include_bytes!("../icon.png"),
+    });
     // The plugin's `examples/` folder, read-only (`examples`).
     p.add(examples::provider(p.origin()));
     runtime::build(p);
