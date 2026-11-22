@@ -5,7 +5,8 @@ edition = "2021"
 description = "Animation (pulsar.animation): the editor crate -- the skeletal animation editors, over the plugin's component crate"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+# A dependency of the plugin library: a cdylib cannot link the shared libraries.
+crate-type = ["rlib"]
 name = "skeletal_animation_editor"
 
 [features]

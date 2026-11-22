@@ -1,0 +1,19 @@
+name: Release
+
+# Builds and releases this plugin's library for every platform on a version bump.
+# The build is written once, in Pulsar-Native (.github/workflows/plugin-release.yml).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+  workflow_dispatch:
+
+jobs:
+  release:
+    uses: Far-Beyond-Pulsar/Pulsar-Native/.github/workflows/plugin-release.yml@main
+    with:
+      plugin_dir: plugins/vendor/skm_editor
+    permissions:
+      contents: write

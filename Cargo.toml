@@ -7,12 +7,17 @@ description = "Animation (`pulsar.animation`): the plugin's root crate, the one 
 autoexamples = false
 
 [features]
+# The plugin as a library of its own, loaded by the editor from plugins/editor:
+# cargo build -p <this package> --release --features dll
+dll = ["editor", "dep:plugin_editor_api", "plugin_editor_api/editor", "plugin_editor_api/shared-dylibs"]
 # The editor's registration (the animation editors' provider) and the crates
 # it needs. A game links the root without it, so it takes no editor
 # dependency.
 editor = ["dep:skeletal_animation_editor", "dep:plugin_manager"]
 
 [dependencies]
+# The plugin library's editor plugin entry point (feature `dll`).
+plugin_editor_api = { workspace = true, optional = true }
 # Animation files changed on disk are asset updates (`engine_fs::AssetChangeKind`).
 engine_fs = { workspace = true }
 ui_types_common = { workspace = true }
@@ -48,3 +53,7 @@ tempfile = { workspace = true }
 
 [lints]
 workspace = true
+
+# Also the plugin as a library of its own (feature `dll`, loaded by the editor).
+[lib]
+crate-type = ["cdylib", "rlib"]
