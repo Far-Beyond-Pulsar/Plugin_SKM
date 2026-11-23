@@ -1,6 +1,6 @@
 [package]
 name = "skeletal_animation_plugin"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 publish = false
 description = "Animation (`pulsar.animation`): the plugin's root crate, the one place it registers everything it contributes (runtime registrations always, the editor's with `editor`)"
