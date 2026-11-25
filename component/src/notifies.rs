@@ -804,6 +804,7 @@ fn montage_result_name(result: MontageResult) -> &'static str {
 /// transform; gameplay and script writes to graph parameters made later in
 /// the frame apply next frame.
 pub fn run_animation_phase(world: &mut World, delta_seconds: f32) {
+    profiling::profile_scope!("Animation::phase");
     let players: Vec<Entity> = world
         .query::<&AnimationComponent>()
         .map(|(entity, _)| entity)

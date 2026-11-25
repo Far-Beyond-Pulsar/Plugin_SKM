@@ -453,6 +453,7 @@ impl AnimationComponent {
     /// One animation-phase step: begin playback on the first live frame, hold while
     /// notify events wait for delivery, otherwise advance.
     pub(crate) fn animation_phase_step(&mut self, delta_seconds: f32) {
+        profiling::profile_scope!("Animation::step");
         if !self.anim.started {
             self.begin_notify_playback();
             self.anim.started = true;
@@ -510,6 +511,7 @@ impl AnimationComponent {
     /// whether a new playback started (the assets changed): unaccepted notify
     /// events of the old playback are discarded then.
     pub(crate) fn ensure_runtime(&mut self) -> bool {
+        profiling::profile_scope!("Animation::ensure_runtime");
         let key = RuntimeKey {
             skeleton: ptr_of(&self.loaded_skeleton),
             graph: ptr_of(&self.loaded_graph),
